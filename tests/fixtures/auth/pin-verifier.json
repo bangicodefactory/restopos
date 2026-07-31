@@ -1,12 +1,12 @@
 {
     "name": "pin-and-badge-verifier-parity",
-    "description": "Cross-language parity for the offline employee verifier (spec 03 §2.3, BAN-397). The server emits these verifiers for a known device_secret and known PIN/badge; the client MUST reproduce the exact same hex or offline login is impossible. Read by BOTH tests/Feature/BootstrapTest.php and resources/js/shared/auth/pin.test.ts.",
+    "description": "Cross-language parity for the offline employee verifier (spec 03 §2.3, BAN-397). The server emits these verifiers for a known device_secret and known PIN/badge; the client MUST reproduce the exact same hex or offline login is impossible. Read by BOTH tests/Feature/BootstrapTest.php and resources/js/shared/auth/pin.test.ts. Regenerate with `php tests/fixtures/auth/generate.php`.",
     "specRefs": [
         "03 §2.3"
     ],
     "deviceSecret": "22e5d5fde4ca75f88f6629527287534342fb0b25ecd7e43fd94e067b308cc97d",
     "deviceSecretDerivation": {
-        "note": "device_secret = HMAC-SHA256(base64_decode(appKey without the base64: prefix), \"restopos:device-secret:\"+deviceUuid). Lets the PHP suite reproduce device_secret through the real DeviceTokenService instead of mocking a final class. The TS suite ignores these and consumes deviceSecret directly.",
+        "note": "device_secret = HMAC-SHA256(base64_decode(appKey without the base64: prefix), \"restopos:device-secret:\"+deviceUuid). Lets the PHP suite reproduce device_secret through the real DeviceTokenService instead of mocking a final class. The TS suite ignores these and consumes deviceSecret directly. See tests/fixtures/auth/generate.php.",
         "appKey": "base64:pU4L8Hsud+ibW67eLIVXEoam3hxQdKpRnHMadoma/RE=",
         "deviceUuid": "00000000-0000-4000-8000-0000000b3970"
     },

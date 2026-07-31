@@ -319,6 +319,8 @@ describe('cross-language verifier parity (BAN-397)', () => {
      * pin.ts to HMAC the raw PIN, or device.ts to decode the hex to bytes, and these hexes diverge.
      */
     type ParityCase = { kind: 'pin' | 'badge'; employeeId: number; secret: string; verifier: string };
+    // `deviceSecretDerivation` (appKey + uuid) is consumed only by the PHP suite to reach this same
+    // deviceSecret through the real DeviceTokenService; the client reads the secret directly.
     type ParityFixture = { deviceSecret: string; cases: ParityCase[] };
 
     const here = dirname(fileURLToPath(import.meta.url));
@@ -371,4 +373,18 @@ describe('cross-language verifier parity (BAN-397)', () => {
             });
         },
     );
+
+    // The verifier is not vacuously accepting: the *wrong* plaintext against a real server verifier
+    // is still rejected. Guards against a future change that makes the comparison pass trivially.
+    it('rejects the wrong PIN against a real server verifier', async () => {
+        const [first] = pinCases;
+        if (!first) throw new Error('parity fixture has no pin cases');
+        const { employeeId, secret, verifier } = first;
+        const deviceKey = await importDeviceKey(fixture.deviceSecret);
+        const emp = employee({ id: employeeId, has_pin: true, pin_verifier: verifier });
+        expect(await verifyPin({ db, deviceKey, employees: [emp] }, employeeId, `${secret}-wrong`)).toMatchObject({
+            ok: false,
+            reason: 'wrong_pin',
+        });
+    });
 });
