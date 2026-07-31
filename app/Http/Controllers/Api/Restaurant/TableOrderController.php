@@ -28,6 +28,30 @@ final class TableOrderController extends Controller
 
     public function __construct(private readonly TableService $tables) {}
 
+    /**
+     * `POST /api/pos/tables/{table}/resolve-duplicates` (RST-058).
+     *
+     * The table-open path: two tills that each created a draft on the same table (offline, then
+     * both synced) leave two permanent drafts. This merges them — oldest wins — so the waiter opens
+     * one order, not two. Returns the surviving order (or null when the table has no draft).
+     */
+    public function resolveTable(Request $request, RestaurantTable $table): JsonResponse
+    {
+        [, $config] = $this->deviceContext($request);
+        abort_unless(RestaurantTable::query()->forConfig($config)->whereKey($table->getKey())->exists(), 404);
+
+        $employeeId = (int) $request->input('employee_id', 0) ?: null;
+        $winner = $this->tables->resolveDuplicateTableOrders((int) $table->getKey(), $employeeId);
+
+        if ($winner === null) {
+            return new JsonResponse(['order' => null]);
+        }
+
+        $winner->load(['lines', 'payments', 'courses']);
+
+        return new JsonResponse(['order' => OrderResource::make($winner)->resolve($request)]);
+    }
+
     /** `POST /api/pos/orders/{order}/transfer` */
     public function transfer(TransferOrderRequest $request, Order $order): JsonResponse
     {

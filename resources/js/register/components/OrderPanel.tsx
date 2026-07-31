@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 
 import { useT } from '../i18n';
 import { currentDelta } from '../domain/kitchen-send';
-import { prepKeyOf, reduceQuantity, removeLine } from '../domain/order-actions';
+import { addCourse, prepKeyOf, reduceQuantity, removeLine, setPreset, setPricelist } from '../domain/order-actions';
 import { effectiveUnitPrice } from '../domain/totals';
 import {
     useCatalog,
@@ -108,6 +108,44 @@ export function OrderPanel({
                 ) : null}
             </header>
 
+            {orderUuid !== null && (catalog.presets.length > 0 || catalog.pricelists.length > 0) ? (
+                <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5 text-sm">
+                    {restaurant && catalog.presets.length > 0 ? (
+                        // Dine-in / takeaway. Switching re-applies the preset's pricelist + fiscal
+                        // position, which changes the VAT charged (REG-335/336).
+                        <select
+                            aria-label={t('reg.order.preset')}
+                            className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
+                            value={order?.pos_preset_id ?? ''}
+                            onChange={(event) => setPreset(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
+                        >
+                            <option value="">{t('reg.order.presetNone')}</option>
+                            {catalog.presets.map((preset) => (
+                                <option key={preset.id} value={preset.id}>
+                                    {preset.name}
+                                </option>
+                            ))}
+                        </select>
+                    ) : null}
+                    {catalog.pricelists.length > 0 ? (
+                        // Re-prices every non-manual line (REG-173).
+                        <select
+                            aria-label={t('reg.order.pricelist')}
+                            className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
+                            value={order?.pricelist_id ?? ''}
+                            onChange={(event) => setPricelist(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
+                        >
+                            <option value="">{t('reg.order.pricelistDefault')}</option>
+                            {catalog.pricelists.map((pricelist) => (
+                                <option key={pricelist.id} value={pricelist.id}>
+                                    {pricelist.name}
+                                </option>
+                            ))}
+                        </select>
+                    ) : null}
+                </div>
+            ) : null}
+
             <div className="min-h-0 flex-1 overflow-auto">
                 {lines.length === 0 ? (
                     <p className="p-6 text-center text-slate-500">{t('reg.order.empty')}</p>
@@ -166,6 +204,18 @@ export function OrderPanel({
                         <dd className="text-2xl font-bold tabular-nums">{money(totals.roundedTotal)}</dd>
                     </div>
                 </dl>
+
+                {restaurant ? (
+                    <Button
+                        size="md"
+                        variant="secondary"
+                        className="mb-2 w-full"
+                        disabled={orderUuid === null || lines.length === 0}
+                        onClick={() => orderUuid !== null && addCourse(orderUuid)}
+                    >
+                        {t('reg.order.addCourse')}
+                    </Button>
+                ) : null}
 
                 <div className="grid grid-cols-4 gap-2">
                     <Button size="md" variant="secondary" onClick={() => openDialog('notes', {})}>

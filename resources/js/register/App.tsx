@@ -2,7 +2,7 @@ import { useSessionStore } from '@shared/auth';
 import { useIdle } from '@shared/store';
 import { Button, useToast } from '@shared/ui';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { syncNow } from './boot';
 import { DialogHost } from './components/DialogHost';
@@ -10,7 +10,7 @@ import { StatusStrip } from './components/StatusStrip';
 import { tryRuntime } from './data/runtime';
 import { publishDisplay } from './domain/customer-display-bus';
 import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
-import { createOrder, markPrinted } from './domain/order-actions';
+import { cleanCourses, createOrder, markPrinted } from './domain/order-actions';
 import { print } from './domain/printing';
 import { buildBill } from './domain/receipt';
 import { orderTotals } from './domain/totals';
@@ -57,6 +57,16 @@ export function App(): JSX.Element {
 
     const [locked, setLocked] = useState(false);
     const [sessionPane, setSessionPane] = useState<'open' | 'close' | null>(null);
+
+    // Leaving the product screen drops trailing empty courses so the next screen and the receipt do
+    // not show phantom courses (RST-087).
+    const prevScreen = useRef(screen);
+    useEffect(() => {
+        if (prevScreen.current === 'products' && screen !== 'products' && selectedOrderUuid !== null) {
+            cleanCourses(selectedOrderUuid);
+        }
+        prevScreen.current = screen;
+    }, [screen, selectedOrderUuid]);
 
     // ── idle lock (REG-049 / RST-014) ────────────────────────────────────────
     const idleSeconds = catalog.config?.employee_idle_logout_seconds ?? 300;

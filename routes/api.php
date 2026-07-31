@@ -92,6 +92,7 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::get('sessions/{session}/closing-data', [SessionController::class, 'closingData'])->name('sessions.closing-data');
         Route::post('sessions/{session}/close', [SessionController::class, 'close'])->name('sessions.close');
         Route::post('sessions/{session}/cash-movements', [SessionController::class, 'cashMovement'])->name('sessions.cash-movements');
+        Route::delete('sessions/{session}/cash-movements/{movement}', [SessionController::class, 'destroyCashMovement'])->name('sessions.cash-movements.destroy');
         Route::post('sessions/{session}/accounting-export', [SessionController::class, 'accountingExport'])->name('sessions.accounting-export');
     });
 
@@ -106,6 +107,7 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::patch('tables/{table}', [FloorController::class, 'updateTable'])->name('tables.update');
         Route::delete('tables/{table}', [FloorController::class, 'destroyTable'])->name('tables.destroy');
 
+        Route::post('tables/{table}/resolve-duplicates', [TableOrderController::class, 'resolveTable'])->name('tables.resolve');
         Route::post('orders/{order}/transfer', [TableOrderController::class, 'transfer'])->name('orders.transfer');
         Route::post('orders/{order}/merge', [TableOrderController::class, 'merge'])->name('orders.merge');
         Route::post('order-merges/{merge}/unmerge', [TableOrderController::class, 'unmerge'])->name('orders.unmerge');

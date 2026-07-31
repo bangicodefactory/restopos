@@ -11,6 +11,8 @@ use App\Http\Requests\Pos\CashMovementRequest;
 use App\Http\Requests\Pos\CloseSessionRequest;
 use App\Http\Requests\Pos\OpenSessionRequest;
 use App\Http\Resources\Pos\SessionResource;
+use App\Models\Identity\Employee;
+use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosSession;
 use App\Services\Identity\EmployeeAuthService;
 use App\Services\Pos\AccountingExportService;
@@ -161,6 +163,33 @@ final class SessionController extends Controller
             'amount' => (string) $movement->amount,
             'session' => SessionResource::make($session->refresh())->resolve($request),
         ], 201);
+    }
+
+    /**
+     * `DELETE /api/pos/sessions/{session}/cash-movements/{movement}` (REG-011).
+     *
+     * Deleting a cash movement is manager-gated: the acting employee must hold
+     * `cash.in_out.delete`, verified server-side rather than trusted from the client.
+     */
+    public function destroyCashMovement(Request $request, PosSession $session, CashMovement $movement): JsonResponse
+    {
+        [, $config] = $this->deviceContext($request);
+        $this->assertOwned($request, $session);
+
+        abort_unless((int) $movement->pos_session_id === (int) $session->getKey(), 404);
+
+        $employeeId = (int) $request->input('employee_id', 0) ?: null;
+        $employee = $employeeId === null ? null : Employee::query()->find($employeeId);
+
+        if ($employee === null || ! $this->employees->can($employee, $config, 'cash.in_out.delete')) {
+            return new JsonResponse([
+                'error' => ['code' => 'forbidden', 'message' => 'Deleting a cash movement requires the cash.in_out.delete ability.'],
+            ], 403);
+        }
+
+        $this->sessions->deleteCashMovement($movement);
+
+        return new JsonResponse(['session' => SessionResource::make($session->refresh())->resolve($request)]);
     }
 
     /** `POST /api/pos/sessions/{session}/accounting-export` */
