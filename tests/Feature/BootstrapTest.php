@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use App\Enums\DeviceType;
+use App\Enums\EmployeeRole;
+use App\Models\Identity\Employee;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Services\Device\DevicePairingService;
 use App\Services\Device\DeviceTokenService;
+use App\Services\Identity\EmployeeAuthService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Feature\PosFixtures;
@@ -86,6 +89,59 @@ it('ships per-device employee verifiers, never the pin hash', function (): void 
 
     // The raw sha256 of the PIN must never appear anywhere in the payload.
     expect(json_encode($response->json()))->not->toContain(hash('sha256', '1234'));
+});
+
+it('emits offline verifiers the client reproduces byte for byte (cross-language parity, BAN-397)', function (): void {
+    // The regression guard for the offline-login blocker: the server derives the verifier from
+    // sha256(pin), so the client must hash the PIN before HMAC-ing it or no cashier can ever log in
+    // with the network down. This shares one frozen fixture with the client suite
+    // (resources/js/shared/auth/pin.test.ts) — the two meet on the exact same hex, so a scheme
+    // divergence on either side fails there or here.
+    $fixture = json_decode(
+        (string) file_get_contents(base_path('tests/fixtures/auth/pin-verifier.json')),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+
+    expect($fixture['cases'])->not->toBeEmpty();
+
+    // Make the per-device secret deterministic and portable to the TS suite by fixing both inputs of
+    // the real derivation — the app key and the device uuid — rather than mocking DeviceTokenService
+    // (it is `final`). Everything downstream then runs through the real container services.
+    config(['app.key' => $fixture['deviceSecretDerivation']['appKey']]);
+    $device = new PosDevice(['uuid' => $fixture['deviceSecretDerivation']['deviceUuid']]);
+
+    $tokens = app(DeviceTokenService::class);
+    expect($tokens->deviceSecret($device))->toBe(
+        $fixture['deviceSecret'],
+        'the real DeviceTokenService no longer reproduces the fixture device_secret — regenerate the fixture',
+    );
+
+    $auth = app(EmployeeAuthService::class);
+
+    foreach ($fixture['cases'] as $case) {
+        $employee = (new Employee)->forceFill([
+            'id' => $case['employeeId'],
+            'name' => 'Parity #'.$case['employeeId'],
+            'default_role' => EmployeeRole::Cashier,
+            // employees.pin_hash / barcode_hash are the sha256 of the plaintext — the only form the
+            // server ever holds, and what the client must hash the typed value down to before HMAC.
+            'pin_hash' => $case['kind'] === 'pin' ? hash('sha256', $case['secret']) : null,
+            'barcode_hash' => $case['kind'] === 'badge' ? hash('sha256', $case['secret']) : null,
+        ]);
+        // roleFor resolves against the attached configs; an empty relation short-circuits to the
+        // default role with no DB round-trip (this employee is never persisted).
+        $employee->setRelation('posConfigs', collect());
+
+        $block = $auth->verifierFor($employee, $this->fx->config, $device);
+
+        $key = $case['kind'] === 'pin' ? 'pin_verifier' : 'badge_verifier';
+        expect($block[$key])->toBe(
+            $case['verifier'],
+            "server {$case['kind']} verifier for employee #{$case['employeeId']} diverged from the shared fixture",
+        );
+    }
 });
 
 it('scopes the payload to the device config and never leaks another company', function (): void {

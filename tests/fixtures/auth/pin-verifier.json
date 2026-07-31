@@ -1,0 +1,51 @@
+{
+    "name": "pin-and-badge-verifier-parity",
+    "description": "Cross-language parity for the offline employee verifier (spec 03 §2.3, BAN-397). The server emits these verifiers for a known device_secret and known PIN/badge; the client MUST reproduce the exact same hex or offline login is impossible. Read by BOTH tests/Feature/BootstrapTest.php and resources/js/shared/auth/pin.test.ts. Regenerate with `php tests/fixtures/auth/generate.php`.",
+    "specRefs": [
+        "03 §2.3"
+    ],
+    "deviceSecret": "22e5d5fde4ca75f88f6629527287534342fb0b25ecd7e43fd94e067b308cc97d",
+    "deviceSecretDerivation": {
+        "note": "device_secret = HMAC-SHA256(base64_decode(appKey without the base64: prefix), \"restopos:device-secret:\"+deviceUuid). Lets the PHP suite reproduce device_secret through the real DeviceTokenService instead of mocking a final class. The TS suite ignores these and consumes deviceSecret directly. See tests/fixtures/auth/generate.php.",
+        "appKey": "base64:pU4L8Hsud+ibW67eLIVXEoam3hxQdKpRnHMadoma/RE=",
+        "deviceUuid": "00000000-0000-4000-8000-0000000b3970"
+    },
+    "cases": [
+        {
+            "kind": "pin",
+            "employeeId": 1,
+            "secret": "1234",
+            "verifier": "671457e949b5e78a97bf422fa668244c0e329eaf97a60d1525458f0ebd41f02f"
+        },
+        {
+            "kind": "badge",
+            "employeeId": 1,
+            "secret": "BADGE-A",
+            "verifier": "a691c3181bbba8a192230a7806a33a448b1dae12f85f74af9c4ff1180ad0ff83"
+        },
+        {
+            "kind": "pin",
+            "employeeId": 42,
+            "secret": "0000",
+            "verifier": "3d034c550c0acac9af7c9ee91bd1ac906f24010a32cf0f872fcb215aaf0cc108"
+        },
+        {
+            "kind": "pin",
+            "employeeId": 7,
+            "secret": "9999",
+            "verifier": "619467d7d7a2632f190d531ea9ce84d1a22fb75890b9b43e10f21cca0b8ecd7d"
+        },
+        {
+            "kind": "pin",
+            "employeeId": 99,
+            "secret": "café",
+            "verifier": "633caa127bf1f56a5ee8ef5644dd147ab630704cdaf9fa8a10a60da9ff894c06"
+        },
+        {
+            "kind": "badge",
+            "employeeId": 7,
+            "secret": "RFID-00-DE-AD-BE-EF",
+            "verifier": "77af5794e980856c815cd807826fa46105d1d915e367dec51e51f6b469b73384"
+        }
+    ]
+}
