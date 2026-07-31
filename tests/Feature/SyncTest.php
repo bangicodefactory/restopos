@@ -380,10 +380,14 @@ it('accepts a commands-only batch and applies cash, partner and prep side effect
         ->and((float) $movements->firstWhere('movement_type', CashMovementType::CashIn)->amount)->toBe(50.0)
         ->and((float) $movements->firstWhere('movement_type', CashMovementType::CashOut)->amount)->toBe(-20.0);
 
-    // (b) the offline customer exists with a real positive id.
+    // (b) the offline customer exists with a real positive id, and the result maps its uuid → id.
     $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
     expect($customer->getKey())->toBeGreaterThan(0)
         ->and($customer->name)->toBe('Chez Fatima');
+
+    $partnerResult = collect($response->json('results'))->firstWhere('partner.uuid', $partnerUuid);
+    expect($partnerResult)->not->toBeNull()
+        ->and($partnerResult['partner']['id'])->toBe($customer->getKey());
 
     // (c) the prep snapshot advanced.
     expect($order->fresh()->last_prep_sent_at)->not->toBeNull();
@@ -429,4 +433,40 @@ it('drops an unresolved placeholder customer id to null rather than violating th
         ->assertJsonPath('results.0.status', 'ok');
 
     expect(Order::query()->where('uuid', $orderUuid)->firstOrFail()->customer_id)->toBeNull();
+});
+
+it('nulls a placeholder when the order arrives in a later batch than partner.create (known cross-batch gap)', function (): void {
+    $partnerUuid = (string) Str::uuid();
+    $placeholderId = -1712340000;
+
+    // Batch 1: create the customer only.
+    pushBatch([command('partner.create', ['id' => $placeholderId, 'uuid' => $partnerUuid, 'name' => 'Later Order'])])->assertOk();
+    $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
+
+    // Batch 2: an order references the placeholder, but no partner.create rides along, so the
+    // in-batch map is empty. Until the client remaps its local id (follow-up), the link is dropped
+    // — but the customer still exists, so reconnecting the two is a client concern, not data loss.
+    $orderUuid = (string) Str::uuid();
+    pushBatch([], [$this->fx->orderCommand($orderUuid, [], ['customer_id' => $placeholderId])])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(Order::query()->where('uuid', $orderUuid)->firstOrFail()->customer_id)->toBeNull()
+        ->and($customer->getKey())->toBeGreaterThan(0);
+});
+
+it('does not double-bump the prep snapshot on a retried prep.sent', function (): void {
+    $orderUuid = (string) Str::uuid();
+    sync([$this->fx->orderCommand($orderUuid)])->assertOk();
+    $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+
+    // The same outbox entry (same command uuid) drained twice — a network retry after the first 200.
+    $cmd = command('prep.sent', ['order_uuid' => $orderUuid, 'snapshot_version' => 0, 'course_index' => null]);
+
+    pushBatch([$cmd])->assertOk();
+    $afterFirst = (int) DB::table('order_preparation_snapshots')->where('pos_order_id', $order->getKey())->value('server_version');
+
+    pushBatch([$cmd])->assertOk();
+    $afterRetry = (int) DB::table('order_preparation_snapshots')->where('pos_order_id', $order->getKey())->value('server_version');
+
+    expect($afterRetry)->toBe($afterFirst);
 });

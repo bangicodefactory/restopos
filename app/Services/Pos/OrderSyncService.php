@@ -256,7 +256,7 @@ final readonly class OrderSyncService
             return $this->rejected($uuid, 'bad_movement_type', 'Unknown cash movement type.');
         }
 
-        $movement = $this->sessions->cashMove(
+        $this->sessions->cashMove(
             session: $session,
             type: $type,
             amount: (string) ($payload['amount'] ?? '0'),
@@ -266,7 +266,7 @@ final readonly class OrderSyncService
             uuid: isset($payload['uuid']) ? (string) $payload['uuid'] : $uuid,
         );
 
-        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'id' => (int) $movement->getKey()];
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null];
     }
 
     /**
@@ -302,7 +302,9 @@ final readonly class OrderSyncService
             $customerIdMap[(int) $payload['id']] = (int) $customer->getKey();
         }
 
-        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'id' => (int) $customer->getKey()];
+        // Return the real id keyed by the partner uuid so the client can retire its negative
+        // placeholder locally (the cross-batch half of REG-153; see follow-up).
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'partner' => ['id' => (int) $customer->getKey(), 'uuid' => $partnerUuid]];
     }
 
     /**
@@ -321,7 +323,17 @@ final readonly class OrderSyncService
             : Order::query()->where('pos_config_id', $config->getKey())->where('uuid', $orderUuid)->first();
 
         if ($order === null) {
+            // Orders are ingested before this command runs, so one in the same batch is already
+            // here; a genuinely missing order never synced. Quarantine (rejected) rather than spin
+            // — the client surfaces it instead of retrying forever.
             return $this->rejected($uuid, 'unknown_order', 'prep.sent references an order not on this register.');
+        }
+
+        // Idempotent on retry: if the order was already marked sent and nothing new is unsent, do
+        // not bump the snapshot again. The first send always marks (last_prep_sent_at is null then),
+        // so a genuine re-fire that added items (unsent_change_count > 0) still advances.
+        if ($order->last_prep_sent_at !== null && (int) $order->unsent_change_count === 0) {
+            return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null];
         }
 
         $version = $this->preparation->markAllSent($order);

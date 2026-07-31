@@ -183,6 +183,10 @@ export type SyncRecordResult = {
     lines?: Array<{ uuid: Uuid; id: number; price_subtotal: Money; price_subtotal_incl: Money }>;
     payments?: Array<{ uuid: Uuid; id: number }>;
     courses?: Array<{ uuid: Uuid; id: number }>;
+    /** `partner.create` result — the real id for the client's negative placeholder (BAN-404). */
+    partner?: { id: number; uuid: Uuid };
+    /** `prep.sent` result — the prep snapshot version after the send. */
+    snapshot_version?: number;
     warnings?: SyncWarning[];
     /** Present on `conflict` and `rejected`. */
     conflict?: { code: ConflictCode; message: string; serverState?: unknown };
