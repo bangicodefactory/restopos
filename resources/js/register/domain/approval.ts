@@ -20,14 +20,21 @@ import { useUiStore } from '../state/ui-store';
  * and the record is marked `verified: 'offline'` so the back-office report can tell the difference.
  */
 
-type Pending = { resolve: (granted: boolean) => void; ability: string };
+/**
+ * The credentials of the approving manager, returned so the caller can forward them to a
+ * server-verified action (e.g. an over-variance session close, REG-016). `null` means denied or
+ * cancelled. The PIN is already verified client-side here; the server re-checks it on ingest.
+ */
+export type ApprovalGrant = { managerEmployeeId: number; pin: string };
+
+type Pending = { resolve: (grant: ApprovalGrant | null) => void; ability: string };
 
 let pending: Pending | null = null;
 
-export function requestApproval(ability: string): Promise<boolean> {
-    if (pending) pending.resolve(false);
+export function requestApproval(ability: string): Promise<ApprovalGrant | null> {
+    if (pending) pending.resolve(null);
     useUiStore.getState().openDialog('approval', { ability });
-    return new Promise<boolean>((resolve) => {
+    return new Promise<ApprovalGrant | null>((resolve) => {
         pending = { resolve, ability };
     });
 }
@@ -37,7 +44,7 @@ export function pendingAbility(): string | null {
 }
 
 export function cancelApproval(): void {
-    pending?.resolve(false);
+    pending?.resolve(null);
     pending = null;
     useUiStore.getState().closeDialog();
 }
@@ -81,7 +88,7 @@ export async function submitApproval(
     };
     await runtime.db.approvals.put(approval);
 
-    pending?.resolve(true);
+    pending?.resolve({ managerEmployeeId: attempt.managerEmployeeId, pin: attempt.pin });
     pending = null;
     useUiStore.getState().closeDialog();
     return { ok: true };

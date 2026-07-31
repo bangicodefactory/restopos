@@ -314,9 +314,10 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                     loading={busy}
                     disabled={drafts > 0 && !force}
                     onClick={async () => {
+                        let grant = null;
                         if (overVariance) {
-                            const granted = await requestApproval('session.close.over_variance');
-                            if (!granted) return;
+                            grant = await requestApproval('session.close.over_variance');
+                            if (!grant) return;
                         }
                         const result = await closeSession({
                             sessionId: session.id,
@@ -329,6 +330,10 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                             ),
                             denominations: counts.filter((row) => row.quantity > 0),
                             employeeId: cashier?.employee_id ?? null,
+                            // Pass the approving manager's credentials so the server can verify the
+                            // over-variance approval and record who authorised it (REG-016).
+                            managerEmployeeId: grant?.managerEmployeeId ?? null,
+                            managerPin: grant?.pin ?? null,
                             force,
                         });
                         if (result.ok) onDone();
