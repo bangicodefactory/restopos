@@ -29,7 +29,9 @@ final class SessionResource extends JsonResource
             'closed_at' => $session->closed_at,
             'business_date' => $session->business_date,
             'has_cash_control' => (bool) $session->has_cash_control,
-            'cash_balance_opening' => (string) $session->cash_balance_opening,
+            // The client reads `opening_float` (packages/domain PosSessionRow); the column is
+            // `cash_balance_opening`. BootstrapService applies the same rename on the bootstrap path.
+            'opening_float' => (string) $session->cash_balance_opening,
             'cash_balance_closing_counted' => $session->cash_balance_closing_counted === null ? null : (string) $session->cash_balance_closing_counted,
             'cash_balance_closing_expected' => (string) $session->cash_balance_closing_expected,
             'cash_difference' => (string) $session->cash_difference,

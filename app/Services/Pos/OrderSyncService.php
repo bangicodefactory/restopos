@@ -146,22 +146,26 @@ final readonly class OrderSyncService
         $warnings = [];
 
         // 1 — session resolution. A closed session is rerouted, never rejected.
-        $resolution = $this->sessions->resolveForIngest(
-            $config,
-            isset($attributes['session_id']) ? (int) $attributes['session_id'] : null,
-            $uuid,
-        );
+        // The register sends `pos_session_id` (the column name it stores locally); accept the
+        // legacy `session_id` too so older outbox payloads keep resolving.
+        $requestedSessionId = match (true) {
+            isset($attributes['pos_session_id']) => (int) $attributes['pos_session_id'],
+            isset($attributes['session_id']) => (int) $attributes['session_id'],
+            default => null,
+        };
+
+        $resolution = $this->sessions->resolveForIngest($config, $requestedSessionId, $uuid);
         $session = $resolution['session'];
 
         if ($resolution['rerouted']) {
             $warnings[] = [
                 'code' => $resolution['rescued'] ? 'session_rescued' : 'session_rerouted',
-                'requested_session_id' => $attributes['session_id'] ?? null,
+                'requested_session_id' => $requestedSessionId,
                 'session_id' => (int) $session->getKey(),
             ];
 
             $this->recordConflict($config, $device, SyncConflictType::ClosedSession, SyncResolution::Rerouted, $uuid, [
-                'requested_session_id' => $attributes['session_id'] ?? null,
+                'requested_session_id' => $requestedSessionId,
                 'session_id' => (int) $session->getKey(),
                 'is_rescue' => (bool) $session->is_rescue,
             ]);
@@ -301,7 +305,9 @@ final readonly class OrderSyncService
             'internal_note' => $attributes['internal_note'] ?? null,
             'to_invoice' => (bool) ($attributes['to_invoice'] ?? false),
             'is_refund' => (bool) ($attributes['is_refund'] ?? false),
-            'refunded_order_id' => $attributes['refunded_order_id'] ?? null,
+            'refunded_order_id' => $this->resolveRefundedOrderId($config, $attributes),
+            'is_tipped' => (bool) ($attributes['is_tipped'] ?? false),
+            'tip_amount' => $attributes['tip_amount'] ?? '0',
             'customer_email' => $attributes['customer_email'] ?? null,
             'customer_phone' => $attributes['customer_phone'] ?? null,
         ]);
@@ -311,6 +317,38 @@ final readonly class OrderSyncService
         return $order;
     }
 
+    /**
+     * Link a refund to the order it reverses. Offline-first, the client only knows the original by
+     * its uuid (`refunded_order_uuid`); a fully synced client may already hold the id. Resolve the
+     * uuid within the company so the `refunded_order_id` foreign key is set on ingest.
+     *
+     * Batch ordering: commands are ingested in array order and each is persisted before the next,
+     * so an original that precedes its refund in the same push resolves here. The one gap is a
+     * refund pushed *ahead* of a not-yet-synced original — it links to null (rare: the original is
+     * settled and synced before it can be refunded).
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function resolveRefundedOrderId(PosConfig $config, array $attributes): ?int
+    {
+        if (isset($attributes['refunded_order_id'])) {
+            return (int) $attributes['refunded_order_id'];
+        }
+
+        $uuid = $attributes['refunded_order_uuid'] ?? null;
+
+        if (! is_string($uuid) || $uuid === '') {
+            return null;
+        }
+
+        $id = Order::query()
+            ->where('company_id', $config->company_id)
+            ->where('uuid', $uuid)
+            ->value('id');
+
+        return $id === null ? null : (int) $id;
+    }
+
     /** @param array<string, mixed> $attributes */
     private function updateOrder(Order $order, PosSession $session, array $attributes, ?int $employeeId): void
     {
@@ -318,6 +356,9 @@ final readonly class OrderSyncService
             'customer_id', 'employee_id', 'pricelist_id', 'fiscal_position_id', 'preset_time',
             'guest_count', 'floating_order_name', 'general_customer_note', 'internal_note',
             'to_invoice', 'customer_email', 'customer_phone', 'tracking_number',
+            // A table transfer, a tip, and an explicit "no tip" (is_tipped=false, tip_amount=0)
+            // must all survive an update; the client sends the column names directly.
+            'restaurant_table_id', 'is_tipped', 'tip_amount',
         ];
 
         $update = ['pos_session_id' => $session->getKey()];
@@ -643,7 +684,20 @@ final readonly class OrderSyncService
                 continue;
             }
 
-            $terminal = (array) ($command['terminal'] ?? []);
+            // The register sends card details flat on the payment command; a richer integration may
+            // send a nested `terminal` object. Accept both — nested wins on any overlapping key.
+            $terminal = array_merge(
+                array_filter([
+                    'card_brand' => $command['card_brand'] ?? null,
+                    'card_type' => $command['card_type'] ?? null,
+                    'card_last4' => $command['card_last4'] ?? null,
+                    'cardholder_name' => $command['cardholder_name'] ?? null,
+                    'auth_code' => $command['auth_code'] ?? null,
+                    'transaction_reference' => $command['transaction_reference'] ?? null,
+                    'entry_mode' => $command['entry_mode'] ?? null,
+                ], static fn ($v): bool => $v !== null),
+                (array) ($command['terminal'] ?? []),
+            );
             $amount = (string) ($command['amount'] ?? '0');
 
             /** @var OrderPayment $payment */

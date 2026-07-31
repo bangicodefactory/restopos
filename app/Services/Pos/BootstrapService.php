@@ -385,6 +385,14 @@ final readonly class BootstrapService
             /** @var array<string, mixed> $row */
             $row = $model->attributesToArray();
 
+            // A model may rename/coerce its columns to the field names the client reads
+            // (e.g. Table maps `restaurant_floor_id` → `floor_id`). Keeps the DB column names
+            // out of the client contract without a Dexie schema migration.
+            if (method_exists($model, 'toPosRow')) {
+                /** @var array<string, mixed> $row */
+                $row = $model->toPosRow($row);
+            }
+
             return $row;
         };
     }
@@ -475,7 +483,17 @@ final readonly class BootstrapService
         /** @var PosSession|null $session */
         $session = $config->currentSession()->first();
 
-        return $session?->attributesToArray();
+        if ($session === null) {
+            return null;
+        }
+
+        $row = $session->attributesToArray();
+        // Rename the column to the field the client reads (packages/domain PosSessionRow), matching
+        // SessionResource on the endpoint path — one contract, the raw column name never leaks.
+        $row['opening_float'] = (string) $session->cash_balance_opening;
+        unset($row['cash_balance_opening']);
+
+        return $row;
     }
 
     private function limitFor(string $name, PosConfig $config): int
