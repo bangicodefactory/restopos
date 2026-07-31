@@ -230,6 +230,51 @@ it('fires each course of a multi-course order independently (BAN-408)', function
     expect(OrderCourse::query()->where('pos_order_id', $orderId)->where('fired', true)->count())->toBe(3);
 });
 
+it('an offline prep.sent for one course leaves the other courses fireable (issue #10)', function (): void {
+    $this->fx->withPrepDisplay();
+
+    // Two lines, one per course, distinct quantities.
+    $orderUuid = (string) Str::uuid();
+    $lineUuids = [(string) Str::uuid(), (string) Str::uuid()];
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $lineUuids[0], 'variant_id' => $this->fx->variant->getKey(), 'qty' => '2', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuids[1], 'variant_id' => $this->fx->variant->getKey(), 'qty' => '3', 'price_unit' => '10.00', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne->getKey()])],
+    ])->assertOk();
+
+    $courseUuids = [];
+    foreach (['Starters', 'Mains'] as $i => $name) {
+        $created = $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/courses", ['name' => $name]);
+        $courseUuids[$i] = $created->json('uuid');
+        $courseId = (int) OrderCourse::query()->where('uuid', $courseUuids[$i])->value('id');
+        OrderLine::query()->where('uuid', $lineUuids[$i])->update(['restaurant_course_id' => $courseId]);
+    }
+
+    // Reconnect: an offline fire of course 1 arrives as a `prep.sent` command carrying its course_index.
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'commands' => [[
+            'uuid' => (string) Str::uuid(),
+            'kind' => 'prep.sent',
+            'payload' => ['order_uuid' => $orderUuid, 'snapshot_version' => 0, 'course_index' => 1],
+        ]],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    // Only course 1 was snapshotted: the remaining delta is exactly course 2's line (qty 3). The
+    // pre-fix markAllSent would snapshot everything and this would be 0.
+    $this->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/orders/{$orderUuid}/preparation-changes")
+        ->assertOk()
+        ->assertJsonPath('nbr_of_changes', 3);
+
+    // And course 2 can still be fired online, producing its own delta.
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/orders/{$orderUuid}/courses/{$courseUuids[1]}/fire")
+        ->assertOk()
+        ->assertJsonPath('delta.nbr_of_changes', 3);
+});
+
 it('refuses to delete a fired course', function (): void {
     $this->fx->withPrepDisplay();
 

@@ -336,7 +336,15 @@ final readonly class OrderSyncService
             return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null];
         }
 
-        $version = $this->preparation->markAllSent($order);
+        // A course fire carries its `course_index`; snapshot only that course so the others stay
+        // fireable (issue #10). A whole-order send has no course_index and snapshots everything.
+        $courseIndex = isset($payload['course_index']) && $payload['course_index'] !== null
+            ? (int) $payload['course_index']
+            : null;
+
+        $version = $courseIndex !== null
+            ? $this->preparation->markCourseSent($order, $courseIndex)
+            : $this->preparation->markAllSent($order);
 
         return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'snapshot_version' => $version];
     }
