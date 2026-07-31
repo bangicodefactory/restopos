@@ -1,0 +1,240 @@
+/**
+ * Translation dictionaries.
+ *
+ * Flat dotted keys, no nesting: a flat map is one lookup, survives `JSON.stringify` into IndexedDB,
+ * and makes a missing key obvious in a diff. English is the fallback and the source of truth for
+ * the key set — `Dictionary` is typed from it, so adding a key to `en` and forgetting `fr` is a
+ * compile error, not a runtime `undefined` on a customer-facing kiosk.
+ */
+
+export const en = {
+    'common.ok': 'OK',
+    'common.cancel': 'Cancel',
+    'common.confirm': 'Confirm',
+    'common.back': 'Back',
+    'common.close': 'Close',
+    'common.search': 'Search',
+    'common.retry': 'Retry',
+    'common.retryAll': 'Retry all',
+    'common.loading': 'Loading…',
+    'common.yes': 'Yes',
+    'common.no': 'No',
+    'common.total': 'Total',
+    'common.subtotal': 'Subtotal',
+    'common.tax': 'Tax',
+    'common.discount': 'Discount',
+    'common.quantity': 'Qty',
+    'common.price': 'Price',
+    'common.customer': 'Customer',
+    'common.note': 'Note',
+    'common.settings': 'Settings',
+
+    'status.online': 'Online',
+    'status.offline': 'Offline',
+    'status.synced': 'All synced',
+    'status.pending': '{count} pending',
+    'status.failed': '{count} failed',
+    'status.syncing': 'Syncing…',
+    'status.updateAvailable': 'Update available',
+    'status.updateNow': 'Update now',
+    'status.offlineReady': 'Ready to work offline',
+
+    'order.new': 'New order',
+    'order.empty': 'No items yet',
+    'order.pay': 'Pay',
+    'order.change': 'Change',
+    'order.due': 'Due',
+    'order.paid': 'Paid',
+    'order.receipt': 'Receipt',
+    'order.reprint': 'Reprint',
+    'order.table': 'Table',
+    'order.guests': 'Guests',
+    'order.course': 'Course',
+
+    'auth.selectEmployee': 'Select your name',
+    'auth.enterPin': 'Enter your PIN',
+    'auth.wrongPin': 'Wrong PIN',
+    'auth.locked': 'Too many attempts. Try again in {seconds}s.',
+    'auth.managerApproval': 'Manager approval required',
+
+    'printer.paperOut': 'Printer out of paper',
+    'printer.coverOpen': 'Printer cover open',
+    'printer.unreachable': 'Printer unreachable',
+    'printer.printing': 'Printing…',
+
+    'error.generic': 'Something went wrong',
+    'error.offlineSafe': 'Your orders are safe on this device and will sync automatically.',
+    'error.sessionClosed': 'This session was closed on another device',
+    'error.updateRequired': 'This device must be updated before it can be used',
+
+    'kitchen.new': 'New',
+    'kitchen.cooking': 'Cooking',
+    'kitchen.ready': 'Ready',
+    'kitchen.served': 'Served',
+    'kitchen.late': 'Late',
+
+    'self.startOrder': 'Start order',
+    'self.addToCart': 'Add',
+    'self.yourOrder': 'Your order',
+    'self.checkout': 'Checkout',
+    'self.eatIn': 'Eat in',
+    'self.takeAway': 'Take away',
+} as const;
+
+export type TranslationKey = keyof typeof en;
+export type Dictionary = Record<TranslationKey, string>;
+
+export const fr: Dictionary = {
+    'common.ok': 'OK',
+    'common.cancel': 'Annuler',
+    'common.confirm': 'Confirmer',
+    'common.back': 'Retour',
+    'common.close': 'Fermer',
+    'common.search': 'Rechercher',
+    'common.retry': 'Réessayer',
+    'common.retryAll': 'Tout réessayer',
+    'common.loading': 'Chargement…',
+    'common.yes': 'Oui',
+    'common.no': 'Non',
+    'common.total': 'Total',
+    'common.subtotal': 'Sous-total',
+    'common.tax': 'TVA',
+    'common.discount': 'Remise',
+    'common.quantity': 'Qté',
+    'common.price': 'Prix',
+    'common.customer': 'Client',
+    'common.note': 'Note',
+    'common.settings': 'Paramètres',
+
+    'status.online': 'En ligne',
+    'status.offline': 'Hors ligne',
+    'status.synced': 'Tout est synchronisé',
+    'status.pending': '{count} en attente',
+    'status.failed': '{count} en échec',
+    'status.syncing': 'Synchronisation…',
+    'status.updateAvailable': 'Mise à jour disponible',
+    'status.updateNow': 'Mettre à jour',
+    'status.offlineReady': 'Prêt à fonctionner hors ligne',
+
+    'order.new': 'Nouvelle commande',
+    'order.empty': 'Aucun article',
+    'order.pay': 'Payer',
+    'order.change': 'Rendu',
+    'order.due': 'Reste à payer',
+    'order.paid': 'Payé',
+    'order.receipt': 'Ticket',
+    'order.reprint': 'Réimprimer',
+    'order.table': 'Table',
+    'order.guests': 'Couverts',
+    'order.course': 'Service',
+
+    'auth.selectEmployee': 'Sélectionnez votre nom',
+    'auth.enterPin': 'Saisissez votre code',
+    'auth.wrongPin': 'Code incorrect',
+    'auth.locked': 'Trop de tentatives. Réessayez dans {seconds}s.',
+    'auth.managerApproval': 'Validation manager requise',
+
+    'printer.paperOut': "Plus de papier dans l'imprimante",
+    'printer.coverOpen': 'Capot ouvert',
+    'printer.unreachable': 'Imprimante injoignable',
+    'printer.printing': 'Impression…',
+
+    'error.generic': 'Une erreur est survenue',
+    'error.offlineSafe': 'Vos commandes sont enregistrées sur cet appareil et seront synchronisées.',
+    'error.sessionClosed': 'Cette session a été clôturée sur un autre appareil',
+    'error.updateRequired': 'Cet appareil doit être mis à jour avant utilisation',
+
+    'kitchen.new': 'Nouveau',
+    'kitchen.cooking': 'En cours',
+    'kitchen.ready': 'Prêt',
+    'kitchen.served': 'Servi',
+    'kitchen.late': 'En retard',
+
+    'self.startOrder': 'Commander',
+    'self.addToCart': 'Ajouter',
+    'self.yourOrder': 'Votre commande',
+    'self.checkout': 'Payer',
+    'self.eatIn': 'Sur place',
+    'self.takeAway': 'À emporter',
+};
+
+export const ar: Dictionary = {
+    'common.ok': 'موافق',
+    'common.cancel': 'إلغاء',
+    'common.confirm': 'تأكيد',
+    'common.back': 'رجوع',
+    'common.close': 'إغلاق',
+    'common.search': 'بحث',
+    'common.retry': 'إعادة المحاولة',
+    'common.retryAll': 'إعادة الكل',
+    'common.loading': 'جارٍ التحميل…',
+    'common.yes': 'نعم',
+    'common.no': 'لا',
+    'common.total': 'الإجمالي',
+    'common.subtotal': 'المجموع الفرعي',
+    'common.tax': 'الضريبة',
+    'common.discount': 'الخصم',
+    'common.quantity': 'الكمية',
+    'common.price': 'السعر',
+    'common.customer': 'الزبون',
+    'common.note': 'ملاحظة',
+    'common.settings': 'الإعدادات',
+
+    'status.online': 'متصل',
+    'status.offline': 'غير متصل',
+    'status.synced': 'تمت المزامنة',
+    'status.pending': '{count} في الانتظار',
+    'status.failed': '{count} فشل',
+    'status.syncing': 'جارٍ المزامنة…',
+    'status.updateAvailable': 'يتوفر تحديث',
+    'status.updateNow': 'تحديث الآن',
+    'status.offlineReady': 'جاهز للعمل دون اتصال',
+
+    'order.new': 'طلب جديد',
+    'order.empty': 'لا توجد عناصر',
+    'order.pay': 'الدفع',
+    'order.change': 'الباقي',
+    'order.due': 'المتبقي',
+    'order.paid': 'مدفوع',
+    'order.receipt': 'الإيصال',
+    'order.reprint': 'إعادة الطباعة',
+    'order.table': 'الطاولة',
+    'order.guests': 'عدد الضيوف',
+    'order.course': 'الطبق',
+
+    'auth.selectEmployee': 'اختر اسمك',
+    'auth.enterPin': 'أدخل الرمز',
+    'auth.wrongPin': 'رمز خاطئ',
+    'auth.locked': 'محاولات كثيرة. أعد المحاولة بعد {seconds} ثانية.',
+    'auth.managerApproval': 'مطلوب موافقة المدير',
+
+    'printer.paperOut': 'نفد ورق الطابعة',
+    'printer.coverOpen': 'غطاء الطابعة مفتوح',
+    'printer.unreachable': 'تعذر الوصول إلى الطابعة',
+    'printer.printing': 'جارٍ الطباعة…',
+
+    'error.generic': 'حدث خطأ ما',
+    'error.offlineSafe': 'طلباتك محفوظة على هذا الجهاز وسيتم مزامنتها تلقائيًا.',
+    'error.sessionClosed': 'تم إغلاق هذه الجلسة على جهاز آخر',
+    'error.updateRequired': 'يجب تحديث هذا الجهاز قبل الاستخدام',
+
+    'kitchen.new': 'جديد',
+    'kitchen.cooking': 'قيد التحضير',
+    'kitchen.ready': 'جاهز',
+    'kitchen.served': 'تم التقديم',
+    'kitchen.late': 'متأخر',
+
+    'self.startOrder': 'ابدأ الطلب',
+    'self.addToCart': 'إضافة',
+    'self.yourOrder': 'طلبك',
+    'self.checkout': 'الدفع',
+    'self.eatIn': 'تناول هنا',
+    'self.takeAway': 'طلب خارجي',
+};
+
+export const DICTIONARIES = { en, fr, ar } as const;
+
+export type Locale = keyof typeof DICTIONARIES;
+
+/** Locales written right to left. Drives `dir` on the document and the keyboard layout. */
+export const RTL_LOCALES: ReadonlySet<Locale> = new Set<Locale>(['ar']);

@@ -1,0 +1,101 @@
+{
+  "name": "009-fixed-included-plus-percent-included",
+  "description": "Both a price-included fixed fee and a price-included 21%: the fixed amount is removed from the magnitude before the percent is unwound.",
+  "specRefs": [
+    "7.4.2",
+    "7.4.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 5,
+      "name": "Eco fee",
+      "amountType": "fixed",
+      "amount": "0.35",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 4,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "12.00",
+      "discount": "0",
+      "taxIds": [
+        5,
+        2
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "12.0000",
+        "priceSubtotal": "19.26",
+        "priceTotal": "24.00",
+        "taxes": [
+          {
+            "taxId": 5,
+            "base": "19.26",
+            "amount": "0.70"
+          },
+          {
+            "taxId": 2,
+            "base": "19.26",
+            "amount": "4.04"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "19.26",
+      "totalTax": "4.74",
+      "totalIncluded": "24.00",
+      "roundedTotal": "24.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "19.26",
+          "amount": "4.04"
+        },
+        {
+          "taxGroupId": 4,
+          "base": "19.26",
+          "amount": "0.70"
+        }
+      ]
+    }
+  }
+}

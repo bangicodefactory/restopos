@@ -1,0 +1,45 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "types": ["vite/client"],
+
+        "strict": true,
+        "noImplicitOverride": true,
+        "noUncheckedIndexedAccess": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "exactOptionalPropertyTypes": false,
+        "forceConsistentCasingInFileNames": true,
+
+        "allowJs": false,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true,
+        "resolveJsonModule": true,
+        "noEmit": true,
+
+        "baseUrl": ".",
+        "paths": {
+            "@domain": ["packages/domain/src/index.ts"],
+            "@domain/*": ["packages/domain/src/*"],
+            "@shared/*": ["resources/js/shared/*"],
+            "@register/*": ["resources/js/register/*"],
+            "@kitchen/*": ["resources/js/kitchen/*"],
+            "@selforder/*": ["resources/js/selforder/*"],
+            "@backoffice/*": ["resources/js/backoffice/*"]
+        }
+    },
+    "include": [
+        "resources/js/**/*.ts",
+        "resources/js/**/*.tsx",
+        "resources/js/**/*.d.ts",
+        "packages/domain/**/*.ts"
+    ],
+    "exclude": ["node_modules", "vendor", "tools", "public", "storage"]
+}

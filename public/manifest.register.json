@@ -1,0 +1,26 @@
+{
+    "name": "RestoPOS Register",
+    "short_name": "Register",
+    "description": "Point of sale register. Works fully offline.",
+    "id": "/pos/",
+    "start_url": "/pos/",
+    "scope": "/pos/",
+    "display": "fullscreen",
+    "display_override": ["window-controls-overlay", "fullscreen", "standalone"],
+    "orientation": "landscape",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
+    "lang": "en",
+    "dir": "ltr",
+    "categories": ["business", "productivity", "finance"],
+    "prefer_related_applications": false,
+    "icons": [
+        { "src": "/icons/register-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/register-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/register-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ],
+    "shortcuts": [
+        { "name": "Open tickets", "short_name": "Tickets", "url": "/pos/tickets" },
+        { "name": "Close session", "short_name": "Close", "url": "/pos/session/close" }
+    ]
+}

@@ -1,0 +1,98 @@
+{
+  "name": "042-half-even-currency",
+  "description": "A currency configured for banker's rounding: 0.125 rounds to 0.12, 0.135 to 0.14.",
+  "specRefs": [
+    "3.1"
+  ],
+  "currency": {
+    "code": "SEK",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_even"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 13,
+      "name": "VAT 25%",
+      "amountType": "percent",
+      "amount": "25",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 11,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "0.50",
+      "discount": "0",
+      "taxIds": [
+        13
+      ]
+    },
+    {
+      "id": "L2",
+      "quantity": "1",
+      "priceUnit": "0.54",
+      "discount": "0",
+      "taxIds": [
+        13
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "0.5000",
+        "priceSubtotal": "0.50",
+        "priceTotal": "0.62",
+        "taxes": [
+          {
+            "taxId": 13,
+            "base": "0.50",
+            "amount": "0.12"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "priceUnit": "0.5400",
+        "priceSubtotal": "0.54",
+        "priceTotal": "0.68",
+        "taxes": [
+          {
+            "taxId": 13,
+            "base": "0.54",
+            "amount": "0.14"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "1.04",
+      "totalTax": "0.26",
+      "totalIncluded": "1.30",
+      "roundedTotal": "1.30",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 11,
+          "base": "1.04",
+          "amount": "0.26"
+        }
+      ]
+    }
+  }
+}

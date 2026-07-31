@@ -1,0 +1,117 @@
+{
+  "name": "044-order-two-lines-global",
+  "description": "The same two lines under round_globally: rounding happens once per tax at order level.",
+  "specRefs": [
+    "8.3",
+    "8.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_globally",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "3.33",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L2",
+      "quantity": "3",
+      "priceUnit": "7.77",
+      "discount": "0",
+      "taxIds": [
+        3
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "3.3300",
+        "priceSubtotal": "6.66",
+        "priceTotal": "8.06",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "6.66",
+            "amount": "1.40"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "priceUnit": "7.7700",
+        "priceSubtotal": "23.31",
+        "priceTotal": "24.71",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "23.31",
+            "amount": "1.40"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "29.97",
+      "totalTax": "2.80",
+      "totalIncluded": "32.77",
+      "roundedTotal": "32.77",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "6.66",
+          "amount": "1.40"
+        },
+        {
+          "taxGroupId": 2,
+          "base": "23.31",
+          "amount": "1.40"
+        }
+      ]
+    }
+  }
+}

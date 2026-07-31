@@ -1,0 +1,117 @@
+{
+  "name": "072-pricelist-specificity-variant-wins",
+  "description": "variant beats product beats category beats global, regardless of sequence.",
+  "specRefs": [
+    "10.3",
+    "10.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": {
+    "pricelists": [
+      {
+        "id": 1,
+        "items": [
+          {
+            "id": 1,
+            "appliedOn": "global",
+            "computePrice": "fixed",
+            "fixedPrice": "1.0000",
+            "minQuantity": "0",
+            "sequence": 1
+          },
+          {
+            "id": 2,
+            "appliedOn": "pos_category",
+            "posCategoryId": 5,
+            "computePrice": "fixed",
+            "fixedPrice": "2.0000",
+            "minQuantity": "0",
+            "sequence": 1
+          },
+          {
+            "id": 3,
+            "appliedOn": "product",
+            "productId": 10,
+            "computePrice": "fixed",
+            "fixedPrice": "3.0000",
+            "minQuantity": "0",
+            "sequence": 1
+          },
+          {
+            "id": 4,
+            "appliedOn": "variant",
+            "productVariantId": 100,
+            "computePrice": "fixed",
+            "fixedPrice": "4.0000",
+            "minQuantity": "0",
+            "sequence": 99
+          }
+        ]
+      }
+    ],
+    "resolve": [
+      {
+        "id": "R1",
+        "pricelistId": 1,
+        "context": {
+          "variantId": 100,
+          "productId": 10,
+          "categoryId": 5,
+          "categoryAncestry": [
+            5,
+            4,
+            3
+          ],
+          "listPrice": "10.0000",
+          "standardPrice": "6.0000",
+          "priceExtra": "0",
+          "quantity": "1",
+          "date": null
+        }
+      }
+    ]
+  },
+  "combo": null,
+  "lines": [],
+  "expected": {
+    "pricelist": [
+      {
+        "id": "R1",
+        "price": "4.0000"
+      }
+    ],
+    "lines": [],
+    "totals": {
+      "totalExcluded": "0.00",
+      "totalTax": "0.00",
+      "totalIncluded": "0.00",
+      "roundedTotal": "0.00",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}

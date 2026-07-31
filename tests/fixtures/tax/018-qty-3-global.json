@@ -1,0 +1,77 @@
+{
+  "name": "018-qty-3-global",
+  "description": "Identical input to 017 but round_globally: the line amount is never rounded before the tax is applied.",
+  "specRefs": [
+    "7.1",
+    "8.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_globally",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "3",
+      "priceUnit": "3.33",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "3.3300",
+        "priceSubtotal": "9.99",
+        "priceTotal": "12.09",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "9.99",
+            "amount": "2.10"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "9.99",
+      "totalTax": "2.10",
+      "totalIncluded": "12.09",
+      "roundedTotal": "12.09",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "9.99",
+          "amount": "2.10"
+        }
+      ]
+    }
+  }
+}

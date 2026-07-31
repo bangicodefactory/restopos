@@ -1,0 +1,101 @@
+{
+  "name": "008-fixed-plus-percent",
+  "description": "Fixed per-unit tax at sequence 10 with include_base_amount, then 21% on base + fee.",
+  "specRefs": [
+    "7.5.2",
+    "7.5.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 5,
+      "name": "Eco fee",
+      "amountType": "fixed",
+      "amount": "0.35",
+      "priceInclude": false,
+      "includeBaseAmount": true,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 4,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "4",
+      "priceUnit": "9.90",
+      "discount": "0",
+      "taxIds": [
+        5,
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "9.9000",
+        "priceSubtotal": "39.60",
+        "priceTotal": "49.61",
+        "taxes": [
+          {
+            "taxId": 5,
+            "base": "39.60",
+            "amount": "1.40"
+          },
+          {
+            "taxId": 1,
+            "base": "41.00",
+            "amount": "8.61"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "39.60",
+      "totalTax": "10.01",
+      "totalIncluded": "49.61",
+      "roundedTotal": "49.61",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "41.00",
+          "amount": "8.61"
+        },
+        {
+          "taxGroupId": 4,
+          "base": "39.60",
+          "amount": "1.40"
+        }
+      ]
+    }
+  }
+}

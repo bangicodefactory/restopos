@@ -1,0 +1,76 @@
+{
+  "name": "014-discount-10",
+  "description": "10% line discount applied to the unit price before tax.",
+  "specRefs": [
+    "7.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "19.99",
+      "discount": "10",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "19.9900",
+        "priceSubtotal": "35.98",
+        "priceTotal": "43.54",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "35.98",
+            "amount": "7.56"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "35.98",
+      "totalTax": "7.56",
+      "totalIncluded": "43.54",
+      "roundedTotal": "43.54",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "35.98",
+          "amount": "7.56"
+        }
+      ]
+    }
+  }
+}

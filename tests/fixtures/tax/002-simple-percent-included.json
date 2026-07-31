@@ -1,0 +1,77 @@
+{
+  "name": "002-simple-percent-included",
+  "description": "One 21% price-included tax on a 10.00 shelf price: the checkpoint mechanism must give back exactly 10.00, so the tax is 1.74 and not the naive 1.73.",
+  "specRefs": [
+    "7.4.2",
+    "7.5.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "10.00",
+      "discount": "0",
+      "taxIds": [
+        2
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "10.0000",
+        "priceSubtotal": "8.26",
+        "priceTotal": "10.00",
+        "taxes": [
+          {
+            "taxId": 2,
+            "base": "8.26",
+            "amount": "1.74"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "8.26",
+      "totalTax": "1.74",
+      "totalIncluded": "10.00",
+      "roundedTotal": "10.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "8.26",
+          "amount": "1.74"
+        }
+      ]
+    }
+  }
+}

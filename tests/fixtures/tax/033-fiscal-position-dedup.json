@@ -1,0 +1,116 @@
+{
+  "name": "033-fiscal-position-dedup",
+  "description": "Mapping two different sources onto the same destination de-duplicates, keeping the first occurrence.",
+  "specRefs": [
+    "5.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 4,
+      "name": "Eco 2%",
+      "amountType": "percent",
+      "amount": "2",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 3,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": {
+    "id": 4,
+    "name": "Merge",
+    "mappings": [
+      {
+        "taxSrcId": 1,
+        "taxDestId": 3
+      },
+      {
+        "taxSrcId": 4,
+        "taxDestId": 3
+      }
+    ]
+  },
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        1,
+        4
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "106.00",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "100.00",
+            "amount": "6.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "6.00",
+      "totalIncluded": "106.00",
+      "roundedTotal": "106.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 2,
+          "base": "100.00",
+          "amount": "6.00"
+        }
+      ]
+    }
+  }
+}

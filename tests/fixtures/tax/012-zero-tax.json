@@ -1,0 +1,76 @@
+{
+  "name": "012-zero-tax",
+  "description": "A 0% tax still appears in the breakdown so the receipt can print its tax group.",
+  "specRefs": [
+    "7.6"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 8,
+      "name": "Exempt 0%",
+      "amountType": "percent",
+      "amount": "0",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 6,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "25.00",
+      "discount": "0",
+      "taxIds": [
+        8
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "25.0000",
+        "priceSubtotal": "50.00",
+        "priceTotal": "50.00",
+        "taxes": [
+          {
+            "taxId": 8,
+            "base": "50.00",
+            "amount": "0.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "50.00",
+      "totalTax": "0.00",
+      "totalIncluded": "50.00",
+      "roundedTotal": "50.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 6,
+          "base": "50.00",
+          "amount": "0.00"
+        }
+      ]
+    }
+  }
+}

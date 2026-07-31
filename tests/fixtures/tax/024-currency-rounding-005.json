@@ -1,0 +1,76 @@
+{
+  "name": "024-currency-rounding-005",
+  "description": "A currency whose smallest increment is 0.05: every line amount snaps to a 5-centime step.",
+  "specRefs": [
+    "3.3.2"
+  ],
+  "currency": {
+    "code": "CHF",
+    "decimalPlaces": 2,
+    "rounding": "0.05",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 10,
+      "name": "MWST 7.7%",
+      "amountType": "percent",
+      "amount": "7.7",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 8,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "13.90",
+      "discount": "0",
+      "taxIds": [
+        10
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "13.9000",
+        "priceSubtotal": "13.90",
+        "priceTotal": "14.95",
+        "taxes": [
+          {
+            "taxId": 10,
+            "base": "13.90",
+            "amount": "1.05"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "13.90",
+      "totalTax": "1.05",
+      "totalIncluded": "14.95",
+      "roundedTotal": "14.95",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 8,
+          "base": "13.90",
+          "amount": "1.05"
+        }
+      ]
+    }
+  }
+}

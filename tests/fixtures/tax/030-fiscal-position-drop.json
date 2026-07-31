@@ -1,0 +1,73 @@
+{
+  "name": "030-fiscal-position-drop",
+  "description": "tax_dest_id = null removes the tax entirely (export exemption).",
+  "specRefs": [
+    "5.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": {
+    "id": 2,
+    "name": "Export",
+    "mappings": [
+      {
+        "taxSrcId": 1,
+        "taxDestId": null
+      }
+    ]
+  },
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "100.00",
+        "taxes": []
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "0.00",
+      "totalIncluded": "100.00",
+      "roundedTotal": "100.00",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}

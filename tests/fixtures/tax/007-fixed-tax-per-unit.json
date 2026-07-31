@@ -1,0 +1,76 @@
+{
+  "name": "007-fixed-tax-per-unit",
+  "description": "A fixed 0.35 per-unit eco tax on quantity 4 - amount is 1.40 regardless of the base.",
+  "specRefs": [
+    "7.5.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 5,
+      "name": "Eco fee",
+      "amountType": "fixed",
+      "amount": "0.35",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 4,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "4",
+      "priceUnit": "9.90",
+      "discount": "0",
+      "taxIds": [
+        5
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "9.9000",
+        "priceSubtotal": "39.60",
+        "priceTotal": "41.00",
+        "taxes": [
+          {
+            "taxId": 5,
+            "base": "39.60",
+            "amount": "1.40"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "39.60",
+      "totalTax": "1.40",
+      "totalIncluded": "41.00",
+      "roundedTotal": "41.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 4,
+          "base": "39.60",
+          "amount": "1.40"
+        }
+      ]
+    }
+  }
+}

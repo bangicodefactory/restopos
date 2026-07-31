@@ -1,0 +1,76 @@
+{
+  "name": "038-pathological-penny-x7-included-global",
+  "description": "The same penny line under round_globally: no intermediate rounding, so the split is 0.06 / 0.01 only after the single order-level rounding.",
+  "specRefs": [
+    "8.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_globally",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "7",
+      "priceUnit": "0.01",
+      "discount": "0",
+      "taxIds": [
+        2
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "0.0100",
+        "priceSubtotal": "0.06",
+        "priceTotal": "0.07",
+        "taxes": [
+          {
+            "taxId": 2,
+            "base": "0.06",
+            "amount": "0.01"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "0.06",
+      "totalTax": "0.01",
+      "totalIncluded": "0.07",
+      "roundedTotal": "0.07",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "0.06",
+          "amount": "0.01"
+        }
+      ]
+    }
+  }
+}

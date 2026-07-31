@@ -1,0 +1,90 @@
+{
+  "name": "073-pricelist-no-match-falls-back",
+  "description": "No candidate matches: the price is listPrice + priceExtra.",
+  "specRefs": [
+    "10.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": {
+    "pricelists": [
+      {
+        "id": 1,
+        "items": [
+          {
+            "id": 1,
+            "appliedOn": "variant",
+            "productVariantId": 999,
+            "computePrice": "fixed",
+            "fixedPrice": "1.0000",
+            "minQuantity": "0",
+            "sequence": 10
+          }
+        ]
+      }
+    ],
+    "resolve": [
+      {
+        "id": "R1",
+        "pricelistId": 1,
+        "context": {
+          "variantId": 100,
+          "productId": 10,
+          "categoryId": 5,
+          "categoryAncestry": [
+            5,
+            4,
+            3
+          ],
+          "listPrice": "10.0000",
+          "standardPrice": "6.0000",
+          "priceExtra": "1.5000",
+          "quantity": "1",
+          "date": null
+        }
+      }
+    ]
+  },
+  "combo": null,
+  "lines": [],
+  "expected": {
+    "pricelist": [
+      {
+        "id": "R1",
+        "price": "11.5000"
+      }
+    ],
+    "lines": [],
+    "totals": {
+      "totalExcluded": "0.00",
+      "totalTax": "0.00",
+      "totalIncluded": "0.00",
+      "roundedTotal": "0.00",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}

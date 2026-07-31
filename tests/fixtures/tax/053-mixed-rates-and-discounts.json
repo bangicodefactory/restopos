@@ -1,0 +1,173 @@
+{
+  "name": "053-mixed-rates-and-discounts",
+  "description": "A realistic four-line restaurant tab: food at 6%, drinks at 21%, one discounted line, one price-included line.",
+  "specRefs": [
+    "8.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "14.50",
+      "discount": "0",
+      "taxIds": [
+        3
+      ]
+    },
+    {
+      "id": "L2",
+      "quantity": "3",
+      "priceUnit": "4.20",
+      "discount": "15",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L3",
+      "quantity": "1",
+      "priceUnit": "38.00",
+      "discount": "5",
+      "taxIds": [
+        3
+      ]
+    },
+    {
+      "id": "L4",
+      "quantity": "2",
+      "priceUnit": "6.50",
+      "discount": "0",
+      "taxIds": [
+        2
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "14.5000",
+        "priceSubtotal": "29.00",
+        "priceTotal": "30.74",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "29.00",
+            "amount": "1.74"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "priceUnit": "4.2000",
+        "priceSubtotal": "10.71",
+        "priceTotal": "12.96",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "10.71",
+            "amount": "2.25"
+          }
+        ]
+      },
+      {
+        "id": "L3",
+        "priceUnit": "38.0000",
+        "priceSubtotal": "36.10",
+        "priceTotal": "38.27",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "36.10",
+            "amount": "2.17"
+          }
+        ]
+      },
+      {
+        "id": "L4",
+        "priceUnit": "6.5000",
+        "priceSubtotal": "10.74",
+        "priceTotal": "13.00",
+        "taxes": [
+          {
+            "taxId": 2,
+            "base": "10.74",
+            "amount": "2.26"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "86.55",
+      "totalTax": "8.42",
+      "totalIncluded": "94.97",
+      "roundedTotal": "94.97",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "21.45",
+          "amount": "4.51"
+        },
+        {
+          "taxGroupId": 2,
+          "base": "65.10",
+          "amount": "3.91"
+        }
+      ]
+    }
+  }
+}

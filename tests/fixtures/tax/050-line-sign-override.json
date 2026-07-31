@@ -1,0 +1,99 @@
+{
+  "name": "050-line-sign-override",
+  "description": "A per-line sign override inside a sale document.",
+  "specRefs": [
+    "7.3.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "50.00",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L2",
+      "quantity": "1",
+      "priceUnit": "50.00",
+      "discount": "0",
+      "taxIds": [
+        1
+      ],
+      "sign": "-1"
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "50.0000",
+        "priceSubtotal": "50.00",
+        "priceTotal": "60.50",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "50.00",
+            "amount": "10.50"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "priceUnit": "50.0000",
+        "priceSubtotal": "-50.00",
+        "priceTotal": "-60.50",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "-50.00",
+            "amount": "-10.50"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "0.00",
+      "totalTax": "0.00",
+      "totalIncluded": "0.00",
+      "roundedTotal": "0.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "0.00",
+          "amount": "0.00"
+        }
+      ]
+    }
+  }
+}

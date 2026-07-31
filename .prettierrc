@@ -1,0 +1,23 @@
+{
+    "printWidth": 110,
+    "tabWidth": 4,
+    "useTabs": false,
+    "semi": true,
+    "singleQuote": true,
+    "quoteProps": "consistent",
+    "trailingComma": "all",
+    "bracketSpacing": true,
+    "bracketSameLine": false,
+    "arrowParens": "always",
+    "endOfLine": "lf",
+    "overrides": [
+        {
+            "files": ["*.json", "*.yml", "*.yaml", "*.md"],
+            "options": { "tabWidth": 2 }
+        },
+        {
+            "files": ["*.blade.php"],
+            "options": { "parser": "html", "tabWidth": 4 }
+        }
+    ]
+}

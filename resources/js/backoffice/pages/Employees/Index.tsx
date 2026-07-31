@@ -1,0 +1,433 @@
+/**
+ * `Employees/Index` — `GET /employees` (BOF-120…BOF-129).
+ *
+ * The list and editor, plus the role/permission matrix.
+ *
+ * **Secrets are write-only, and the UI is built around that** rather than working against it. The
+ * list shows `has_pin` / `has_badge`, never a value; the editor's PIN and badge fields start
+ * empty and stay empty; leaving them empty changes nothing, and clearing a PIN is a separate,
+ * confirmed action that sends an explicit `null`. There is deliberately no "show current PIN":
+ * the server only ever had the sha256, so there is nothing to show, and a control implying
+ * otherwise would be a lie about how the offline verifiers work.
+ *
+ * **The matrix is a reader.** Abilities per role come from `config/pos.php`, which is
+ * configuration rather than data, and the contract exposes no write for it. Presenting it as a
+ * grid of checkboxes that cannot be saved would be worse than presenting it as what it is — so it
+ * is a table, grouped by ability family, with the reason stated once.
+ */
+
+import { Head, router, useForm } from '@inertiajs/react';
+import { cn } from '@shared/ui';
+import { Fragment, useMemo, useState, type JSX } from 'react';
+
+import { DataTable, type Column } from '../../components/data-table/DataTable';
+import {
+    ColorIndexField,
+    SaveBar,
+    SelectField,
+    TextField,
+    ToggleField,
+    useDirtyGuard,
+} from '../../components/form';
+import { FormSection } from '../../components/form/fields';
+import { AppLayout } from '../../components/layout/AppLayout';
+import { ConfirmAction } from '../../components/ui/ConfirmAction';
+import { Badge, Card, CardBody, CardHeader, EmptyState, Notice } from '../../components/ui/primitives';
+import { useT } from '../../i18n';
+import { routes } from '../../lib/routes';
+
+import {
+    ROLE_ORDER,
+    abilityGroups,
+    swatchFor,
+    toForm,
+    type EmployeeRow,
+    type EmployeesIndexProps,
+} from './types';
+
+export default function EmployeesIndex({ employees, roles, abilities }: EmployeesIndexProps): JSX.Element {
+    const t = useT();
+    const [search, setSearch] = useState('');
+    const [selectedId, setSelectedId] = useState<number | null>(employees[0]?.id ?? null);
+
+    const selected = employees.find((employee) => employee.id === selectedId) ?? null;
+    const roleLabel = useMemo(() => new Map(roles.map((role) => [role.value, role.label])), [roles]);
+
+    const columns: Column<EmployeeRow>[] = [
+        {
+            id: 'name',
+            header: t('employee.title'),
+            locked: true,
+            cell: (row) => (
+                <span className="flex items-center gap-2">
+                    <span
+                        aria-hidden
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: swatchFor(row.color) }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setSelectedId(row.id)}
+                        aria-pressed={row.id === selectedId}
+                        className="text-start font-medium text-brand-700 hover:underline"
+                    >
+                        {row.name}
+                    </button>
+                </span>
+            ),
+            sortValue: (row) => row.name,
+            searchValue: (row) => `${row.name} ${row.job_title ?? ''}`,
+            exportValue: (row) => row.name,
+        },
+        {
+            id: 'job_title',
+            header: t('employee.jobTitle'),
+            cell: (row) => row.job_title ?? '—',
+            sortValue: (row) => row.job_title,
+            exportValue: (row) => row.job_title,
+        },
+        {
+            id: 'default_role',
+            header: t('employee.role'),
+            cell: (row) => <Badge tone="brand">{roleLabel.get(row.default_role) ?? row.default_role}</Badge>,
+            sortValue: (row) => ROLE_ORDER[row.default_role] ?? 99,
+            searchValue: (row) => roleLabel.get(row.default_role) ?? row.default_role,
+            exportValue: (row) => row.default_role,
+        },
+        {
+            id: 'has_pin',
+            header: t('employee.pin'),
+            align: 'center',
+            cell: (row) => (
+                <Badge tone={row.has_pin ? 'ok' : 'warn'}>
+                    {row.has_pin ? t('employee.pinSet') : t('employee.pinNone')}
+                </Badge>
+            ),
+            sortValue: (row) => row.has_pin,
+            exportValue: (row) => (row.has_pin ? '1' : '0'),
+        },
+        {
+            id: 'has_badge',
+            header: t('employee.badge'),
+            align: 'center',
+            cell: (row) => (
+                <Badge tone={row.has_badge ? 'ok' : 'neutral'}>
+                    {row.has_badge ? t('employee.badgeSet') : t('employee.badgeNone')}
+                </Badge>
+            ),
+            sortValue: (row) => row.has_badge,
+            exportValue: (row) => (row.has_badge ? '1' : '0'),
+        },
+        {
+            id: 'user_id',
+            header: t('employee.linkedUser'),
+            align: 'end',
+            defaultHidden: true,
+            cell: (row) => (row.user_id === null ? '—' : `#${row.user_id}`),
+            sortValue: (row) => row.user_id,
+            exportValue: (row) => row.user_id,
+        },
+        {
+            id: 'active',
+            header: t('state.active'),
+            align: 'center',
+            cell: (row) => (
+                <Badge tone={row.active ? 'ok' : 'neutral'}>
+                    {row.active ? t('state.active') : t('state.inactive')}
+                </Badge>
+            ),
+            sortValue: (row) => row.active,
+            exportValue: (row) => (row.active ? '1' : '0'),
+        },
+    ];
+
+    return (
+        <AppLayout title={t('employee.title')} description={t('employee.secretHint')}>
+            <Head title={t('employee.title')} />
+
+            <div className="space-y-6">
+                <DataTable
+                    columns={columns}
+                    rows={employees}
+                    getRowId={(row) => row.id}
+                    storageKey="employees"
+                    caption={t('employee.title')}
+                    search={{ value: search, onChange: setSearch }}
+                    exportFilename="employes"
+                    perPage={50}
+                    emptyTitle={t('state.empty')}
+                    emptyHint={t('employee.createMissing')}
+                    rowClassName={(row) => (row.id === selectedId ? 'bg-brand-50' : undefined)}
+                />
+
+                {selected === null ? (
+                    <Card>
+                        <EmptyState title={t('state.empty')} hint={t('employee.createMissing')} />
+                    </Card>
+                ) : (
+                    <EmployeeEditor key={selected.id} employee={selected} roles={roles} />
+                )}
+
+                <PermissionMatrix abilities={abilities} roles={roles} />
+
+                <Notice tone="info" title={t('employee.createMissingTitle')}>
+                    {t('employee.createMissing')}
+                </Notice>
+            </div>
+        </AppLayout>
+    );
+}
+
+// ───────────────────────────────────────────────────────────── editor
+
+type EmployeeEditForm = ReturnType<typeof toForm> & { pin: string; badge: string };
+
+function EmployeeEditor({
+    employee,
+    roles,
+}: {
+    employee: EmployeeRow;
+    roles: EmployeesIndexProps['roles'];
+}): JSX.Element {
+    const t = useT();
+
+    const form = useForm<EmployeeEditForm>({ ...toForm(employee), pin: '', badge: '' });
+
+    useDirtyGuard(form.isDirty, t('confirm.leave'));
+
+    /** Empty secret fields must not be sent: `''` would hash to a valid, guessable PIN. */
+    const submit = (): void => {
+        form.transform((data) => {
+            const payload: Record<string, unknown> = {
+                name: data.name,
+                job_title: data.job_title === '' ? null : data.job_title,
+                default_role: data.default_role,
+                color: data.color,
+                active: data.active,
+            };
+            if (data.pin.trim() !== '') payload.pin = data.pin.trim();
+            if (data.badge.trim() !== '') payload.badge = data.badge.trim();
+            return payload;
+        });
+        form.patch(routes.employees.update(employee.id), {
+            preserveScroll: true,
+            onSuccess: () => form.setData((current) => ({ ...current, pin: '', badge: '' })),
+        });
+    };
+
+    return (
+        <Card>
+            <CardHeader
+                title={employee.name}
+                description={employee.job_title ?? undefined}
+                actions={
+                    <>
+                        <Badge tone={employee.has_pin ? 'ok' : 'warn'}>
+                            {employee.has_pin ? t('employee.pinSet') : t('employee.pinNone')}
+                        </Badge>
+                        <Badge tone={employee.active ? 'ok' : 'neutral'}>
+                            {employee.active ? t('state.active') : t('state.inactive')}
+                        </Badge>
+                    </>
+                }
+            />
+            <CardBody>
+                <FormSection title={t('config.group.general')}>
+                    <TextField
+                        label="Nom"
+                        required
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                        maxLength={120}
+                    />
+                    <TextField
+                        label={t('employee.jobTitle')}
+                        value={form.data.job_title}
+                        error={form.errors.job_title}
+                        onChange={(value) => form.setData('job_title', value)}
+                        maxLength={80}
+                    />
+                    <SelectField
+                        label={t('employee.role')}
+                        value={form.data.default_role}
+                        error={form.errors.default_role}
+                        onChange={(value) => form.setData('default_role', value)}
+                        options={roles}
+                        hint={t('employee.roleHint')}
+                    />
+                    <ToggleField
+                        label={t('state.active')}
+                        checked={form.data.active}
+                        onChange={(checked) => form.setData('active', checked)}
+                        description={t('employee.activeHint')}
+                    />
+                    <ColorIndexField
+                        label={t('employee.colour')}
+                        value={form.data.color}
+                        error={form.errors.color}
+                        onChange={(value) => form.setData('color', value)}
+                    />
+                </FormSection>
+
+                <FormSection title={t('employee.secrets')} description={t('employee.secretHint')}>
+                    <TextField
+                        label={t('employee.pin')}
+                        type="password"
+                        autoComplete="new-password"
+                        value={form.data.pin}
+                        error={form.errors.pin}
+                        onChange={(value) => form.setData('pin', value)}
+                        maxLength={12}
+                        hint={employee.has_pin ? t('employee.pinReplaceHint') : t('employee.pinNewHint')}
+                    />
+                    <TextField
+                        label={t('employee.badge')}
+                        type="password"
+                        autoComplete="off"
+                        value={form.data.badge}
+                        error={form.errors.badge}
+                        onChange={(value) => form.setData('badge', value)}
+                        maxLength={64}
+                        hint={employee.has_badge ? t('employee.badgeReplaceHint') : t('employee.badgeNewHint')}
+                    />
+                    <div className="flex flex-wrap items-end gap-2 md:col-span-2">
+                        <ConfirmAction
+                            label={t('employee.clearPin')}
+                            title={t('employee.clearPin')}
+                            message={t('employee.clearPinConfirm', { name: employee.name })}
+                            disabled={!employee.has_pin}
+                            onConfirm={() =>
+                                router.patch(
+                                    routes.employees.update(employee.id),
+                                    { pin: null },
+                                    { preserveScroll: true },
+                                )
+                            }
+                        />
+                        <ConfirmAction
+                            label={t('employee.clearBadge')}
+                            title={t('employee.clearBadge')}
+                            message={t('employee.clearBadgeConfirm', { name: employee.name })}
+                            disabled={!employee.has_badge}
+                            onConfirm={() =>
+                                router.patch(
+                                    routes.employees.update(employee.id),
+                                    { badge: null },
+                                    { preserveScroll: true },
+                                )
+                            }
+                        />
+                    </div>
+                </FormSection>
+
+                <SaveBar
+                    dirty={form.isDirty}
+                    processing={form.processing}
+                    errorCount={Object.keys(form.errors).length}
+                    onSave={submit}
+                    onCancel={() => form.reset()}
+                />
+            </CardBody>
+        </Card>
+    );
+}
+
+// ───────────────────────────────────────────────────────────── matrix
+
+function PermissionMatrix({
+    abilities,
+    roles,
+}: {
+    abilities: EmployeesIndexProps['abilities'];
+    roles: EmployeesIndexProps['roles'];
+}): JSX.Element {
+    const t = useT();
+
+    const columns = useMemo(
+        () =>
+            [...roles].sort(
+                (a, b) => (ROLE_ORDER[a.value] ?? 99) - (ROLE_ORDER[b.value] ?? 99),
+            ),
+        [roles],
+    );
+
+    const groups = useMemo(() => abilityGroups(abilities), [abilities]);
+
+    return (
+        <Card>
+            <CardHeader title={t('employee.matrix')} description={t('employee.matrixHint')} />
+            <CardBody className="p-0">
+                {groups.length === 0 ? (
+                    <EmptyState title={t('state.empty')} />
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-sm">
+                            <caption className="sr-only">{t('employee.matrix')}</caption>
+                            <thead className="bg-slate-50">
+                                <tr>
+                                    <th scope="col" className="px-4 py-2 text-start text-xs uppercase text-slate-600">
+                                        {t('employee.ability')}
+                                    </th>
+                                    {columns.map((role) => (
+                                        <th
+                                            key={role.value}
+                                            scope="col"
+                                            className="px-4 py-2 text-center text-xs uppercase text-slate-600"
+                                        >
+                                            {role.label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {groups.map(({ group, items }) => (
+                                    <Fragment key={group}>
+                                        <tr className="bg-slate-100/60">
+                                            <th
+                                                scope="colgroup"
+                                                colSpan={columns.length + 1}
+                                                className="px-4 py-1.5 text-start text-xs font-semibold uppercase tracking-wide text-slate-600"
+                                            >
+                                                {group}
+                                            </th>
+                                        </tr>
+                                        {items.map((ability) => (
+                                            <tr key={ability}>
+                                                <th
+                                                    scope="row"
+                                                    className="px-4 py-1.5 text-start font-mono text-xs font-normal text-slate-700"
+                                                >
+                                                    {ability}
+                                                </th>
+                                                {columns.map((role) => {
+                                                    const granted = (abilities[role.value] ?? []).includes(ability);
+                                                    return (
+                                                        <td key={role.value} className="px-4 py-1.5 text-center">
+                                                            <span
+                                                                aria-hidden
+                                                                className={cn(
+                                                                    'text-base',
+                                                                    granted ? 'text-ok-fg' : 'text-slate-300',
+                                                                )}
+                                                            >
+                                                                {granted ? '✓' : '·'}
+                                                            </span>
+                                                            <span className="sr-only">
+                                                                {granted ? t('state.yes') : t('state.no')}
+                                                            </span>
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </Fragment>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </CardBody>
+        </Card>
+    );
+}

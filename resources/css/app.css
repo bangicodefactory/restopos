@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Tailwind 3 directives, not the v4 `@import 'tailwindcss'` form: package.json pins
+ * tailwindcss ^3.4 and the theme lives in tailwind.config.ts (see that file for the token
+ * rationale — touch targets, contrast, the dark kitchen palette).
+ *
+ * Design tokens as CSS variables.
+ *
+ * The brand ramp lives here rather than in the Tailwind config so the self-order app can re-theme
+ * at runtime from the venue's branding
+ * (`document.documentElement.style.setProperty('--rp-brand-600', '220 38 38')`) without a rebuild.
+ * Values are space-separated RGB channels so Tailwind's `<alpha-value>` works.
+ */
+@layer base {
+    :root {
+        --rp-brand-50: 239 246 255;
+        --rp-brand-100: 219 234 254;
+        --rp-brand-200: 191 219 254;
+        --rp-brand-300: 147 197 253;
+        --rp-brand-400: 96 165 250;
+        --rp-brand-500: 59 130 246;
+        --rp-brand-600: 37 99 235;
+        --rp-brand-700: 29 78 216;
+        --rp-brand-800: 30 64 175;
+        --rp-brand-900: 30 58 138;
+    }
+
+    html {
+        /* A till is used with a finger; never let a double-tap zoom the UI. */
+        touch-action: manipulation;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+    }
+
+    body {
+        /* Font smoothing matters at the sizes a POS uses on a low-DPI tablet. */
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Never surface a native tap highlight — we draw our own press states. */
+    * {
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+        font: inherit;
+    }
+
+    :focus-visible {
+        outline: none;
+    }
+
+    /* Respect the OS setting; a kitchen screen animating in someone's peripheral vision is noise. */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+@layer components {
+    /* The scroll container used by every list on a touch screen. */
+    .pos-scroll {
+        @apply overflow-auto overscroll-contain;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+
+    /* Larger scrollbars for the `iface_big_scrollbars` config flag. */
+    .pos-scroll-big::-webkit-scrollbar {
+        width: 1rem;
+        height: 1rem;
+    }
+
+    .pos-scroll-big::-webkit-scrollbar-thumb {
+        @apply rounded-full bg-slate-400;
+    }
+
+    /* Safe-area padding for a fullscreen PWA on a notched device. */
+    .pos-safe-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+}
+
+/**
+ * Print rules for the browser-print receipt fallback. The transport renders into an iframe with its
+ * own stylesheet, but a manager printing a report from the back-office lands here.
+ */
+@media print {
+    body {
+        background: #fff;
+    }
+
+    .no-print {
+        display: none !important;
+    }
+
+    @page {
+        margin: 12mm;
+    }
+}

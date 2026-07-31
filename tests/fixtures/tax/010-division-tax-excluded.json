@@ -1,0 +1,76 @@
+{
+  "name": "010-division-tax-excluded",
+  "description": "A division ('percentage of price, tax included') tax used excluded: 5% of the gross, so amount = base/(1-0.05) - base.",
+  "specRefs": [
+    "7.5.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 6,
+      "name": "Div 5%",
+      "amountType": "division",
+      "amount": "5",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 5,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "95.00",
+      "discount": "0",
+      "taxIds": [
+        6
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "95.0000",
+        "priceSubtotal": "95.00",
+        "priceTotal": "100.00",
+        "taxes": [
+          {
+            "taxId": 6,
+            "base": "95.00",
+            "amount": "5.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "95.00",
+      "totalTax": "5.00",
+      "totalIncluded": "100.00",
+      "roundedTotal": "100.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 5,
+          "base": "95.00",
+          "amount": "5.00"
+        }
+      ]
+    }
+  }
+}

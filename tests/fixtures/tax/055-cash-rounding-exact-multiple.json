@@ -1,0 +1,80 @@
+{
+  "name": "055-cash-rounding-exact-multiple",
+  "description": "The total is already a multiple of the cash-rounding step: delta must be exactly 0.00.",
+  "specRefs": [
+    "9.1"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 15,
+      "name": "VAT 0%",
+      "amountType": "percent",
+      "amount": "0",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 6,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": {
+    "rounding": "0.05",
+    "method": "half_up",
+    "strategy": "add_invoice_line"
+  },
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "10.00",
+      "discount": "0",
+      "taxIds": [
+        15
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "10.0000",
+        "priceSubtotal": "10.00",
+        "priceTotal": "10.00",
+        "taxes": [
+          {
+            "taxId": 15,
+            "base": "10.00",
+            "amount": "0.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "10.00",
+      "totalTax": "0.00",
+      "totalIncluded": "10.00",
+      "roundedTotal": "10.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 6,
+          "base": "10.00",
+          "amount": "0.00"
+        }
+      ]
+    }
+  }
+}

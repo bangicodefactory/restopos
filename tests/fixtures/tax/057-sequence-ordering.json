@@ -1,0 +1,101 @@
+{
+  "name": "057-sequence-ordering",
+  "description": "Evaluation order follows (sequence, id), not the order the ids appear on the line.",
+  "specRefs": [
+    "6.2",
+    "6.5"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": true,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 30,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 4,
+      "name": "Eco 2%",
+      "amountType": "percent",
+      "amount": "2",
+      "priceInclude": false,
+      "includeBaseAmount": true,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 3,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        1,
+        4
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "123.42",
+        "taxes": [
+          {
+            "taxId": 4,
+            "base": "100.00",
+            "amount": "2.00"
+          },
+          {
+            "taxId": 1,
+            "base": "102.00",
+            "amount": "21.42"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "23.42",
+      "totalIncluded": "123.42",
+      "roundedTotal": "123.42",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "102.00",
+          "amount": "21.42"
+        },
+        {
+          "taxGroupId": 3,
+          "base": "100.00",
+          "amount": "2.00"
+        }
+      ]
+    }
+  }
+}

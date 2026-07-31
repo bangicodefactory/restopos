@@ -1,0 +1,76 @@
+{
+  "name": "023-three-decimal-currency",
+  "description": "BHD: 3 decimal places, rounding 0.001, 10% tax.",
+  "specRefs": [
+    "3.3"
+  ],
+  "currency": {
+    "code": "BHD",
+    "decimalPlaces": 3,
+    "rounding": "0.001",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 9,
+      "name": "VAT 10%",
+      "amountType": "percent",
+      "amount": "10",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 7,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "3",
+      "priceUnit": "1.2345",
+      "discount": "0",
+      "taxIds": [
+        9
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "1.2345",
+        "priceSubtotal": "3.704",
+        "priceTotal": "4.074",
+        "taxes": [
+          {
+            "taxId": 9,
+            "base": "3.704",
+            "amount": "0.370"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "3.704",
+      "totalTax": "0.370",
+      "totalIncluded": "4.074",
+      "roundedTotal": "4.074",
+      "roundingDelta": "0.000",
+      "taxGroups": [
+        {
+          "taxGroupId": 7,
+          "base": "3.704",
+          "amount": "0.370"
+        }
+      ]
+    }
+  }
+}

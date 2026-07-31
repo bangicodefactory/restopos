@@ -1,0 +1,22 @@
+{
+    "name": "RestoPOS Menu",
+    "short_name": "Menu",
+    "description": "Browse the menu and order from your table.",
+    "id": "/menu/",
+    "start_url": "/menu/",
+    "scope": "/menu/",
+    "display": "standalone",
+    "display_override": ["standalone", "minimal-ui"],
+    "orientation": "portrait",
+    "background_color": "#ffffff",
+    "theme_color": "#0f172a",
+    "lang": "en",
+    "dir": "ltr",
+    "categories": ["food", "shopping"],
+    "prefer_related_applications": false,
+    "icons": [
+        { "src": "/icons/selforder-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/selforder-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/selforder-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ]
+}

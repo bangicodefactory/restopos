@@ -1,0 +1,86 @@
+{
+  "name": "082-combo-three-decimal-currency",
+  "description": "Combo distribution at 0.001 precision.",
+  "specRefs": [
+    "11.2.3"
+  ],
+  "currency": {
+    "code": "BHD",
+    "decimalPlaces": 3,
+    "rounding": "0.001",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": {
+    "parentPrice": "10.000",
+    "precision": "0.001",
+    "components": [
+      {
+        "id": "C1",
+        "comboBasePrice": "1.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C2",
+        "comboBasePrice": "1.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C3",
+        "comboBasePrice": "1.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      }
+    ]
+  },
+  "lines": [],
+  "expected": {
+    "combo": [
+      {
+        "id": "C1",
+        "priceUnit": "3.3330"
+      },
+      {
+        "id": "C2",
+        "priceUnit": "3.3330"
+      },
+      {
+        "id": "C3",
+        "priceUnit": "3.3340"
+      }
+    ],
+    "lines": [],
+    "totals": {
+      "totalExcluded": "0.000",
+      "totalTax": "0.000",
+      "totalIncluded": "0.000",
+      "roundedTotal": "0.000",
+      "roundingDelta": "0.000",
+      "taxGroups": []
+    }
+  }
+}

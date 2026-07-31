@@ -1,0 +1,100 @@
+{
+  "name": "056-division-plus-percent-included",
+  "description": "A price-included division tax followed by a price-included percent: the division term is unwound last per recomputeBase.",
+  "specRefs": [
+    "7.4.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 7,
+      "name": "Div 5% incl",
+      "amountType": "division",
+      "amount": "5",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 5,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        7,
+        2
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "78.51",
+        "priceTotal": "100.00",
+        "taxes": [
+          {
+            "taxId": 7,
+            "base": "78.51",
+            "amount": "4.13"
+          },
+          {
+            "taxId": 2,
+            "base": "78.51",
+            "amount": "17.36"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "78.51",
+      "totalTax": "21.49",
+      "totalIncluded": "100.00",
+      "roundedTotal": "100.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "78.51",
+          "amount": "17.36"
+        },
+        {
+          "taxGroupId": 5,
+          "base": "78.51",
+          "amount": "4.13"
+        }
+      ]
+    }
+  }
+}

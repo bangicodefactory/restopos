@@ -1,0 +1,76 @@
+{
+  "name": "015-discount-33-33",
+  "description": "A 33.33% discount: the factor 0.666700000000 is exact at MAX_SCALE and both engines must produce the identical truncation.",
+  "specRefs": [
+    "7.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "3",
+      "priceUnit": "13.37",
+      "discount": "33.33",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "13.3700",
+        "priceSubtotal": "26.74",
+        "priceTotal": "32.36",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "26.74",
+            "amount": "5.62"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "26.74",
+      "totalTax": "5.62",
+      "totalIncluded": "32.36",
+      "roundedTotal": "32.36",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "26.74",
+          "amount": "5.62"
+        }
+      ]
+    }
+  }
+}

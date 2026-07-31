@@ -1,0 +1,75 @@
+{
+  "name": "080-combo-quantity-two",
+  "description": "A component picked twice: the residue is divided by its quantity at PRICE_SCALE.",
+  "specRefs": [
+    "11.2.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": {
+    "parentPrice": "10.00",
+    "precision": "0.01",
+    "components": [
+      {
+        "id": "C1",
+        "comboBasePrice": "3.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C2",
+        "comboBasePrice": "3.00",
+        "quantity": "2",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      }
+    ]
+  },
+  "lines": [],
+  "expected": {
+    "combo": [
+      {
+        "id": "C1",
+        "priceUnit": "3.3300"
+      },
+      {
+        "id": "C2",
+        "priceUnit": "3.3350"
+      }
+    ],
+    "lines": [],
+    "totals": {
+      "totalExcluded": "0.00",
+      "totalTax": "0.00",
+      "totalIncluded": "0.00",
+      "roundedTotal": "0.00",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}

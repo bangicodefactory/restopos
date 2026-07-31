@@ -1,0 +1,100 @@
+{
+  "name": "039-two-included-percents-additive",
+  "description": "THE semantic pin: two price-included percents with no include_base_amount are ADDITIVE (base = magnitude / 1.23), not multiplicative (magnitude / 1.02 / 1.21).",
+  "specRefs": [
+    "7.4.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 2,
+      "name": "VAT 21% incl",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 12,
+      "name": "Eco 2% incl",
+      "amountType": "percent",
+      "amount": "2",
+      "priceInclude": true,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 3,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "123.00",
+      "discount": "0",
+      "taxIds": [
+        2,
+        12
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "123.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "123.00",
+        "taxes": [
+          {
+            "taxId": 2,
+            "base": "100.00",
+            "amount": "21.00"
+          },
+          {
+            "taxId": 12,
+            "base": "100.00",
+            "amount": "2.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "23.00",
+      "totalIncluded": "123.00",
+      "roundedTotal": "123.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "100.00",
+          "amount": "21.00"
+        },
+        {
+          "taxGroupId": 3,
+          "base": "100.00",
+          "amount": "2.00"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "name": "049-fixed-tax-negative-quantity",
+  "description": "A fixed per-unit tax on a returned line uses |quantity| and is then signed.",
+  "specRefs": [
+    "7.3.4",
+    "7.5.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 5,
+      "name": "Eco fee",
+      "amountType": "fixed",
+      "amount": "0.35",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 4,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "-3",
+      "priceUnit": "9.90",
+      "discount": "0",
+      "taxIds": [
+        5
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "9.9000",
+        "priceSubtotal": "-29.70",
+        "priceTotal": "-30.75",
+        "taxes": [
+          {
+            "taxId": 5,
+            "base": "-29.70",
+            "amount": "-1.05"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "-29.70",
+      "totalTax": "-1.05",
+      "totalIncluded": "-30.75",
+      "roundedTotal": "-30.75",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 4,
+          "base": "-29.70",
+          "amount": "-1.05"
+        }
+      ]
+    }
+  }
+}

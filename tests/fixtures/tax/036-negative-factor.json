@@ -1,0 +1,100 @@
+{
+  "name": "036-negative-factor",
+  "description": "A withholding-style tax: the amount is computed positively then negated; the reported base is unchanged.",
+  "specRefs": [
+    "7.5.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 11,
+      "name": "Withholding 15%",
+      "amountType": "percent",
+      "amount": "15",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": true,
+      "sequence": 20,
+      "taxGroupId": 10,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        1,
+        11
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "106.00",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "100.00",
+            "amount": "21.00"
+          },
+          {
+            "taxId": 11,
+            "base": "100.00",
+            "amount": "-15.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "6.00",
+      "totalIncluded": "106.00",
+      "roundedTotal": "106.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "100.00",
+          "amount": "21.00"
+        },
+        {
+          "taxGroupId": 10,
+          "base": "100.00",
+          "amount": "-15.00"
+        }
+      ]
+    }
+  }
+}

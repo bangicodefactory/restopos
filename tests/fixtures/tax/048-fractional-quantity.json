@@ -1,0 +1,76 @@
+{
+  "name": "048-fractional-quantity",
+  "description": "A weighed item: 2.500 kg at 3.333 with 6%.",
+  "specRefs": [
+    "7.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2.500",
+      "priceUnit": "3.3330",
+      "discount": "0",
+      "taxIds": [
+        3
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "3.3330",
+        "priceSubtotal": "8.33",
+        "priceTotal": "8.83",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "8.33",
+            "amount": "0.50"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "8.33",
+      "totalTax": "0.50",
+      "totalIncluded": "8.83",
+      "roundedTotal": "8.83",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 2,
+          "base": "8.33",
+          "amount": "0.50"
+        }
+      ]
+    }
+  }
+}

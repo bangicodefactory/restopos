@@ -1,0 +1,243 @@
+import type { OrderCommand, RecordCommand } from '@domain/sync/wire';
+import type { CourseRow, OrderLineRow, OrderRow, PaymentRow, Uuid } from '@domain/types';
+import { asUuid } from '@domain/types';
+import { withQuotaRescue, type PosDb } from '@shared/db';
+import { createFlusher } from '@shared/store';
+import type { OutboxSyncer } from '@shared/sync';
+
+import {
+    coursesOf,
+    linesOf,
+    paymentsOf,
+    useOrderStore,
+    type OrderSlice,
+} from '../state/order-store';
+import { orderTotals } from '../domain/totals';
+
+/**
+ * The bridge between the in-memory order store and durable storage (spec 03 §3.4.6, §3.6.4).
+ *
+ * `persist()` marks an order dirty and schedules a 250 ms debounced IndexedDB write. Two overrides
+ * are mandatory and both come from Odoo's incident history: flush immediately on payment
+ * validation, and flush immediately on `pagehide` / `visibilitychange → hidden`. A crash between
+ * "paid" and "flushed" loses money.
+ *
+ * `enqueue()` turns an order into the ORM-style command the sync endpoint takes. Commands, not
+ * documents: appending a line to a 60-line restaurant tab is a 400-byte push rather than a 40 kB
+ * one, and the outbox coalesces repeated pushes for the same order into one pending entry.
+ */
+
+export type Persistence = {
+    persist: (orderUuid: string) => void;
+    enqueue: (orderUuid: string) => void;
+    flushNow: () => Promise<void>;
+    attachLifecycle: () => () => void;
+};
+
+function lineCommand(line: OrderLineRow): RecordCommand<OrderLineRow> {
+    return {
+        op: line.id === null ? 'create' : 'update',
+        uuid: line.uuid,
+        product_variant_id: line.product_variant_id,
+        product_id: line.product_id,
+        pos_category_id: line.pos_category_id,
+        full_product_name: line.full_product_name,
+        uom_id: line.uom_id,
+        quantity: line.quantity,
+        price_unit: line.price_unit,
+        price_extra: line.price_extra,
+        price_type: line.price_type,
+        discount_percent: line.discount_percent,
+        attribute_line_value_ids: line.attribute_line_value_ids,
+        custom_attribute_values: line.custom_attribute_values,
+        customer_note: line.customer_note,
+        internal_note: line.internal_note,
+        combo_parent_uuid: line.combo_parent_uuid,
+        combo_id: line.combo_id,
+        combo_item_id: line.combo_item_id,
+        course_uuid: line.course_uuid,
+        refunded_line_uuid: line.refunded_line_uuid,
+        refunded_line_id: line.refunded_line_id,
+        skip_preparation: line.skip_preparation,
+    };
+}
+
+function paymentCommand(payment: PaymentRow): RecordCommand<PaymentRow> {
+    return {
+        op: payment.id === null ? 'create' : 'update',
+        uuid: payment.uuid,
+        payment_method_id: payment.payment_method_id,
+        amount: payment.amount,
+        is_change: payment.is_change,
+        is_refund: payment.is_refund,
+        label: payment.label,
+        paid_at: payment.paid_at,
+        payment_status: payment.payment_status,
+        card_brand: payment.card_brand,
+        card_last4: payment.card_last4,
+        auth_code: payment.auth_code,
+        transaction_reference: payment.transaction_reference,
+    };
+}
+
+function courseCommand(course: CourseRow): RecordCommand<CourseRow> {
+    return {
+        op: course.id === null ? 'create' : 'update',
+        uuid: course.uuid,
+        index: course.index,
+        name: course.name,
+        fired: course.fired,
+        fired_at: course.fired_at,
+    };
+}
+
+/** Build the push command for one order. Exported for the sync tests. */
+export function buildOrderCommand(state: OrderSlice, orderUuid: string): OrderCommand | null {
+    const order = state.orders[orderUuid];
+    if (!order) return null;
+
+    const totals = orderTotals(orderUuid, state);
+    const lines = linesOf(state, orderUuid).map(lineCommand);
+
+    for (const uuid of order.baseline?.deletedLineUuids ?? []) {
+        lines.push({ op: 'delete', uuid: asUuid(uuid) });
+    }
+
+    return {
+        uuid: order.uuid,
+        op: order.state === 'cancelled' ? 'cancel' : 'upsert',
+        base_rev: order.baseline?.serverRev ?? null,
+        order: {
+            pos_session_id: order.pos_session_id,
+            state: order.state,
+            source: order.source,
+            access_token: order.access_token,
+            receipt_number: order.receipt_number,
+            tracking_number: order.tracking_number,
+            ticket_code: order.ticket_code,
+            customer_id: order.customer_id,
+            employee_id: order.employee_id,
+            pricelist_id: order.pricelist_id,
+            fiscal_position_id: order.fiscal_position_id,
+            pos_preset_id: order.pos_preset_id,
+            preset_time: order.preset_time,
+            restaurant_table_id: order.restaurant_table_id,
+            guest_count: order.guest_count,
+            floating_order_name: order.floating_order_name,
+            general_customer_note: order.general_customer_note,
+            internal_note: order.internal_note,
+            to_invoice: order.to_invoice,
+            is_refund: order.is_refund,
+            refunded_order_uuid: order.refunded_order_uuid,
+            customer_email: order.customer_email,
+            customer_phone: order.customer_phone,
+            ordered_at: order.ordered_at,
+            client_created_at: order.client_created_at,
+            cancel_reason: order.cancel_reason,
+            is_tipped: order.is_tipped,
+            tip_amount: order.tip_amount,
+            // Proposals only — the server recomputes and never trusts these (spec 05 §4).
+            amount_total_client: totals.roundedTotal,
+            amount_tax_client: totals.tax,
+        },
+        lines,
+        payments: paymentsOf(state, orderUuid).map(paymentCommand),
+        courses: coursesOf(state, orderUuid).map(courseCommand),
+        approvals: [],
+    };
+}
+
+async function writeOrder(db: PosDb, state: OrderSlice, orderUuid: string): Promise<void> {
+    const order = state.orders[orderUuid];
+
+    if (!order) {
+        // The order was discarded locally: remove it and its graph.
+        await db.transaction('rw', [db.orders, db.lines, db.payments, db.courses], async () => {
+            await db.orders.delete(orderUuid);
+            await db.lines.where('order_uuid').equals(orderUuid).delete();
+            await db.payments.where('order_uuid').equals(orderUuid).delete();
+            await db.courses.where('order_uuid').equals(orderUuid).delete();
+        });
+        return;
+    }
+
+    const lines = linesOf(state, orderUuid);
+    const payments = paymentsOf(state, orderUuid);
+    const courses = coursesOf(state, orderUuid);
+    const keptLineUuids = new Set<string>(lines.map((line) => line.uuid as string));
+
+    await db.transaction('rw', [db.orders, db.lines, db.payments, db.courses], async () => {
+        await db.orders.put(order as OrderRow);
+        const stored = await db.lines.where('order_uuid').equals(orderUuid).primaryKeys();
+        const orphans = (stored as string[]).filter((uuid) => !keptLineUuids.has(uuid));
+        if (orphans.length > 0) await db.lines.bulkDelete(orphans);
+        if (lines.length > 0) await db.lines.bulkPut(lines);
+        if (payments.length > 0) await db.payments.bulkPut(payments);
+        if (courses.length > 0) await db.courses.bulkPut(courses);
+    });
+}
+
+export function createPersistence(db: PosDb, syncer: OutboxSyncer): Persistence {
+    const dirty = new Set<string>();
+
+    const flush = async (): Promise<void> => {
+        const batch = [...dirty];
+        dirty.clear();
+        for (const orderUuid of batch) {
+            const state = useOrderStore.getState();
+            try {
+                await withQuotaRescue(db, () => writeOrder(db, state, orderUuid));
+            } catch {
+                // Re-arm: a failed write must not silently drop the order from the dirty set.
+                dirty.add(orderUuid);
+            }
+        }
+    };
+
+    const flusher = createFlusher(flush, 250);
+
+    return {
+        persist: (orderUuid) => {
+            dirty.add(orderUuid);
+            flusher.schedule();
+        },
+        enqueue: (orderUuid) => {
+            const command = buildOrderCommand(useOrderStore.getState(), orderUuid);
+            if (!command) return;
+            void syncer.enqueueOrder(command);
+        },
+        flushNow: async () => {
+            flusher.schedule();
+            await flusher.flushNow();
+        },
+        attachLifecycle: flusher.attachLifecycle,
+    };
+}
+
+/** Read the dynamic records back at boot (draft orders + anything not yet acknowledged). */
+export async function loadOrdersFromDb(db: PosDb): Promise<{
+    orders: OrderRow[];
+    lines: OrderLineRow[];
+    payments: PaymentRow[];
+    courses: CourseRow[];
+}> {
+    const all = await db.orders.toArray();
+    const keep = all.filter(
+        (order) => order.state === 'draft' || order.syncState !== 'synced' || order.state === 'paid',
+    );
+    const uuids = keep.map((order) => order.uuid as string);
+    if (uuids.length === 0) return { orders: [], lines: [], payments: [], courses: [] };
+
+    const [lines, payments, courses] = await Promise.all([
+        db.lines.where('order_uuid').anyOf(uuids).toArray(),
+        db.payments.where('order_uuid').anyOf(uuids).toArray(),
+        db.courses.where('order_uuid').anyOf(uuids).toArray(),
+    ]);
+
+    return { orders: keep, lines, payments, courses };
+}
+
+/** Uuid helper for callers that hold a plain string. */
+export function toUuid(value: string): Uuid {
+    return asUuid(value);
+}

@@ -1,0 +1,80 @@
+{
+  "name": "054-cash-rounding-refund",
+  "description": "Cash rounding 'up' on a refund: away from zero means more negative.",
+  "specRefs": [
+    "9.1"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "-1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": {
+    "rounding": "0.05",
+    "method": "up",
+    "strategy": "add_invoice_line"
+  },
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "10.18",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "10.1800",
+        "priceSubtotal": "-10.18",
+        "priceTotal": "-12.32",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "-10.18",
+            "amount": "-2.14"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "-10.18",
+      "totalTax": "-2.14",
+      "totalIncluded": "-12.32",
+      "roundedTotal": "-12.35",
+      "roundingDelta": "-0.03",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "-10.18",
+          "amount": "-2.14"
+        }
+      ]
+    }
+  }
+}

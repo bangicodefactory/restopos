@@ -1,0 +1,95 @@
+{
+  "name": "045-tax-group-summary-shared-group",
+  "description": "Two taxes sharing one tax group aggregate into a single receipt row.",
+  "specRefs": [
+    "8.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 14,
+      "name": "Levy 3%",
+      "amountType": "percent",
+      "amount": "3",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        1,
+        14
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "124.00",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "100.00",
+            "amount": "21.00"
+          },
+          {
+            "taxId": 14,
+            "base": "100.00",
+            "amount": "3.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "24.00",
+      "totalIncluded": "124.00",
+      "roundedTotal": "124.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "200.00",
+          "amount": "24.00"
+        }
+      ]
+    }
+  }
+}

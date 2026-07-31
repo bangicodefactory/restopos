@@ -1,0 +1,2254 @@
+{
+  "name": "052-hundred-lines-global",
+  "description": "The same 100-line tab under round_globally: the tax is rounded once, 23.42, a 0.42 divergence from 051. This is the drift the two modes exist to describe.",
+  "specRefs": [
+    "8.3"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_globally",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L001",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L002",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L003",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L004",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L005",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L006",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L007",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L008",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L009",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L010",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L011",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L012",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L013",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L014",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L015",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L016",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L017",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L018",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L019",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L020",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L021",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L022",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L023",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L024",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L025",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L026",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L027",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L028",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L029",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L030",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L031",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L032",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L033",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L034",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L035",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L036",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L037",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L038",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L039",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L040",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L041",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L042",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L043",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L044",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L045",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L046",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L047",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L048",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L049",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L050",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L051",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L052",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L053",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L054",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L055",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L056",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L057",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L058",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L059",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L060",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L061",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L062",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L063",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L064",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L065",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L066",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L067",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L068",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L069",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L070",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L071",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L072",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L073",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L074",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L075",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L076",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L077",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L078",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L079",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L080",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L081",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L082",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L083",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L084",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L085",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L086",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L087",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L088",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L089",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L090",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L091",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L092",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L093",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L094",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L095",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L096",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L097",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L098",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L099",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L100",
+      "quantity": "1",
+      "priceUnit": "1.115",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L001",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L002",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L003",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L004",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L005",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L006",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L007",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L008",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L009",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L010",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L011",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L012",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L013",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L014",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L015",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L016",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L017",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L018",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L019",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L020",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L021",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L022",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L023",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L024",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L025",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L026",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L027",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L028",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L029",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L030",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L031",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L032",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L033",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L034",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L035",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L036",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L037",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L038",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L039",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L040",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L041",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L042",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L043",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L044",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L045",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L046",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L047",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L048",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L049",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L050",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L051",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L052",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L053",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L054",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L055",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L056",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L057",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L058",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L059",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L060",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L061",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L062",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L063",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L064",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L065",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L066",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L067",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L068",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L069",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L070",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L071",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L072",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L073",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L074",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L075",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L076",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L077",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L078",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L079",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L080",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L081",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L082",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L083",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L084",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L085",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L086",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L087",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L088",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L089",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L090",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L091",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L092",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L093",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L094",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L095",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L096",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L097",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L098",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L099",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      },
+      {
+        "id": "L100",
+        "priceUnit": "1.1150",
+        "priceSubtotal": "1.12",
+        "priceTotal": "1.35",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "1.12",
+            "amount": "0.23"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "111.50",
+      "totalTax": "23.42",
+      "totalIncluded": "134.92",
+      "roundedTotal": "134.92",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "111.50",
+          "amount": "23.42"
+        }
+      ]
+    }
+  }
+}

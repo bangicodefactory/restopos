@@ -1,0 +1,62 @@
+{
+  "name": "013-no-taxes",
+  "description": "A line with no taxes at all: subtotal equals total.",
+  "specRefs": [
+    "7.5.2"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "3",
+      "priceUnit": "4.95",
+      "discount": "0",
+      "taxIds": []
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "4.9500",
+        "priceSubtotal": "14.85",
+        "priceTotal": "14.85",
+        "taxes": []
+      }
+    ],
+    "totals": {
+      "totalExcluded": "14.85",
+      "totalTax": "0.00",
+      "totalIncluded": "14.85",
+      "roundedTotal": "14.85",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}

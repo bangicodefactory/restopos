@@ -1,0 +1,147 @@
+/**
+ * `Printers/Index` props — spec 05 §12.
+ *
+ * `queue` is `Inertia::defer()`ed: it is a live look at `preparation_print_jobs` in the `queued`
+ * and `failed` states and has no business delaying the printer list.
+ */
+
+import type { Deferred } from '../../types/inertia';
+
+export type PrinterRow = {
+    id: number;
+    name: string;
+    printer_type: string;
+    proxy_ip: string | null;
+    printer_ip: string | null;
+    printer_port: number | null;
+    is_receipt_printer: boolean;
+    print_all_categories: boolean;
+    characters_per_line: number;
+    copies: number;
+    active: boolean;
+    category_ids: number[];
+};
+
+export type PrinterCategory = {
+    id: number;
+    name: string;
+    parent_id: number | null;
+};
+
+export type PrintJobRow = {
+    id: number;
+    uuid: string;
+    pos_printer_id: number;
+    job_type: string;
+    state: string;
+    attempts: number;
+    last_error: string | null;
+    queued_at: string | null;
+};
+
+export type PrintersIndexProps = {
+    printers: PrinterRow[];
+    categories: PrinterCategory[];
+    queue: Deferred<PrintJobRow[]>;
+};
+
+/**
+ * `PATCH /printers/{printer}` validates these. `printer_type` is **not** among them, so the
+ * connection kind is displayed and locked rather than edited.
+ */
+export const WRITABLE_PRINTER_KEYS = [
+    'name',
+    'proxy_ip',
+    'printer_ip',
+    'printer_port',
+    'is_receipt_printer',
+    'print_all_categories',
+    'characters_per_line',
+    'copies',
+    'active',
+    'category_ids',
+] as const;
+
+export const PRINTER_TYPE_LABEL: Record<string, string> = {
+    iot: 'Boîtier IoT',
+    epson_epos: 'Epson ePOS (réseau)',
+    network_escpos: 'ESC/POS réseau brut',
+    browser: 'Navigateur',
+};
+
+/**
+ * Which connection fields a printer type actually uses. A network printer with no IP prints
+ * nothing and says nothing, so the form marks the field required for its type instead of
+ * accepting an empty value.
+ */
+export const CONNECTION_FIELDS: Record<string, { proxy: boolean; ip: boolean; port: boolean }> = {
+    iot: { proxy: true, ip: false, port: false },
+    epson_epos: { proxy: false, ip: true, port: true },
+    network_escpos: { proxy: false, ip: true, port: true },
+    browser: { proxy: false, ip: false, port: false },
+};
+
+export const JOB_STATE_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral' | 'info'> = {
+    queued: 'info',
+    printing: 'warn',
+    printed: 'ok',
+    failed: 'danger',
+    skipped: 'neutral',
+};
+
+export type PrinterForm = {
+    name: string;
+    proxy_ip: string;
+    printer_ip: string;
+    printer_port: number | null;
+    is_receipt_printer: boolean;
+    print_all_categories: boolean;
+    characters_per_line: number | null;
+    copies: number | null;
+    active: boolean;
+    category_ids: number[];
+};
+
+export function toForm(printer: PrinterRow): PrinterForm {
+    return {
+        name: printer.name,
+        proxy_ip: printer.proxy_ip ?? '',
+        printer_ip: printer.printer_ip ?? '',
+        printer_port: printer.printer_port,
+        is_receipt_printer: printer.is_receipt_printer,
+        print_all_categories: printer.print_all_categories,
+        characters_per_line: printer.characters_per_line,
+        copies: printer.copies,
+        active: printer.active,
+        category_ids: printer.category_ids,
+    };
+}
+
+/** Indented `{value,label}` options for a nested POS-category list. */
+export function categoryOptions(categories: readonly PrinterCategory[]): { value: string; label: string }[] {
+    const byParent = new Map<number | null, PrinterCategory[]>();
+    for (const category of categories) {
+        const bucket = byParent.get(category.parent_id);
+        if (bucket) bucket.push(category);
+        else byParent.set(category.parent_id, [category]);
+    }
+
+    const out: { value: string; label: string }[] = [];
+    const walk = (parent: number | null, depth: number): void => {
+        for (const category of byParent.get(parent) ?? []) {
+            out.push({ value: String(category.id), label: `${'— '.repeat(depth)}${category.name}` });
+            if (depth < 6) walk(category.id, depth + 1);
+        }
+    };
+    walk(null, 0);
+
+    // Anything whose parent is outside the list would otherwise vanish silently.
+    if (out.length < categories.length) {
+        const seen = new Set(out.map((option) => option.value));
+        for (const category of categories) {
+            if (!seen.has(String(category.id))) out.push({ value: String(category.id), label: category.name });
+        }
+    }
+
+    return out;
+}

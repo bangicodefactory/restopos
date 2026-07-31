@@ -1,0 +1,213 @@
+{
+  "name": "083-pricelist-and-combo-and-tax",
+  "description": "End-to-end: a pricelist resolves a price, a combo splits a meal, and a two-line tab is taxed with a fiscal position and cash rounding.",
+  "specRefs": [
+    "10",
+    "11",
+    "5",
+    "9"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": {
+    "id": 1,
+    "name": "Takeaway",
+    "mappings": [
+      {
+        "taxSrcId": 1,
+        "taxDestId": 3
+      }
+    ]
+  },
+  "cashRounding": {
+    "rounding": "0.05",
+    "method": "half_up",
+    "strategy": "add_invoice_line"
+  },
+  "pricelist": {
+    "pricelists": [
+      {
+        "id": 1,
+        "items": [
+          {
+            "id": 1,
+            "appliedOn": "global",
+            "computePrice": "formula",
+            "base": "list_price",
+            "priceDiscount": "12.5",
+            "priceRound": "0.05",
+            "priceSurcharge": "0.10",
+            "minQuantity": "0",
+            "sequence": 10
+          }
+        ]
+      }
+    ],
+    "resolve": [
+      {
+        "id": "R1",
+        "pricelistId": 1,
+        "context": {
+          "variantId": 100,
+          "productId": 10,
+          "categoryId": 5,
+          "categoryAncestry": [
+            5,
+            4,
+            3
+          ],
+          "listPrice": "10.0000",
+          "standardPrice": "6.0000",
+          "priceExtra": "0",
+          "quantity": "1",
+          "date": null
+        }
+      }
+    ]
+  },
+  "combo": {
+    "parentPrice": "14.95",
+    "precision": "0.01",
+    "components": [
+      {
+        "id": "C1",
+        "comboBasePrice": "9.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C2",
+        "comboBasePrice": "3.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C3",
+        "comboBasePrice": "3.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      }
+    ]
+  },
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "2",
+      "priceUnit": "12.50",
+      "discount": "0",
+      "taxIds": [
+        1
+      ]
+    },
+    {
+      "id": "L2",
+      "quantity": "1",
+      "priceUnit": "8.30",
+      "discount": "20",
+      "taxIds": [
+        1
+      ]
+    }
+  ],
+  "expected": {
+    "pricelist": [
+      {
+        "id": "R1",
+        "price": "8.8500"
+      }
+    ],
+    "combo": [
+      {
+        "id": "C1",
+        "priceUnit": "8.9700"
+      },
+      {
+        "id": "C2",
+        "priceUnit": "2.9900"
+      },
+      {
+        "id": "C3",
+        "priceUnit": "2.9900"
+      }
+    ],
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "12.5000",
+        "priceSubtotal": "25.00",
+        "priceTotal": "26.50",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "25.00",
+            "amount": "1.50"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "priceUnit": "8.3000",
+        "priceSubtotal": "6.64",
+        "priceTotal": "7.04",
+        "taxes": [
+          {
+            "taxId": 3,
+            "base": "6.64",
+            "amount": "0.40"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "31.64",
+      "totalTax": "1.90",
+      "totalIncluded": "33.54",
+      "roundedTotal": "33.55",
+      "roundingDelta": "0.01",
+      "taxGroups": [
+        {
+          "taxGroupId": 2,
+          "base": "31.64",
+          "amount": "1.90"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "name": "035-nested-tax-groups",
+  "description": "Groups nest: 21 contains 20 (which contains 1 and 4) plus 3.",
+  "specRefs": [
+    "6.3",
+    "6.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 21,
+      "name": "Outer",
+      "amountType": "group",
+      "amount": "0",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 1,
+      "taxGroupId": 9,
+      "childrenTaxIds": [
+        20,
+        3
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Inner",
+      "amountType": "group",
+      "amount": "0",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 5,
+      "taxGroupId": 9,
+      "childrenTaxIds": [
+        1,
+        4
+      ]
+    },
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 4,
+      "name": "Eco 2%",
+      "amountType": "percent",
+      "amount": "2",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 3,
+      "childrenTaxIds": []
+    },
+    {
+      "id": 3,
+      "name": "VAT 6%",
+      "amountType": "percent",
+      "amount": "6",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 20,
+      "taxGroupId": 2,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": null,
+  "lines": [
+    {
+      "id": "L1",
+      "quantity": "1",
+      "priceUnit": "100.00",
+      "discount": "0",
+      "taxIds": [
+        21
+      ]
+    }
+  ],
+  "expected": {
+    "lines": [
+      {
+        "id": "L1",
+        "priceUnit": "100.0000",
+        "priceSubtotal": "100.00",
+        "priceTotal": "129.00",
+        "taxes": [
+          {
+            "taxId": 1,
+            "base": "100.00",
+            "amount": "21.00"
+          },
+          {
+            "taxId": 3,
+            "base": "100.00",
+            "amount": "6.00"
+          },
+          {
+            "taxId": 4,
+            "base": "100.00",
+            "amount": "2.00"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalExcluded": "100.00",
+      "totalTax": "29.00",
+      "totalIncluded": "129.00",
+      "roundedTotal": "129.00",
+      "roundingDelta": "0.00",
+      "taxGroups": [
+        {
+          "taxGroupId": 1,
+          "base": "100.00",
+          "amount": "21.00"
+        },
+        {
+          "taxGroupId": 2,
+          "base": "100.00",
+          "amount": "6.00"
+        },
+        {
+          "taxGroupId": 3,
+          "base": "100.00",
+          "amount": "2.00"
+        }
+      ]
+    }
+  }
+}
