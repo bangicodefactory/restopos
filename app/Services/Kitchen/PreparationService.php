@@ -234,8 +234,16 @@ final readonly class PreparationService
     public function markCourseSent(Order $order, int $courseIndex): int
     {
         $snapshot = $this->snapshot($order);
-        $version = (int) ($snapshot['server_version'] ?? 0) + 1;
+        $version = (int) ($snapshot['server_version'] ?? 0);
 
+        // Idempotent on retry: if this course already has nothing unsent, don't re-snapshot or bump
+        // the version. Unlike a whole-order send, an intermediate course fire leaves other courses
+        // unsent, so the caller's `unsent_change_count === 0` guard cannot catch a replay here.
+        if ($this->delta($order, $courseIndex)->isEmpty()) {
+            return $version;
+        }
+
+        $version += 1;
         $this->writeSnapshot($order, $version, $courseIndex);
 
         $order->forceFill([

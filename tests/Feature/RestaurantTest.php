@@ -8,6 +8,7 @@ use App\Models\Restaurant\OrderCourse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
 
@@ -252,14 +253,23 @@ it('an offline prep.sent for one course leaves the other courses fireable (issue
         OrderLine::query()->where('uuid', $lineUuids[$i])->update(['restaurant_course_id' => $courseId]);
     }
 
+    $orderId = (int) Order::query()->where('uuid', $orderUuid)->value('id');
+
     // Reconnect: an offline fire of course 1 arrives as a `prep.sent` command carrying its course_index.
-    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+    $prepSent = fn (): TestResponse => $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
         'commands' => [[
             'uuid' => (string) Str::uuid(),
             'kind' => 'prep.sent',
             'payload' => ['order_uuid' => $orderUuid, 'snapshot_version' => 0, 'course_index' => 1],
         ]],
-    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+    ]);
+
+    $prepSent()->assertOk()->assertJsonPath('results.0.status', 'ok');
+    $version = (int) DB::table('order_preparation_snapshots')->where('pos_order_id', $orderId)->value('server_version');
+
+    // A retry of the same offline fire is idempotent: no re-snapshot, no version bump.
+    $prepSent()->assertOk()->assertJsonPath('results.0.status', 'ok');
+    expect((int) DB::table('order_preparation_snapshots')->where('pos_order_id', $orderId)->value('server_version'))->toBe($version);
 
     // Only course 1 was snapshotted: the remaining delta is exactly course 2's line (qty 3). The
     // pre-fix markAllSent would snapshot everything and this would be 0.
