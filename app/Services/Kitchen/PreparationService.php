@@ -225,6 +225,35 @@ final readonly class PreparationService
         return $version;
     }
 
+    /**
+     * Mark one course sent without printing — the offline-fire counterpart to the course-scoped
+     * online send (RST-084 / BAN-408). Only that course's lines are recorded, so the others stay
+     * fireable; without this, an offline `prep.sent` would snapshot every line and block the later
+     * courses at the kitchen. `unsent_change_count` is recomputed from what is left order-wide.
+     */
+    public function markCourseSent(Order $order, int $courseIndex): int
+    {
+        $snapshot = $this->snapshot($order);
+        $version = (int) ($snapshot['server_version'] ?? 0);
+
+        // Idempotent on retry: if this course already has nothing unsent, don't re-snapshot or bump
+        // the version. Unlike a whole-order send, an intermediate course fire leaves other courses
+        // unsent, so the caller's `unsent_change_count === 0` guard cannot catch a replay here.
+        if ($this->delta($order, $courseIndex)->isEmpty()) {
+            return $version;
+        }
+
+        $version += 1;
+        $this->writeSnapshot($order, $version, $courseIndex);
+
+        $order->forceFill([
+            'unsent_change_count' => $this->delta($order)->absoluteCount(),
+            'last_prep_sent_at' => now(),
+        ])->save();
+
+        return $version;
+    }
+
     /** The stored snapshot, for merge bookkeeping. @return array<string, mixed>|null */
     public function snapshotPayload(Order $order): ?array
     {
