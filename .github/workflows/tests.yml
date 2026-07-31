@@ -19,7 +19,9 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        php: [8.2, 8.3, 8.4]
+        # The composer.lock resolves symfony/* v8.1 (platform floor php >= 8.4.1), so 8.4 is the
+        # real (and only) supported line — matching composer.json's `php` constraint. See issue #3.
+        php: ['8.4']
 
     name: PHP ${{ matrix.php }}
 
@@ -34,11 +36,14 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
 
-      - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
-
+      # Must precede `composer install`: its post-autoload-dump runs `package:discover`, which
+      # boots the app and registers broadcast channels — resolving the reverb broadcaster, which
+      # needs REVERB_APP_KEY from the environment (it is set in .env.example).
       - name: Copy environment file
         run: cp .env.example .env
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
 
       - name: Generate app key
         run: php artisan key:generate
