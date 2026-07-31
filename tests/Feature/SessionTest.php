@@ -245,16 +245,25 @@ it('deletes a cash movement only for an employee holding cash.in_out.delete (REG
             'employee_id' => $this->fx->cashier->getKey(),
         ])->assertCreated()->json('uuid');
 
-    // A cashier does not hold the ability — refused, movement survives.
+    // A cashier proves identity but does not hold the ability — refused, movement survives.
     $this->withHeaders($this->fx->headers())
-        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->cashier->getKey()])
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->cashier->getKey(), 'pin' => '1234'])
         ->assertStatus(403)
         ->assertJsonPath('error.code', 'forbidden');
     expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeTrue();
 
-    // A manager holds cash.in_out.delete — deleted, session cash totals refreshed.
+    // Passing the manager's id WITHOUT their PIN must not bypass the gate (the id is public).
     $this->withHeaders($this->fx->headers())
         ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey()])
+        ->assertStatus(403);
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey(), 'pin' => '0000'])
+        ->assertStatus(403);
+    expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeTrue();
+
+    // A manager with the correct PIN holds cash.in_out.delete — deleted, session cash totals refreshed.
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey(), 'pin' => '9999'])
         ->assertOk();
     expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeFalse();
 });

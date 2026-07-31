@@ -53,6 +53,7 @@ export function NotesDialog(): JSX.Element | null {
         line?.internal_note ?? [],
     );
     const [freeNote, setFreeNote] = useState('');
+    const [courseDraft, setCourseDraft] = useState<string | null>(line?.course_uuid ?? null);
 
     if (dialog?.kind !== 'notes' || orderUuid === null) return null;
 
@@ -74,6 +75,7 @@ export function NotesDialog(): JSX.Element | null {
             setCustomerNote(line.uuid, customerNote);
             const notes = freeNote.trim() === '' ? internal : [...internal, { text: freeNote.trim(), color_index: 0 }];
             setInternalNote(line.uuid, notes);
+            if (courseDraft !== (line.course_uuid ?? null)) setLineCourse(line.uuid, courseDraft);
         } else {
             setOrderNote(orderUuid, customerNote);
             const text = [...internal.map((note) => note.text), freeNote.trim()].filter(Boolean).join(' · ');
@@ -104,8 +106,8 @@ export function NotesDialog(): JSX.Element | null {
                         <span className="font-semibold">{t('reg.order.moveCourse')}</span>
                         <select
                             className="min-h-touch-lg rounded-pos border border-slate-300 px-3"
-                            value={line.course_uuid ?? ''}
-                            onChange={(event) => setLineCourse(line.uuid, event.target.value === '' ? null : event.target.value)}
+                            value={courseDraft ?? ''}
+                            onChange={(event) => setCourseDraft(event.target.value === '' ? null : event.target.value)}
                         >
                             <option value="">{t('reg.order.noCourse')}</option>
                             {orderCourses.map((course) => (

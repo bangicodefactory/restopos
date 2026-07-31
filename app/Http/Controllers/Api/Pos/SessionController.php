@@ -11,7 +11,6 @@ use App\Http\Requests\Pos\CashMovementRequest;
 use App\Http\Requests\Pos\CloseSessionRequest;
 use App\Http\Requests\Pos\OpenSessionRequest;
 use App\Http\Resources\Pos\SessionResource;
-use App\Models\Identity\Employee;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosSession;
 use App\Services\Identity\EmployeeAuthService;
@@ -168,8 +167,9 @@ final class SessionController extends Controller
     /**
      * `DELETE /api/pos/sessions/{session}/cash-movements/{movement}` (REG-011).
      *
-     * Deleting a cash movement is manager-gated: the acting employee must hold
-     * `cash.in_out.delete`, verified server-side rather than trusted from the client.
+     * Manager-gated **and identity-proven**: the acting employee's PIN is verified server-side and
+     * they must hold `cash.in_out.delete`. An employee id alone is not proof — ids ship in the
+     * bootstrap payload, so trusting a client-supplied id would let any cashier pass a manager's id.
      */
     public function destroyCashMovement(Request $request, PosSession $session, CashMovement $movement): JsonResponse
     {
@@ -178,12 +178,15 @@ final class SessionController extends Controller
 
         abort_unless((int) $movement->pos_session_id === (int) $session->getKey(), 404);
 
-        $employeeId = (int) $request->input('employee_id', 0) ?: null;
-        $employee = $employeeId === null ? null : Employee::query()->find($employeeId);
+        $employeeId = $request->input('employee_id');
+        $pin = $request->input('pin');
+        $employee = $employeeId !== null && $pin !== null
+            ? $this->employees->verifyPin($config, (int) $employeeId, (string) $pin)
+            : null;
 
         if ($employee === null || ! $this->employees->can($employee, $config, 'cash.in_out.delete')) {
             return new JsonResponse([
-                'error' => ['code' => 'forbidden', 'message' => 'Deleting a cash movement requires the cash.in_out.delete ability.'],
+                'error' => ['code' => 'forbidden', 'message' => 'Deleting a cash movement requires a manager PIN and the cash.in_out.delete ability.'],
             ], 403);
         }
 

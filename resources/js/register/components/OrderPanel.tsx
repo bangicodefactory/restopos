@@ -113,35 +113,39 @@ export function OrderPanel({
                     {restaurant && catalog.presets.length > 0 ? (
                         // Dine-in / takeaway. Switching re-applies the preset's pricelist + fiscal
                         // position, which changes the VAT charged (REG-335/336).
-                        <select
-                            aria-label={t('reg.order.preset')}
-                            className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
-                            value={order?.pos_preset_id ?? ''}
-                            onChange={(event) => setPreset(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
-                        >
-                            <option value="">{t('reg.order.presetNone')}</option>
-                            {catalog.presets.map((preset) => (
-                                <option key={preset.id} value={preset.id}>
-                                    {preset.name}
-                                </option>
-                            ))}
-                        </select>
+                        <label className="flex min-w-0 flex-1 items-center gap-1">
+                            <span className="shrink-0 text-slate-500">{t('reg.order.preset')}</span>
+                            <select
+                                className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
+                                value={order?.pos_preset_id ?? ''}
+                                onChange={(event) => setPreset(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
+                            >
+                                <option value="">{t('reg.order.presetNone')}</option>
+                                {catalog.presets.map((preset) => (
+                                    <option key={preset.id} value={preset.id}>
+                                        {preset.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
                     ) : null}
                     {catalog.pricelists.length > 0 ? (
                         // Re-prices every non-manual line (REG-173).
-                        <select
-                            aria-label={t('reg.order.pricelist')}
-                            className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
-                            value={order?.pricelist_id ?? ''}
-                            onChange={(event) => setPricelist(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
-                        >
-                            <option value="">{t('reg.order.pricelistDefault')}</option>
-                            {catalog.pricelists.map((pricelist) => (
-                                <option key={pricelist.id} value={pricelist.id}>
-                                    {pricelist.name}
-                                </option>
-                            ))}
-                        </select>
+                        <label className="flex min-w-0 flex-1 items-center gap-1">
+                            <span className="shrink-0 text-slate-500">{t('reg.order.pricelist')}</span>
+                            <select
+                                className="min-h-touch min-w-0 flex-1 rounded-pos border border-slate-300 bg-white px-2"
+                                value={order?.pricelist_id ?? ''}
+                                onChange={(event) => setPricelist(orderUuid, event.target.value === '' ? null : Number(event.target.value))}
+                            >
+                                <option value="">{t('reg.order.pricelistDefault')}</option>
+                                {catalog.pricelists.map((pricelist) => (
+                                    <option key={pricelist.id} value={pricelist.id}>
+                                        {pricelist.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
                     ) : null}
                 </div>
             ) : null}
