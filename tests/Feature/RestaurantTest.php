@@ -183,6 +183,53 @@ it('creates and fires a course', function (): void {
     expect(DB::table('prep_orders')->where('pos_order_id', $orderId)->count())->toBe(1);
 });
 
+it('fires each course of a multi-course order independently (BAN-408)', function (): void {
+    $this->fx->withPrepDisplay();
+
+    // Three lines, one per course, with distinct quantities so each course's delta is unmistakable.
+    $orderUuid = (string) Str::uuid();
+    $lineUuids = [(string) Str::uuid(), (string) Str::uuid(), (string) Str::uuid()];
+    $qtys = ['2', '3', '4'];
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $lineUuids[0], 'variant_id' => $this->fx->variant->getKey(), 'qty' => $qtys[0], 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuids[1], 'variant_id' => $this->fx->variant->getKey(), 'qty' => $qtys[1], 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuids[2], 'variant_id' => $this->fx->variant->getKey(), 'qty' => $qtys[2], 'price_unit' => '10.00', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne->getKey()])],
+    ])->assertOk();
+
+    $orderId = (int) Order::query()->where('uuid', $orderUuid)->value('id');
+
+    // A course per line.
+    $courseUuids = [];
+    foreach (['Starters', 'Mains', 'Dessert'] as $i => $name) {
+        $created = $this->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/orders/{$orderUuid}/courses", ['name' => $name]);
+        $created->assertCreated();
+        $courseUuids[$i] = $created->json('uuid');
+        $courseId = (int) OrderCourse::query()->where('uuid', $courseUuids[$i])->value('id');
+        OrderLine::query()->where('uuid', $lineUuids[$i])->update(['restaurant_course_id' => $courseId]);
+    }
+
+    // Fire each course in turn. Every fire must produce a *non-empty* delta of only that course's
+    // line at its own quantity — the BAN-408 bug snapshotted all lines on the first fire, so courses
+    // 2 and 3 came back empty and could never be fired.
+    foreach ($qtys as $i => $qty) {
+        $fired = $this->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/orders/{$orderUuid}/courses/{$courseUuids[$i]}/fire");
+
+        $fired->assertOk()
+            ->assertJsonPath('course.fired', true)
+            ->assertJsonPath('delta.nbr_of_changes', (int) $qty);
+
+        expect($fired->json('delta.changes'))->toHaveCount(1)
+            ->and((int) $fired->json('delta.count'))->toBe((int) $qty);
+    }
+
+    expect(OrderCourse::query()->where('pos_order_id', $orderId)->where('fired', true)->count())->toBe(3);
+});
+
 it('refuses to delete a fired course', function (): void {
     $this->fx->withPrepDisplay();
 

@@ -8,7 +8,7 @@ import {
     filterChangesByCategories,
     type PrepDelta,
 } from './kitchen-delta';
-import { adoptPrepSnapshot, markPrepSent } from './order-actions';
+import { adoptPrepSnapshot, fireCourse, markCoursePrepSent, markPrepSent } from './order-actions';
 import { print } from './printing';
 import { buildPrepTicket } from './receipt';
 
@@ -173,31 +173,63 @@ export async function sendToKitchen(
 }
 
 /**
- * RST-084 — fire a course. The ticket is a *note-update* style change listing the course's
- * products, not a NEW ticket, so quantities are not counted twice at the pass.
+ * RST-084 — fire one course to the kitchen.
+ *
+ * A single call to the `.../courses/{course}/fire` endpoint marks the course fired *and* sends its
+ * delta server-side (the server is the arbiter of the snapshot, KDS-057). We then print the course's
+ * lines locally and advance the local snapshot for *this course only*. The old implementation posted
+ * the fire endpoint and then `sendToKitchen`, which sent the same course twice — and, because the
+ * fire had already bumped the snapshot version, the second post 409'd. It also had zero callers.
  */
 export async function fireCourseAndSend(orderUuid: string, courseUuid: string): Promise<SendOutcome> {
-    const state = useOrderStore.getState();
-    const course = state.courses[courseUuid];
+    const course = useOrderStore.getState().courses[courseUuid];
     if (!course) return { status: 'nothing', delta: currentDelta(orderUuid) };
 
+    // Only this course's changes are fired/printed; the whole-order delta stays untouched for the
+    // other courses.
+    const whole = currentDelta(orderUuid);
+    const courseDelta: PrepDelta = { ...whole, changes: whole.changes.filter((change) => change.courseUuid === courseUuid) };
+
+    if (courseDelta.changes.length === 0) {
+        // Nothing new to fire, but still stamp the course fired so its tag shows (RST-084).
+        fireCourse(orderUuid, courseUuid);
+        return { status: 'nothing', delta: courseDelta };
+    }
+
+    const courseName = course.name ?? `Service ${course.index}`;
     const runtime = tryRuntime();
-    if (runtime && browserOnline()) {
+    let online = browserOnline() && runtime !== null;
+
+    if (online && runtime) {
         try {
-            await runtime.api.post(`pos/orders/${orderUuid}/courses/${courseUuid}/fire`, {
-                snapshot_version: knownSnapshotVersion(orderUuid),
-                employee_id: null,
-            });
+            const response = await runtime.api.post<{ snapshot_version: number }>(
+                `pos/orders/${orderUuid}/courses/${courseUuid}/fire`,
+                { snapshot_version: knownSnapshotVersion(orderUuid), employee_id: null },
+            );
+            if (response.data) rememberSnapshotVersion(orderUuid, response.data.snapshot_version);
         } catch (error) {
             if (error instanceof ApiError && error.sync.kind === 'conflict') {
-                return { status: 'outdated', delta: currentDelta(orderUuid) };
+                return { status: 'outdated', delta: courseDelta };
             }
-            // Any other failure is tolerated: the local fire and the queued order push carry it.
+            if (error instanceof ApiError && error.sync.kind === 'offline') {
+                online = false; // fall through to the offline path
+            } else {
+                return { status: 'failed', delta: courseDelta, reason: error instanceof Error ? error.message : String(error) };
+            }
         }
     }
 
-    return sendToKitchen(orderUuid, {
-        courseIndex: course.index,
-        courseName: course.name ?? `Service ${course.index}`,
-    });
+    const printed = await printTickets(orderUuid, courseDelta, courseName);
+    fireCourse(orderUuid, courseUuid);
+    markCoursePrepSent(orderUuid, courseUuid);
+
+    if (!online) {
+        void runtime?.syncer.enqueueCommand('prep.sent', {
+            order_uuid: orderUuid,
+            snapshot_version: knownSnapshotVersion(orderUuid),
+            course_index: course.index,
+        });
+    }
+
+    return { status: 'sent', delta: courseDelta, printed, online };
 }

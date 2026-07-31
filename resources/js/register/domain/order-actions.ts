@@ -32,7 +32,7 @@ import {
     useOrderStore,
     type OrderSlice,
 } from '../state/order-store';
-import { buildPrepSnapshot, prepKey } from './kitchen-delta';
+import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
 import { invalidateTotals, orderTotals } from './totals';
 
@@ -1091,6 +1091,47 @@ export function markPrepSent(orderUuid: string, sentAt = nowIso()): PrepSnapshot
 
     commit(orderUuid);
     return nextSnapshot;
+}
+
+/**
+ * RST-084 — advance the local snapshot for a *single* fired course, keeping what the kitchen already
+ * knew about the others. This is the client mirror of the BAN-408 server fix: replacing the whole
+ * snapshot (as {@link markPrepSent} does) would mark the unfired courses sent and hide them from the
+ * next fire, so their delta would be empty and their tickets would never print.
+ */
+export function markCoursePrepSent(orderUuid: string, courseUuid: string, sentAt = nowIso()): PrepSnapshot {
+    const state = snapshot();
+    const order = state.orders[orderUuid];
+    const allLines = linesOf(state, orderUuid);
+    const courseLines = allLines.filter((line) => line.course_uuid === courseUuid);
+    const courseSnapshot = buildPrepSnapshot(courseLines, order?.general_customer_note ?? null, order?.internal_note ?? null, sentAt);
+
+    const merged: PrepSnapshot = {
+        at: sentAt,
+        lines: { ...(order?.last_prep_snapshot?.lines ?? {}), ...courseSnapshot.lines },
+        noteHash: courseSnapshot.noteHash,
+    };
+
+    const remaining = computePrepDelta(
+        allLines,
+        coursesOf(state, orderUuid),
+        merged,
+        order?.general_customer_note ?? null,
+        order?.internal_note ?? null,
+    ).nbrOfChanges;
+
+    mutate((draft) => {
+        const target = draft.orders[orderUuid];
+        if (!target) return;
+        target.last_prep_snapshot = merged;
+        target.last_prep_sent_at = sentAt;
+        target.unsent_change_count = remaining;
+        if (remaining === 0) target.prep_state = 'sent';
+        touch(draft, orderUuid);
+    });
+
+    commit(orderUuid);
+    return merged;
 }
 
 /** KDS-057 — another till fired first: adopt the server's snapshot without printing. */

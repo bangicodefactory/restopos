@@ -9,7 +9,7 @@ import { DialogHost } from './components/DialogHost';
 import { StatusStrip } from './components/StatusStrip';
 import { tryRuntime } from './data/runtime';
 import { publishDisplay } from './domain/customer-display-bus';
-import { sendToKitchen } from './domain/kitchen-send';
+import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
 import { createOrder, markPrinted } from './domain/order-actions';
 import { print } from './domain/printing';
 import { buildBill } from './domain/receipt';
@@ -147,6 +147,21 @@ export function App(): JSX.Element {
         }
     }, [selectedOrderUuid, t, toast]);
 
+    const onFireCourse = useCallback(
+        async (courseUuid: string) => {
+            if (selectedOrderUuid === null) return;
+            const outcome = await fireCourseAndSend(selectedOrderUuid, courseUuid);
+            if (outcome.status === 'outdated') {
+                toast.show({ tone: 'warn', title: t('reg.order.sentOutdated') });
+                return;
+            }
+            if (outcome.status === 'sent') {
+                toast.show({ tone: 'success', title: t('reg.order.sentOk') });
+            }
+        },
+        [selectedOrderUuid, t, toast],
+    );
+
     const onBill = useCallback(async () => {
         const runtime = tryRuntime();
         if (!runtime || selectedOrderUuid === null) return;
@@ -222,6 +237,7 @@ export function App(): JSX.Element {
                             if (selectedOrderUuid !== null) setScreen('payment');
                         }}
                         onSend={() => void onSend()}
+                        onFireCourse={(courseUuid) => void onFireCourse(courseUuid)}
                         onBill={() => void onBill()}
                         onSplit={() => setScreen('split')}
                         onTransfer={() => startTransfer(selectedOrderUuid)}

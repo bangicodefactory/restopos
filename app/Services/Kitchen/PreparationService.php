@@ -176,7 +176,8 @@ final readonly class PreparationService
             $prepOrders = $this->fanOutToDisplays($order, $config, $delta);
             $printJobs = $this->fanOutToPrinters($order, $config, $delta, $deviceId);
 
-            $this->writeSnapshot($order, $version + 1);
+            // Scope the snapshot to the fired course so the other courses stay fireable (BAN-408).
+            $this->writeSnapshot($order, $version + 1, $courseIndex);
 
             $order->forceFill([
                 'prep_state' => OrderPrepState::Sent->value,
@@ -603,11 +604,34 @@ final readonly class PreparationService
         };
     }
 
-    private function writeSnapshot(Order $order, int $version): void
+    /**
+     * Advance the "what the kitchen has been told" snapshot.
+     *
+     * With `$courseIndex`, only that course's lines are recorded as sent — the other courses keep
+     * whatever the kitchen already knew. Snapshotting *every* line on a single-course fire was the
+     * BAN-408 bug: firing course 1 marked courses 2 and 3 sent, so their delta was empty forever and
+     * they could never be fired.
+     */
+    private function writeSnapshot(Order $order, int $version, ?int $courseIndex = null): void
     {
         $lines = [];
 
+        // Course fire: start from the existing snapshot, minus this course (its lines are rebuilt
+        // below from the current state, so an added/changed/removed line in the fired course is
+        // reflected while the untouched courses are preserved).
+        if ($courseIndex !== null) {
+            foreach ((array) ($this->snapshot($order)['lines'] ?? []) as $uuid => $line) {
+                if ((int) ($line['course_index'] ?? 1) !== $courseIndex) {
+                    $lines[$uuid] = $line;
+                }
+            }
+        }
+
         foreach ($this->currentState($order) as $uuid => $line) {
+            if ($courseIndex !== null && (int) $line['course_index'] !== $courseIndex) {
+                continue;
+            }
+
             $lines[$uuid] = [
                 'uuid' => $uuid,
                 'quantity' => (string) $line['quantity'],
