@@ -36,11 +36,14 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
 
-      - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
-
+      # Must precede `composer install`: its post-autoload-dump runs `package:discover`, which
+      # boots the app and registers broadcast channels — resolving the reverb broadcaster, which
+      # needs REVERB_APP_KEY from the environment (it is set in .env.example).
       - name: Copy environment file
         run: cp .env.example .env
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
 
       - name: Generate app key
         run: php artisan key:generate
