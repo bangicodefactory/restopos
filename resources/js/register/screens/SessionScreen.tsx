@@ -5,7 +5,7 @@ import type { JSX } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useT } from '../i18n';
-import { requestApproval } from '../domain/approval';
+import { requestApproval, type ApprovalGrant } from '../domain/approval';
 import {
     closeSession,
     confirmOpeningControl,
@@ -314,7 +314,7 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                     loading={busy}
                     disabled={drafts > 0 && !force}
                     onClick={async () => {
-                        let grant = null;
+                        let grant: ApprovalGrant | null = null;
                         if (overVariance) {
                             grant = await requestApproval('session.close.over_variance');
                             if (!grant) return;

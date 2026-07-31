@@ -159,7 +159,7 @@ it('refuses an over-threshold variance without a manager approval', function ():
 
     expect(PosSession::query()->findOrFail($id)->state->value)->toBe(SessionState::Opened->value);
 
-    // …and goes through with one.
+    // …and goes through with one — recording *which* manager authorised it (REG-016).
     $this->withHeaders($this->fx->headers())
         ->postJson("/api/pos/sessions/{$id}/close", [
             'counted_cash' => '90.00',
@@ -167,7 +167,11 @@ it('refuses an over-threshold variance without a manager approval', function ():
             'manager_pin' => '9999',
         ])
         ->assertOk()
-        ->assertJsonPath('cash_difference', '-10.0000');
+        ->assertJsonPath('cash_difference', '-10.0000')
+        ->assertJsonPath('over_variance_approved_by_employee_id', $this->fx->manager->getKey());
+
+    expect((int) PosSession::query()->whereKey($id)->value('over_variance_approved_by_employee_id'))
+        ->toBe($this->fx->manager->getKey());
 });
 
 it('rejects a cashier pin as a manager approval', function (): void {

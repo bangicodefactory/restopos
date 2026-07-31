@@ -44,6 +44,8 @@ return new class extends Migration
             $table->foreignId('opened_by_employee_id')->nullable()->constrained('employees')->restrictOnDelete();
             $table->foreignId('closed_by_user_id')->nullable()->constrained('users')->restrictOnDelete();
             $table->foreignId('closed_by_employee_id')->nullable()->constrained('employees')->restrictOnDelete();
+            // The manager who signed off on an over-variance close (REG-016); null otherwise.
+            $table->foreignId('over_variance_approved_by_employee_id')->nullable()->constrained('employees')->nullOnDelete();
             $table->timestamp('opened_at')->nullable()->index();
             $table->timestamp('closed_at')->nullable()->index();
             $table->date('business_date')->index();

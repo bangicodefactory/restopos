@@ -105,13 +105,16 @@ final class SessionController extends Controller
         // An over-variance close needs a manager, verified here rather than
         // trusted from the client (spec 03 §2.3).
         $managerApproved = false;
+        $approvedByEmployeeId = null;
         $managerId = $request->validated('manager_employee_id');
         $managerPin = $request->validated('manager_pin');
 
         if ($managerId !== null && $managerPin !== null) {
             $manager = $this->employees->verifyPin($config, (int) $managerId, (string) $managerPin);
-            $managerApproved = $manager !== null
-                && $this->employees->can($manager, $config, 'session.close.over_variance');
+            if ($manager !== null && $this->employees->can($manager, $config, 'session.close.over_variance')) {
+                $managerApproved = true;
+                $approvedByEmployeeId = (int) $manager->getKey();
+            }
         }
 
         try {
@@ -124,6 +127,7 @@ final class SessionController extends Controller
                 notes: $request->validated('notes'),
                 managerApproved: $managerApproved,
                 force: (bool) ($request->validated('force') ?? false),
+                approvedByEmployeeId: $approvedByEmployeeId,
             );
         } catch (DomainException $e) {
             return new JsonResponse([

@@ -45,6 +45,7 @@ final class SessionResource extends JsonResource
             'closing_forced' => (bool) $session->closing_forced,
             'opened_by_employee_id' => $session->opened_by_employee_id,
             'closed_by_employee_id' => $session->closed_by_employee_id,
+            'over_variance_approved_by_employee_id' => $session->over_variance_approved_by_employee_id,
         ];
     }
 }
