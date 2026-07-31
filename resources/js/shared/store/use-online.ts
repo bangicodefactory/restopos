@@ -63,7 +63,7 @@ export type ReachabilityState = {
 };
 
 /**
- * Heartbeat against `/api/pos/ping`.
+ * Heartbeat against `/api/ping`.
  *
  * Cheap (a 204), never cached by the service worker (all `/api/**` is NetworkOnly), and paused
  * while the document is hidden so a backgrounded till does not burn battery.
@@ -78,7 +78,7 @@ export function useReachability(options: HeartbeatOptions = {}): ReachabilitySta
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
         try {
-            const response = await fetch(options.url ?? '/api/pos/ping', {
+            const response = await fetch(options.url ?? '/api/ping', {
                 method: 'GET',
                 cache: 'no-store',
                 credentials: 'omit',
