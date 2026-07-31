@@ -22,6 +22,7 @@ import { bindingsFromCatalog, createPrinterRouter } from './domain/printing';
 import { fetchCurrentSession } from './domain/session-actions';
 import { useBootStore, useSyncStore } from './state/boot-store';
 import { unsyncedCount, useOrderStore } from './state/order-store';
+import { usePosSessionStore } from './state/session-store';
 
 /**
  * Boot (spec 03 §3.3 "Hydration").
@@ -101,7 +102,10 @@ export async function boot(): Promise<BootResult> {
             configId,
             companyId: 1,
             currencyId: 1,
-            sessionId: useSessionStore.getState().session?.id ?? 0,
+            // The open session lives in the register's own store (usePosSessionStore); the shared
+            // useSessionStore only ever holds the cashier, so reading session from it stamped every
+            // order with 0 and had the server reroute it into a conflict.
+            sessionId: usePosSessionStore.getState().session?.id ?? 0,
             deviceId: null,
             deviceSeq: device.info.device_seq,
             employeeId: useSessionStore.getState().cashier?.employee_id ?? null,

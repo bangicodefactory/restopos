@@ -46,7 +46,7 @@ it('opens a session in opening control when cash control is on', function (): vo
 
     $response->assertCreated()
         ->assertJsonPath('state', SessionState::OpeningControl->value)
-        ->assertJsonPath('cash_balance_opening', '150.0000')
+        ->assertJsonPath('opening_float', '150.0000')
         ->assertJsonPath('has_cash_control', true);
 
     $sessionId = $response->json('id');

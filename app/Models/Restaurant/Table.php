@@ -187,4 +187,33 @@ class Table extends Model implements PosLoadable
 
         return ['*'];
     }
+
+    /**
+     * Rename DB columns to the field names the client contract uses
+     * (packages/domain `RestaurantTableRow`): `floor_id`, `position_h`, `position_v`. The floor
+     * plan places tiles with these as inline-style offsets, so the positions must be numbers —
+     * React only appends `px` to numeric style values, and the `decimal:2` cast yields strings.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    public function toPosRow(array $row): array
+    {
+        if (array_key_exists('restaurant_floor_id', $row)) {
+            $row['floor_id'] = $row['restaurant_floor_id'] === null ? null : (int) $row['restaurant_floor_id'];
+            unset($row['restaurant_floor_id']);
+        }
+
+        if (array_key_exists('position_x', $row)) {
+            $row['position_h'] = (float) $row['position_x'];
+            unset($row['position_x']);
+        }
+
+        if (array_key_exists('position_y', $row)) {
+            $row['position_v'] = (float) $row['position_y'];
+            unset($row['position_y']);
+        }
+
+        return $row;
+    }
 }
