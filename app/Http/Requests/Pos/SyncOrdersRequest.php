@@ -26,11 +26,16 @@ final class SyncOrdersRequest extends FormRequest
     /** @return array<string, mixed> */
     public function rules(): array
     {
+        $max = config('pos.sync.max_orders_per_batch', 200);
+
         return [
             'client_version' => ['nullable', 'string', 'max:32'],
             'client_time' => ['nullable', 'date'],
             'employee_id' => ['nullable', 'integer'],
-            'orders' => ['required', 'array', 'min:1', 'max:'.config('pos.sync.max_orders_per_batch', 200)],
+            // Not `min:1`: a batch may legitimately carry only `commands` (cash moves, partner
+            // creation, offline kitchen sends) and no orders. Bouncing that with a 422 sent the
+            // whole batch to quarantine (BAN-404).
+            'orders' => ['nullable', 'array', 'max:'.$max],
             'orders.*.uuid' => ['required', 'string', 'size:36'],
             'orders.*.op' => ['nullable', Rule::in(['upsert', 'cancel', 'delete_draft'])],
             'orders.*.base_rev' => ['nullable', 'string', 'max:64'],
@@ -49,6 +54,14 @@ final class SyncOrdersRequest extends FormRequest
             'orders.*.courses' => ['nullable', 'array'],
             'orders.*.courses.*.uuid' => ['required_with:orders.*.courses', 'string', 'size:36'],
             'orders.*.courses.*.op' => ['nullable', Rule::in(['create', 'update', 'delete'])],
+            // Non-order intents. Kept deliberately shallow (envelope only): the child payload is
+            // validated per-kind inside OrderSyncService, and a bad command yields a per-record
+            // `rejected` result rather than a 422 that bounces the whole batch.
+            'commands' => ['nullable', 'array', 'max:'.$max],
+            'commands.*.uuid' => ['nullable', 'string', 'max:64'],
+            'commands.*.kind' => ['nullable', 'string', 'max:64'],
+            'commands.*.payload' => ['nullable', 'array'],
+            'commands.*.at' => ['nullable', 'date'],
         ];
     }
 }
