@@ -227,9 +227,17 @@ function applySyncResult(result: SyncRecordResult): void {
     if (result.status === 'ok') {
         // A `partner.create` result reconciles an offline customer's placeholder id to the real one
         // (issue #7). It carries no order, so handle it and stop before the order-ack path below.
+        // (Other command results — cash_move, prep.sent — have no order either and fall through to
+        // applyServerAck, which no-ops when the uuid matches no order.)
         if (result.partner) {
             const rt = tryRuntime();
-            if (rt) void remapPlaceholderCustomer(rt.db, result.partner).catch(() => {});
+            if (rt) {
+                void remapPlaceholderCustomer(rt.db, result.partner).catch(() => {
+                    // A failed remap leaves the placeholder in place, so a later order would unlink;
+                    // surface it rather than swallowing it silently.
+                    sync.pushNotice({ orderUuid: uuid, message: 'customer_remap_failed' });
+                });
+            }
             sync.noteSync();
             return;
         }

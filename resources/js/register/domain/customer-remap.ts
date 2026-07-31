@@ -26,8 +26,9 @@ export async function remapPlaceholderCustomer(
     db: PosDb,
     partner: { id: number; uuid: string },
 ): Promise<{ oldId: number; newId: number } | null> {
-    // `customers` is keyed by id and does not index uuid; a bounded scan is fine for a rare event.
-    const local = (await db.customers.toArray()).find((row) => row.uuid === partner.uuid);
+    // `customers` is keyed by id and does not index uuid, so match by scan. `filter().first()`
+    // short-circuits and avoids materialising the whole table; partner.create is rare anyway.
+    const local = await db.customers.filter((row) => row.uuid === partner.uuid).first();
     if (!local) return null;
 
     const oldId = local.id;
@@ -43,7 +44,12 @@ export async function remapPlaceholderCustomer(
         await db.customers.put({ ...local, id: newId });
     });
 
-    // 2. Rewrite any in-memory order still pointing at the placeholder.
+    // 2. Rewrite any in-memory order still pointing at the placeholder. `setCustomer` re-queues each
+    //    one — necessary, not redundant: a same-batch order the server already reconciled re-syncs
+    //    as a no-op, but a cross-batch order that synced *before* this and had its customer_id nulled
+    //    is only relinked by this re-queue. (Loaded orders only; a settled order sitting in Dexie but
+    //    not in the store keeps whatever link was resolved when it synced — relinking a paid order is
+    //    out of scope.)
     for (const [uuid, order] of Object.entries(useOrderStore.getState().orders)) {
         if (order.customer_id === oldId) setCustomer(uuid, newId);
     }
