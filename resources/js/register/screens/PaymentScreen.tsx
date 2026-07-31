@@ -126,8 +126,11 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
 
         validateOrder(orderUuid);
         // Bypass the debounce: the receipt screen is one navigation away and a crash in between
-        // would lose the sale.
-        await tryRuntime()?.syncer.drain();
+        // would lose the sale. flushNow() forces the paid order to IndexedDB *now* (REG-217); drain
+        // then pushes it to the server best-effort.
+        const runtime = tryRuntime();
+        await runtime?.persistence.flushNow();
+        await runtime?.syncer.drain();
         onValidated();
     }, [
         catalog.paymentMethods,

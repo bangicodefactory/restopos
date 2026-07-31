@@ -80,6 +80,7 @@ export async function boot(): Promise<BootResult> {
     });
 
     const printer = createPrinterRouter();
+    const persistence = createPersistence(db, syncer);
 
     setRuntime({
         db,
@@ -87,6 +88,7 @@ export async function boot(): Promise<BootResult> {
         bootstrap,
         delta,
         syncer,
+        persistence,
         printer,
         counters,
         device,
@@ -95,7 +97,6 @@ export async function boot(): Promise<BootResult> {
         appVersion: APP_VERSION,
     });
 
-    const persistence = createPersistence(db, syncer);
     persistence.attachLifecycle();
 
     configureOrderActions({

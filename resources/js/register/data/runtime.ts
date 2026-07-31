@@ -4,6 +4,8 @@ import type { PosDb } from '@shared/db';
 import type { PrinterRouter } from '@shared/printing';
 import type { ApiClient, BootstrapClient, DeltaPuller, OutboxSyncer } from '@shared/sync';
 
+import type { Persistence } from './persistence';
+
 /**
  * Process-wide singletons.
  *
@@ -19,6 +21,7 @@ export type RegisterRuntime = {
     bootstrap: BootstrapClient;
     delta: DeltaPuller;
     syncer: OutboxSyncer;
+    persistence: Persistence;
     printer: PrinterRouter;
     counters: CounterStore;
     device: StoredDevice;
