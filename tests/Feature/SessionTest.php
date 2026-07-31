@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\OrderState;
 use App\Enums\SessionState;
+use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -230,4 +231,39 @@ it('never lets a device touch another register session', function (): void {
     $this->withHeaders($this->fx->headers())
         ->getJson('/api/pos/sessions/'.$other->session->getKey().'/closing-data')
         ->assertStatus(404);
+});
+
+it('deletes a cash movement only for an employee holding cash.in_out.delete (REG-011)', function (): void {
+    $this->fx->withSession();
+    $sessionId = $this->fx->session->getKey();
+
+    // Cash movements are addressed by uuid (HasUuid route binding).
+    $movementUuid = (string) $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$sessionId}/cash-movements", [
+            'movement_type' => 'cash_in',
+            'amount' => '25.00',
+            'employee_id' => $this->fx->cashier->getKey(),
+        ])->assertCreated()->json('uuid');
+
+    // A cashier proves identity but does not hold the ability — refused, movement survives.
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->cashier->getKey(), 'pin' => '1234'])
+        ->assertStatus(403)
+        ->assertJsonPath('error.code', 'forbidden');
+    expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeTrue();
+
+    // Passing the manager's id WITHOUT their PIN must not bypass the gate (the id is public).
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey()])
+        ->assertStatus(403);
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey(), 'pin' => '0000'])
+        ->assertStatus(403);
+    expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeTrue();
+
+    // A manager with the correct PIN holds cash.in_out.delete — deleted, session cash totals refreshed.
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/sessions/{$sessionId}/cash-movements/{$movementUuid}", ['employee_id' => $this->fx->manager->getKey(), 'pin' => '9999'])
+        ->assertOk();
+    expect(CashMovement::query()->where('uuid', $movementUuid)->exists())->toBeFalse();
 });

@@ -1,11 +1,12 @@
 import { Button, Dialog, cn } from '@shared/ui';
 import type { JSX } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { useT } from '../../i18n';
 import {
     setCustomerNote,
     setInternalNote,
+    setLineCourse,
     setOrderInternalNote,
     setOrderNote,
 } from '../../domain/order-actions';
@@ -39,6 +40,11 @@ export function NotesDialog(): JSX.Element | null {
     const order = useOrder(orderUuid);
     const lineUuid = typeof dialog?.payload?.['lineUuid'] === 'string' ? dialog.payload['lineUuid'] : null;
     const line = useOrderStore((state) => (lineUuid === null ? null : (state.lines[lineUuid] ?? null)));
+    const coursesRecord = useOrderStore((state) => state.courses);
+    const orderCourses = useMemo(
+        () => Object.values(coursesRecord).filter((course) => course.order_uuid === orderUuid).sort((a, b) => a.index - b.index),
+        [coursesRecord, orderUuid],
+    );
 
     const [customerNote, setCustomerNoteDraft] = useState<string>(
         line?.customer_note ?? order?.general_customer_note ?? '',
@@ -47,6 +53,7 @@ export function NotesDialog(): JSX.Element | null {
         line?.internal_note ?? [],
     );
     const [freeNote, setFreeNote] = useState('');
+    const [courseDraft, setCourseDraft] = useState<string | null>(line?.course_uuid ?? null);
 
     if (dialog?.kind !== 'notes' || orderUuid === null) return null;
 
@@ -68,6 +75,7 @@ export function NotesDialog(): JSX.Element | null {
             setCustomerNote(line.uuid, customerNote);
             const notes = freeNote.trim() === '' ? internal : [...internal, { text: freeNote.trim(), color_index: 0 }];
             setInternalNote(line.uuid, notes);
+            if (courseDraft !== (line.course_uuid ?? null)) setLineCourse(line.uuid, courseDraft);
         } else {
             setOrderNote(orderUuid, customerNote);
             const text = [...internal.map((note) => note.text), freeNote.trim()].filter(Boolean).join(' · ');
@@ -93,6 +101,24 @@ export function NotesDialog(): JSX.Element | null {
             }
         >
             <div className="space-y-4">
+                {line && orderCourses.length > 0 ? (
+                    <label className="grid gap-1">
+                        <span className="font-semibold">{t('reg.order.moveCourse')}</span>
+                        <select
+                            className="min-h-touch-lg rounded-pos border border-slate-300 px-3"
+                            value={courseDraft ?? ''}
+                            onChange={(event) => setCourseDraft(event.target.value === '' ? null : event.target.value)}
+                        >
+                            <option value="">{t('reg.order.noCourse')}</option>
+                            {orderCourses.map((course) => (
+                                <option key={course.uuid} value={course.uuid}>
+                                    {course.name ?? t('reg.order.course', { index: course.index })}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                ) : null}
+
                 <label className="grid gap-1">
                     <span className="font-semibold">{t('reg.order.customerNote')}</span>
                     <textarea

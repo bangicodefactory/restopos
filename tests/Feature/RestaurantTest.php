@@ -285,6 +285,50 @@ it('an offline prep.sent for one course leaves the other courses fireable (issue
         ->assertJsonPath('delta.nbr_of_changes', 3);
 });
 
+it('resolves two duplicate table drafts into one order on the table-open path (RST-058)', function (): void {
+    $tableId = $this->fx->tableOne->getKey();
+
+    $oldest = tableOrder($this->fx, $tableId, '2');
+
+    // A partial unique index normally rejects a second draft on the table; drop it to reproduce the
+    // offline race that slipped a duplicate past the guard — exactly what resolveDuplicateTableOrders
+    // exists to clean up.
+    DB::statement('DROP INDEX pos_orders_draft_table_unique');
+    $newer = tableOrder($this->fx, $tableId, '3');
+
+    expect(Order::query()->where('restaurant_table_id', $tableId)->where('state', 'draft')->count())->toBe(2);
+
+    $response = $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/tables/{$tableId}/resolve-duplicates");
+
+    $response->assertOk();
+
+    // The oldest draft wins and now carries both lines; the newer draft is merged away.
+    expect($response->json('order.uuid'))->toBe($oldest)
+        ->and(Order::query()->where('restaurant_table_id', $tableId)->where('state', 'draft')->count())->toBe(1)
+        ->and(Order::query()->where('uuid', $newer)->exists())->toBeFalse();
+
+    $winnerId = (int) Order::query()->where('uuid', $oldest)->value('id');
+    expect(OrderLine::query()->where('pos_order_id', $winnerId)->count())->toBe(2);
+});
+
+it('returns the sole draft (or null) when there is nothing to resolve on a table', function (): void {
+    $tableId = $this->fx->tableOne->getKey();
+
+    // No draft yet → null.
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/tables/{$tableId}/resolve-duplicates")
+        ->assertOk()
+        ->assertJsonPath('order', null);
+
+    // One draft → that draft, untouched.
+    $only = tableOrder($this->fx, $tableId, '2');
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/tables/{$tableId}/resolve-duplicates")
+        ->assertOk()
+        ->assertJsonPath('order.uuid', $only);
+});
+
 it('refuses to delete a fired course', function (): void {
     $this->fx->withPrepDisplay();
 

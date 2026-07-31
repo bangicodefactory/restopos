@@ -5,9 +5,9 @@ import { useMemo } from 'react';
 import { useT } from '../i18n';
 import { currentDelta } from '../domain/kitchen-send';
 import { createOrder } from '../domain/order-actions';
-import { useMoney } from '../hooks/use-register';
+import { useCatalog, useMoney } from '../hooks/use-register';
 import { orderTotals } from '../domain/totals';
-import { draftOrders, useOrderStore } from '../state/order-store';
+import { draftOrders, floatingOrders, useOrderStore } from '../state/order-store';
 import { useUiStore } from '../state/ui-store';
 
 /**
@@ -27,10 +27,16 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
     const orderScreen = useOrderStore((state) => state.orderScreen);
     const setScreen = useUiStore((state) => state.setScreen);
     const openDialog = useUiStore((state) => state.openDialog);
+    const isRestaurant = useCatalog().config?.is_restaurant === true;
 
     // `orders` is the subscription; the snapshot is read once so the selector stays referentially
     // stable (a selector that built this array would re-render the bar on every keystroke).
-    const tabs = useMemo(() => (orders ? draftOrders(useOrderStore.getState()) : []), [orders]);
+    // In restaurant mode the tabs are the *floating* orders only — seated-table drafts live on the
+    // floor plan, not the tab bar (REG-119); in retail mode every draft is floating.
+    const tabs = useMemo(
+        () => (orders ? (isRestaurant ? floatingOrders : draftOrders)(useOrderStore.getState()) : []),
+        [orders, isRestaurant],
+    );
 
     return (
         <div className={cn('flex items-center gap-2 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-1', className)}>
