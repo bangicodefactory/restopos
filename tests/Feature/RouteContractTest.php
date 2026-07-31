@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+// Own namespace so the scanner helpers below do not pollute the global function table (Pest loads
+// every test file into one process). The Pest DSL (`uses`, `it`, `expect`) and PHP built-ins
+// resolve via the global-namespace fallback.
+namespace Tests\Feature\RouteContract;
+
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\Finder\Finder;
 use Tests\TestCase;
@@ -25,7 +30,12 @@ uses(TestCase::class);
 |
 | Scope: the request PATH only (a route existing does not prove the method,
 | middleware or payload are right — those are covered by the endpoint tests).
-| A client path with a dynamic `${…}` segment matches a route `{param}`.
+| A client path with a dynamic `${…}` segment matches a route `{param}`, but a
+| dynamic client segment does not stand in for a route *literal* — so an extra or
+| misplaced segment is caught rather than absorbed by a same-length route.
+|
+| Only string/template literals passed to the ApiClient (or absolute `/api/…`
+| literals) are scanned; a path assembled from variables is invisible here.
 */
 
 /** @return list<list<string>> Each api route as segments; a `{param}` segment becomes `*`. */
@@ -69,6 +79,13 @@ function apiTopLevelSegments(array $patterns): array
 /** Normalise a client path literal to api-relative segments (`${…}` → `*`), or null if not an API path. */
 function normaliseClientPath(string $raw, array $tops): ?array
 {
+    // A literal `*` marks a glob or documentation pattern (a service-worker route, a doc comment
+    // like `/api/kitchen/*`), never a concrete request path — the `${…}` → `*` normalisation below
+    // is the only thing that introduces a wildcard segment.
+    if (str_contains($raw, '*')) {
+        return null;
+    }
+
     $path = strtok($raw, '?');           // drop any query string
     $path = preg_replace('/\$\{[^}]*\}/', '*', $path); // template expr → wildcard segment
     $path = ltrim((string) $path, '/');
@@ -101,7 +118,11 @@ function clientPathResolves(array $client, array $patterns): bool
         $matched = true;
         foreach ($pattern as $i => $routeSeg) {
             $clientSeg = $client[$i];
-            if ($routeSeg !== '*' && $clientSeg !== '*' && $routeSeg !== $clientSeg) {
+            // A route param (`*`) accepts any client segment. Otherwise a route *literal* must equal
+            // the client segment exactly — a client dynamic segment (`*`) does NOT satisfy a route
+            // literal. That asymmetry is the point: without it, `pos/*/bootstrap` would borrow a
+            // same-length route like `pos/orders/{order}` and the cold-start regression would pass.
+            if ($routeSeg !== '*' && $routeSeg !== $clientSeg) {
                 $matched = false;
                 break;
             }
@@ -128,8 +149,10 @@ function clientApiPathReferences(array $tops): array
     $getPost = '/\.(?:get|post)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\1/';
     // `.request('METHOD', '…')` — path is the second string argument.
     $request = '/\.request(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*[\'"`][A-Z]+[\'"`]\s*,\s*([\'"`])([^\'"`]+)\1/';
-    // Any absolute `'/api/…'` literal (e.g. the reachability probe's `fetch`).
-    $absolute = '/([\'"`])(\/api\/[^\'"`?\s]*)\1/';
+    // Absolute `'/api/…'` literals (e.g. the reachability probe's `fetch`). Single/double quotes
+    // only — NOT backticks: JSDoc inline code-spans use backticks (`/api/kitchen/*`) and are
+    // documentation, not calls; real absolute request paths are plain quoted string literals.
+    $absolute = '/([\'"])(\/api\/[^\'"?\s]*)\1/';
 
     $refs = [];
 
