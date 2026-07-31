@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Enums\CashMovementType;
 use App\Enums\OrderState;
 use App\Enums\SessionState;
 use App\Enums\SyncConflictType;
+use App\Models\Identity\Customer;
+use App\Models\Pos\CashMovement;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\PosSession;
@@ -30,6 +33,26 @@ function sync(array $orders, array $headers = []): TestResponse
         'client_version' => '1.0.0',
         'employee_id' => $fx->cashier->getKey(),
         'orders' => $orders,
+    ]);
+}
+
+/** One outbox command envelope: a random entry uuid the client matches results against. */
+function command(string $kind, array $payload): array
+{
+    return ['uuid' => (string) Str::uuid(), 'kind' => $kind, 'payload' => $payload, 'at' => now()->toIso8601String()];
+}
+
+/** POST a batch of commands (and optionally orders) to the sync endpoint. */
+function pushBatch(array $commands, array $orders = []): TestResponse
+{
+    /** @var PosFixtures $fx */
+    $fx = test()->fx;
+
+    return test()->withHeaders($fx->headers())->postJson('/api/pos/sync', [
+        'client_version' => '1.0.0',
+        'employee_id' => $fx->cashier->getKey(),
+        'orders' => $orders,
+        'commands' => $commands,
     ]);
 }
 
@@ -326,4 +349,84 @@ it('records the request in sync_requests with a payload hash', function (): void
         ->and($row->response_status)->toBe(200)
         ->and($row->processed_at)->not->toBeNull()
         ->and(json_decode((string) $row->record_uuids, true))->toContain($uuid);
+});
+
+// ── commands[] on the sync endpoint (BAN-404) ─────────────────────────────────
+
+it('accepts a commands-only batch and applies cash, partner and prep side effects', function (): void {
+    // The offline kitchen send targets an order that must already exist server-side.
+    $orderUuid = (string) Str::uuid();
+    sync([$this->fx->orderCommand($orderUuid)])->assertOk();
+    $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+
+    $session = $this->fx->session;
+    $partnerUuid = (string) Str::uuid();
+
+    $response = pushBatch([
+        command('session.cash_move', ['uuid' => (string) Str::uuid(), 'session_id' => $session->getKey(), 'movement_type' => 'cash_in', 'amount' => '50.00', 'reason' => 'float top-up', 'employee_id' => $this->fx->cashier->getKey()]),
+        command('session.cash_move', ['uuid' => (string) Str::uuid(), 'session_id' => $session->getKey(), 'movement_type' => 'cash_out', 'amount' => '20.00', 'reason' => 'supplier', 'employee_id' => $this->fx->cashier->getKey()]),
+        command('partner.create', ['id' => -1712345678, 'uuid' => $partnerUuid, 'name' => 'Chez Fatima', 'email' => 'fatima@example.test']),
+        command('prep.sent', ['order_uuid' => $orderUuid, 'snapshot_version' => 0, 'course_index' => null]),
+    ]);
+
+    // No 422, no quarantine — every command comes back ok.
+    $response->assertOk();
+    expect($response->json('results'))->toHaveCount(4)
+        ->and(collect($response->json('results'))->pluck('status')->unique()->values()->all())->toBe(['ok']);
+
+    // (a) cash in + cash out landed as signed rows.
+    $movements = CashMovement::query()->where('pos_session_id', $session->getKey())->get();
+    expect($movements)->toHaveCount(2)
+        ->and((float) $movements->firstWhere('movement_type', CashMovementType::CashIn)->amount)->toBe(50.0)
+        ->and((float) $movements->firstWhere('movement_type', CashMovementType::CashOut)->amount)->toBe(-20.0);
+
+    // (b) the offline customer exists with a real positive id.
+    $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
+    expect($customer->getKey())->toBeGreaterThan(0)
+        ->and($customer->name)->toBe('Chez Fatima');
+
+    // (c) the prep snapshot advanced.
+    expect($order->fresh()->last_prep_sent_at)->not->toBeNull();
+});
+
+it('is idempotent on a repeated cash-move command', function (): void {
+    $session = $this->fx->session;
+    $moveUuid = (string) Str::uuid();
+    $cmd = command('session.cash_move', ['uuid' => $moveUuid, 'session_id' => $session->getKey(), 'movement_type' => 'cash_in', 'amount' => '15.00', 'employee_id' => $this->fx->cashier->getKey()]);
+
+    pushBatch([$cmd])->assertOk();
+    pushBatch([$cmd])->assertOk();
+
+    expect(CashMovement::query()->where('uuid', $moveUuid)->count())->toBe(1);
+});
+
+it('reconciles an offline customer id referenced by an order in the same batch', function (): void {
+    $partnerUuid = (string) Str::uuid();
+    $placeholderId = -1712345999;
+    $orderUuid = (string) Str::uuid();
+
+    $response = pushBatch(
+        [command('partner.create', ['id' => $placeholderId, 'uuid' => $partnerUuid, 'name' => 'Walk-in Ahmed'])],
+        [$this->fx->orderCommand($orderUuid, [], ['customer_id' => $placeholderId])],
+    );
+
+    $response->assertOk();
+
+    $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
+    $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+
+    // The negative placeholder was rewritten to the real customer — no FK violation.
+    expect((int) $order->customer_id)->toBe($customer->getKey())
+        ->and($order->customer_id)->toBeGreaterThan(0);
+});
+
+it('drops an unresolved placeholder customer id to null rather than violating the FK', function (): void {
+    $orderUuid = (string) Str::uuid();
+
+    // No partner.create in the batch: the negative id cannot resolve.
+    pushBatch([], [$this->fx->orderCommand($orderUuid, [], ['customer_id' => -999999])])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
+
+    expect(Order::query()->where('uuid', $orderUuid)->firstOrFail()->customer_id)->toBeNull();
 });

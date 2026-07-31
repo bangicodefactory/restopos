@@ -38,7 +38,11 @@ final class SyncController extends Controller
             // rules do not name — including `variant_id` and `price_unit` — and
             // the ingest service, not the validator, is what decides which line
             // fields are meaningful.
-            payload: [...$request->validated(), 'orders' => (array) $request->input('orders', [])],
+            payload: [
+                ...$request->validated(),
+                'orders' => (array) $request->input('orders', []),
+                'commands' => (array) $request->input('commands', []),
+            ],
             idempotencyKey: is_string($idempotencyKey) && $idempotencyKey !== '' ? $idempotencyKey : null,
         );
 

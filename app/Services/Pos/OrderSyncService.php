@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Pos;
 
+use App\Enums\CashMovementType;
 use App\Enums\OrderSource;
 use App\Enums\OrderState;
 use App\Enums\PaymentStatus;
@@ -12,6 +13,7 @@ use App\Enums\SyncConflictType;
 use App\Enums\SyncResolution;
 use App\Events\Pos\OrderStateChanged;
 use App\Events\Pos\OrderSynced;
+use App\Models\Identity\Customer;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\Payment as OrderPayment;
@@ -19,6 +21,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
 use App\Models\Restaurant\OrderCourse;
+use App\Services\Kitchen\PreparationService;
 use App\Support\Tax\Dto\OrderResult;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -57,6 +60,7 @@ final readonly class OrderSyncService
         private OrderCalculator $calculator,
         private SequenceService $sequences,
         private SessionService $sessions,
+        private PreparationService $preparation,
         private Dispatcher $events,
         private LoggerInterface $logger,
         private Config $config,
@@ -70,6 +74,8 @@ final readonly class OrderSyncService
     {
         $started = microtime(true);
         $orders = array_values((array) ($payload['orders'] ?? []));
+        $commands = array_map(static fn ($c): array => (array) $c, array_values((array) ($payload['commands'] ?? [])));
+        $employeeId = (int) ($payload['employee_id'] ?? 0) ?: null;
         $uuids = array_values(array_filter(array_map(
             static fn (array $o): ?string => isset($o['uuid']) ? (string) $o['uuid'] : null,
             $orders,
@@ -86,10 +92,27 @@ final readonly class OrderSyncService
         $requestUuid = $idempotencyKey ?? (string) Str::uuid();
         $requestId = $this->openRequestLog($config, $device, $requestUuid, $payload, $uuids);
 
+        // Command ordering is load-bearing (BAN-404): `partner.create` must run *before* orders so a
+        // just-created customer's real id is available to an order that still references its client
+        // placeholder; everything else (cash moves, `prep.sent`) runs *after* orders, because
+        // `prep.sent` targets an order that may be in this same batch.
+        $partnerCommands = array_values(array_filter($commands, static fn (array $c): bool => ($c['kind'] ?? null) === 'partner.create'));
+        $otherCommands = array_values(array_filter($commands, static fn (array $c): bool => ($c['kind'] ?? null) !== 'partner.create'));
+
+        /** @var array<int, int> $customerIdMap client placeholder (negative) id => real customer id */
+        $customerIdMap = [];
         $results = [];
 
+        foreach ($partnerCommands as $command) {
+            $results[] = $this->processCommand($config, $device, $command, $employeeId, $customerIdMap);
+        }
+
         foreach ($orders as $command) {
-            $results[] = $this->processOne($config, $device, $command, (int) ($payload['employee_id'] ?? 0) ?: null);
+            $results[] = $this->processOne($config, $device, $command, $employeeId, $customerIdMap);
+        }
+
+        foreach ($otherCommands as $command) {
+            $results[] = $this->processCommand($config, $device, $command, $employeeId, $customerIdMap);
         }
 
         $response = [
@@ -106,14 +129,22 @@ final readonly class OrderSyncService
 
     /**
      * @param  array<string, mixed>  $command
+     * @param  array<int, int>  $customerIdMap  client placeholder (negative) id => real customer id
      * @return array<string, mixed>
      */
-    private function processOne(PosConfig $config, ?PosDevice $device, array $command, ?int $employeeId): array
+    private function processOne(PosConfig $config, ?PosDevice $device, array $command, ?int $employeeId, array $customerIdMap = []): array
     {
         $uuid = (string) ($command['uuid'] ?? '');
 
         if ($uuid === '') {
             return $this->rejected('', 'missing_uuid', 'Every order command must carry a uuid.');
+        }
+
+        // Resolve a client-local (negative) customer id to the real id created by a `partner.create`
+        // command earlier in this batch. An unresolved placeholder is dropped to null rather than
+        // left to violate the foreign key (REG-153).
+        if (isset($command['order']) && is_array($command['order'])) {
+            $command['order'] = $this->resolvePlaceholderCustomer($command['order'], $customerIdMap);
         }
 
         try {
@@ -132,6 +163,170 @@ final readonly class OrderSyncService
 
             return $this->rejected($uuid, 'ingest_failed', $e->getMessage());
         }
+    }
+
+    /** Drop an unresolved client-placeholder (negative) customer id to null; remap a resolved one.
+     *
+     * @param  array<string, mixed>  $order
+     * @param  array<int, int>  $customerIdMap
+     * @return array<string, mixed>
+     */
+    private function resolvePlaceholderCustomer(array $order, array $customerIdMap): array
+    {
+        if (! isset($order['customer_id'])) {
+            return $order;
+        }
+
+        $customerId = (int) $order['customer_id'];
+
+        if ($customerId >= 0) {
+            return $order;
+        }
+
+        $order['customer_id'] = $customerIdMap[$customerId] ?? null;
+
+        return $order;
+    }
+
+    // ---------------------------------------------------------- generic commands
+
+    /**
+     * Non-order intents the outbox batches alongside orders (spec 03 §3.6): cash movements, offline
+     * partner creation and offline kitchen sends. Each returns a per-record result keyed by the
+     * command's own uuid, exactly like an order, so the client can retire the outbox entry.
+     *
+     * @param  array<string, mixed>  $command
+     * @param  array<int, int>  $customerIdMap
+     * @return array<string, mixed>
+     */
+    private function processCommand(PosConfig $config, ?PosDevice $device, array $command, ?int $employeeId, array &$customerIdMap): array
+    {
+        $uuid = (string) ($command['uuid'] ?? '');
+
+        if ($uuid === '') {
+            return $this->rejected('', 'missing_uuid', 'Every command must carry a uuid.');
+        }
+
+        $kind = (string) ($command['kind'] ?? '');
+        $payload = (array) ($command['payload'] ?? []);
+
+        try {
+            return match ($kind) {
+                'session.cash_move' => $this->connection->transaction(fn (): array => $this->applyCashMove($config, $device, $uuid, $payload, $employeeId)),
+                // A full closure (not an arrow fn) so the placeholder→real id map propagates by
+                // reference back to sync(); an arrow fn would capture a copy.
+                'partner.create' => $this->connection->transaction(function () use ($config, $uuid, $payload, &$customerIdMap): array {
+                    return $this->applyPartnerCreate($config, $uuid, $payload, $customerIdMap);
+                }),
+                'prep.sent' => $this->connection->transaction(fn (): array => $this->applyPrepSent($config, $uuid, $payload)),
+                default => $this->rejected($uuid, 'unsupported_command', "Unsupported command kind: {$kind}"),
+            };
+        } catch (Throwable $e) {
+            $this->logger->error('pos.sync.command_rejected', [
+                'command' => $uuid,
+                'kind' => $kind,
+                'config' => $config->getKey(),
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->rejected($uuid, 'command_failed', $e->getMessage());
+        }
+    }
+
+    /**
+     * `session.cash_move` — a till cash in/out (REG-010). Idempotent on the movement uuid inside the
+     * payload; the envelope uuid is what the client matches the result against.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function applyCashMove(PosConfig $config, ?PosDevice $device, string $uuid, array $payload, ?int $employeeId): array
+    {
+        $session = isset($payload['session_id'])
+            ? PosSession::query()->where('pos_config_id', $config->getKey())->whereKey((int) $payload['session_id'])->first()
+            : null;
+
+        if ($session === null) {
+            return $this->rejected($uuid, 'unknown_session', 'Cash movement references a session not on this register.');
+        }
+
+        $type = CashMovementType::tryFrom((string) ($payload['movement_type'] ?? ''));
+
+        if ($type === null) {
+            return $this->rejected($uuid, 'bad_movement_type', 'Unknown cash movement type.');
+        }
+
+        $movement = $this->sessions->cashMove(
+            session: $session,
+            type: $type,
+            amount: (string) ($payload['amount'] ?? '0'),
+            reason: isset($payload['reason']) ? (string) $payload['reason'] : null,
+            employeeId: isset($payload['employee_id']) ? (int) $payload['employee_id'] : $employeeId,
+            deviceId: $device?->getKey(),
+            uuid: isset($payload['uuid']) ? (string) $payload['uuid'] : $uuid,
+        );
+
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'id' => (int) $movement->getKey()];
+    }
+
+    /**
+     * `partner.create` — a customer created offline (REG-153). Idempotent on the partner uuid, and it
+     * records the client's negative placeholder id → the real id so an order in this same batch can
+     * be reconciled before it is written.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, int>  $customerIdMap
+     * @return array<string, mixed>
+     */
+    private function applyPartnerCreate(PosConfig $config, string $uuid, array $payload, array &$customerIdMap): array
+    {
+        $partnerUuid = (string) ($payload['uuid'] ?? '');
+
+        if ($partnerUuid === '') {
+            return $this->rejected($uuid, 'missing_partner_uuid', 'partner.create requires a uuid.');
+        }
+
+        if (trim((string) ($payload['name'] ?? '')) === '') {
+            return $this->rejected($uuid, 'missing_partner_name', 'A customer needs a name.');
+        }
+
+        $writable = ['name', 'email', 'phone', 'mobile', 'vat', 'street', 'street2', 'city', 'zip', 'state_id', 'country_id', 'barcode', 'pricelist_id', 'fiscal_position_id', 'note'];
+
+        /** @var Customer $customer */
+        $customer = Customer::query()->updateOrCreate(
+            ['uuid' => $partnerUuid],
+            [...array_intersect_key($payload, array_flip($writable)), 'company_id' => $config->company_id, 'active' => true],
+        );
+
+        if (isset($payload['id']) && (int) $payload['id'] < 0) {
+            $customerIdMap[(int) $payload['id']] = (int) $customer->getKey();
+        }
+
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'id' => (int) $customer->getKey()];
+    }
+
+    /**
+     * `prep.sent` — a kitchen send performed offline (KDS-062). The tickets already printed on the
+     * device; the server just advances the prep snapshot to "everything sent".
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function applyPrepSent(PosConfig $config, string $uuid, array $payload): array
+    {
+        $orderUuid = (string) ($payload['order_uuid'] ?? '');
+
+        $order = $orderUuid === ''
+            ? null
+            : Order::query()->where('pos_config_id', $config->getKey())->where('uuid', $orderUuid)->first();
+
+        if ($order === null) {
+            return $this->rejected($uuid, 'unknown_order', 'prep.sent references an order not on this register.');
+        }
+
+        $version = $this->preparation->markAllSent($order);
+
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'snapshot_version' => $version];
     }
 
     /**
