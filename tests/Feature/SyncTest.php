@@ -444,14 +444,32 @@ it('nulls a placeholder when the order arrives in a later batch than partner.cre
     $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
 
     // Batch 2: an order references the placeholder, but no partner.create rides along, so the
-    // in-batch map is empty. Until the client remaps its local id (follow-up), the link is dropped
-    // — but the customer still exists, so reconnecting the two is a client concern, not data loss.
+    // in-batch map is empty. The client now remaps its local id on the partner.create result
+    // (issue #7), so this path is the server-side safety net: an *un*remapped placeholder is dropped
+    // to null rather than allowed to violate the FK. The customer still exists to relink against.
     $orderUuid = (string) Str::uuid();
     pushBatch([], [$this->fx->orderCommand($orderUuid, [], ['customer_id' => $placeholderId])])
         ->assertOk()->assertJsonPath('results.0.status', 'ok');
 
     expect(Order::query()->where('uuid', $orderUuid)->firstOrFail()->customer_id)->toBeNull()
         ->and($customer->getKey())->toBeGreaterThan(0);
+});
+
+it('links a later-batch order to a customer created in an earlier partner.create batch', function (): void {
+    $partnerUuid = (string) Str::uuid();
+
+    // Batch 1: create the customer offline.
+    pushBatch([command('partner.create', ['id' => -1712340001, 'uuid' => $partnerUuid, 'name' => 'Repeat Customer'])])->assertOk();
+    $customer = Customer::query()->where('uuid', $partnerUuid)->firstOrFail();
+
+    // Batch 2: the client has remapped its local id, so a later order references the real (positive)
+    // id — which links directly, no partner.create needed in this batch. This is the end state
+    // issue #7's client remap produces.
+    $orderUuid = (string) Str::uuid();
+    pushBatch([], [$this->fx->orderCommand($orderUuid, [], ['customer_id' => $customer->getKey()])])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect((int) Order::query()->where('uuid', $orderUuid)->firstOrFail()->customer_id)->toBe($customer->getKey());
 });
 
 it('does not double-bump the prep snapshot on a retried prep.sent', function (): void {

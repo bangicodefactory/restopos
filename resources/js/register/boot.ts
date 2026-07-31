@@ -17,6 +17,7 @@ import { loadCatalogIndex } from './data/catalog-load';
 import { setCatalog } from './data/catalog';
 import { createPersistence, loadOrdersFromDb } from './data/persistence';
 import { APP_VERSION, clearRuntime, configIdFromUrl, getRuntime, setRuntime, tryRuntime } from './data/runtime';
+import { remapPlaceholderCustomer } from './domain/customer-remap';
 import { applyServerAck, configureOrderActions, hydrateOrders, markSyncState } from './domain/order-actions';
 import { bindingsFromCatalog, createPrinterRouter } from './domain/printing';
 import { fetchCurrentSession } from './domain/session-actions';
@@ -224,6 +225,15 @@ function applySyncResult(result: SyncRecordResult): void {
     const sync = useSyncStore.getState();
 
     if (result.status === 'ok') {
+        // A `partner.create` result reconciles an offline customer's placeholder id to the real one
+        // (issue #7). It carries no order, so handle it and stop before the order-ack path below.
+        if (result.partner) {
+            const rt = tryRuntime();
+            if (rt) void remapPlaceholderCustomer(rt.db, result.partner).catch(() => {});
+            sync.noteSync();
+            return;
+        }
+
         applyServerAck(uuid, {
             ...(result.order
                 ? {
