@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+// Own namespace so the `pushOrders` / `orderOnSession` helpers below stay out of the global function
+// table Pest shares across every test file (the Pest DSL resolves via the global-namespace fallback).
+
+namespace Tests\Feature\BootstrapContract;
+
 use App\Models\Audit\SyncConflict;
 use App\Models\Pos\Order;
 use App\Models\Pos\Payment;
@@ -132,6 +137,23 @@ it('links a refund to the original order resolved from refunded_order_uuid', fun
         ->and((bool) $refund->is_refund)->toBeTrue();
 });
 
+it('resolves a refund against an original earlier in the same batch', function (): void {
+    $originalUuid = (string) Str::uuid();
+    $refundUuid = (string) Str::uuid();
+
+    // One push, original before refund: each command is persisted before the next is ingested.
+    pushOrders([
+        orderOnSession($originalUuid, ['state' => 'paid']),
+        orderOnSession($refundUuid, ['is_refund' => true, 'refunded_order_uuid' => $originalUuid]),
+    ])->assertOk()
+        ->assertJsonPath('results.0.status', 'ok')
+        ->assertJsonPath('results.1.status', 'ok');
+
+    $original = Order::query()->where('uuid', $originalUuid)->firstOrFail();
+    $refund = Order::query()->where('uuid', $refundUuid)->firstOrFail();
+    expect((int) $refund->refunded_order_id)->toBe($original->getKey());
+});
+
 // ── (d) tips persist, and a zero tip stays distinct from "not asked" ──
 
 it('persists a tip and keeps an explicit zero tip distinct from not-asked', function (): void {
@@ -181,4 +203,26 @@ it('stores the flat card details the register sends on a payment command', funct
         ->and($payment->card_last4)->toBe('4242')
         ->and($payment->auth_code)->toBe('A12345')
         ->and($payment->transaction_reference)->toBe('txn_987');
+});
+
+it('lets a nested terminal object win over the flat card fields on overlap', function (): void {
+    $uuid = (string) Str::uuid();
+
+    pushOrders([orderOnSession($uuid, ['state' => 'paid'], [[
+        'op' => 'create',
+        'uuid' => (string) Str::uuid(),
+        'payment_method_id' => $this->fx->card->getKey(),
+        'amount' => '24.20',
+        'payment_status' => 'done',
+        'card_brand' => 'visa',                    // flat, overlaps → nested wins
+        'auth_code' => 'FLAT01',                    // flat only → preserved
+        'terminal' => ['card_brand' => 'amex'],
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $payment = Payment::query()
+        ->where('pos_order_id', Order::query()->where('uuid', $uuid)->value('id'))
+        ->firstOrFail();
+
+    expect($payment->card_brand)->toBe('amex')
+        ->and($payment->auth_code)->toBe('FLAT01');
 });

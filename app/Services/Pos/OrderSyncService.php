@@ -322,6 +322,11 @@ final readonly class OrderSyncService
      * its uuid (`refunded_order_uuid`); a fully synced client may already hold the id. Resolve the
      * uuid within the company so the `refunded_order_id` foreign key is set on ingest.
      *
+     * Batch ordering: commands are ingested in array order and each is persisted before the next,
+     * so an original that precedes its refund in the same push resolves here. The one gap is a
+     * refund pushed *ahead* of a not-yet-synced original — it links to null (rare: the original is
+     * settled and synced before it can be refunded).
+     *
      * @param  array<string, mixed>  $attributes
      */
     private function resolveRefundedOrderId(PosConfig $config, array $attributes): ?int

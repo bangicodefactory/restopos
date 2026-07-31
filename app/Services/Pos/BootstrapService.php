@@ -488,9 +488,10 @@ final readonly class BootstrapService
         }
 
         $row = $session->attributesToArray();
-        // The client reads `opening_float` (packages/domain PosSessionRow); the column is
-        // `cash_balance_opening`. Same rename SessionResource applies on the endpoint path.
+        // Rename the column to the field the client reads (packages/domain PosSessionRow), matching
+        // SessionResource on the endpoint path — one contract, the raw column name never leaks.
         $row['opening_float'] = (string) $session->cash_balance_opening;
+        unset($row['cash_balance_opening']);
 
         return $row;
     }
