@@ -19,7 +19,9 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        php: [8.2, 8.3, 8.4]
+        # The composer.lock resolves symfony/* v8.1 (platform floor php >= 8.4.1), so 8.4 is the
+        # real (and only) supported line — matching composer.json's `php` constraint. See issue #3.
+        php: ['8.4']
 
     name: PHP ${{ matrix.php }}
 
