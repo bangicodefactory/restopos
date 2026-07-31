@@ -6,12 +6,13 @@ import { useOrderStore } from '../state/order-store';
 import { installCatalog, makeProduct, makeVariant, resetRegisterState } from './__fixtures__/catalog';
 import {
     currentDelta,
+    fireCourseAndSend,
     knownSnapshotVersion,
     rememberSnapshotVersion,
     sendToKitchen,
     unsentChangeCount,
 } from './kitchen-send';
-import { addLine, createOrder, setQuantity } from './order-actions';
+import { addCourse, addLine, createOrder, setLineCourse, setQuantity } from './order-actions';
 
 /**
  * Unit coverage for KDS-056 … KDS-058 — the send, and in particular KDS-057: when another till has
@@ -184,5 +185,51 @@ describe('sendToKitchen', () => {
         expect(outcome.status).toBe('failed');
         expect(useOrderStore.getState().orders[orderUuid]?.prep_state).toBe('none');
         expect(unsentChangeCount(orderUuid)).toBe(1);
+    });
+});
+
+describe('fireCourseAndSend (RST-084 / BAN-408)', () => {
+    it('fires only the selected course and leaves the others unsent and fireable', async () => {
+        const orderUuid = await createOrder({ tableId: 1 });
+        const courseA = addCourse(orderUuid, 'Starters');
+        const courseB = addCourse(orderUuid, 'Mains');
+        const lineA = addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        const lineB = addLine({ orderUuid, variantId: PIZZA, quantity: 3 });
+        setLineCourse(lineA, courseA);
+        setLineCourse(lineB, courseB);
+
+        const first = await fireCourseAndSend(orderUuid, courseA);
+
+        expect(first).toMatchObject({ status: 'sent', online: true });
+        // One POST, to the fire endpoint of course A — no redundant second send.
+        expect(post).toHaveBeenCalledOnce();
+        expect(String(post.mock.calls[0]?.[0])).toContain(`courses/${courseA}/fire`);
+        expect(first.delta.changes).toHaveLength(1);
+
+        const state = useOrderStore.getState();
+        expect(state.courses[courseA]?.fired).toBe(true);
+        expect(state.courses[courseB]?.fired).toBe(false);
+        // Course B was NOT marked sent — this is the client half of BAN-408.
+        expect(unsentChangeCount(orderUuid)).toBe(3);
+
+        // Firing course B afterwards still has its line to send.
+        const second = await fireCourseAndSend(orderUuid, courseB);
+        expect(second.status).toBe('sent');
+        expect(second.delta.changes).toHaveLength(1);
+        expect(useOrderStore.getState().courses[courseB]?.fired).toBe(true);
+        expect(unsentChangeCount(orderUuid)).toBe(0);
+    });
+
+    it('returns outdated when another till fired past our snapshot', async () => {
+        const orderUuid = await createOrder({ tableId: 1 });
+        const course = addCourse(orderUuid, 'Starters');
+        const line = addLine({ orderUuid, variantId: PIZZA });
+        setLineCourse(line, course);
+
+        post.mockRejectedValueOnce(conflict(null));
+
+        expect((await fireCourseAndSend(orderUuid, course)).status).toBe('outdated');
+        // The course must not be marked fired on a conflict.
+        expect(useOrderStore.getState().courses[course]?.fired).toBe(false);
     });
 });

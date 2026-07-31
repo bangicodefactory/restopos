@@ -32,6 +32,7 @@ export type OrderPanelProps = {
     orderUuid: string | null;
     onPay: () => void;
     onSend: () => void;
+    onFireCourse: (courseUuid: string) => void;
     onBill: () => void;
     onSplit: () => void;
     onTransfer: () => void;
@@ -42,6 +43,7 @@ export function OrderPanel({
     orderUuid,
     onPay,
     onSend,
+    onFireCourse,
     onBill,
     onSplit,
     onTransfer,
@@ -110,11 +112,13 @@ export function OrderPanel({
                 {lines.length === 0 ? (
                     <p className="p-6 text-center text-slate-500">{t('reg.order.empty')}</p>
                 ) : (
-                    grouped.map((group, index) => (
-                        <div key={group.course?.uuid ?? `plain-${index}`}>
-                            {group.course ? (
-                                <CourseHeader course={group.course} onFire={onSend} />
-                            ) : null}
+                    grouped.map((group, index) => {
+                        const course = group.course;
+                        return (
+                            <div key={course?.uuid ?? `plain-${index}`}>
+                                {course ? (
+                                    <CourseHeader course={course} onFire={() => onFireCourse(course.uuid)} />
+                                ) : null}
                             <ul>
                                 {group.lines.map((line) => (
                                     <LineRow
@@ -141,8 +145,9 @@ export function OrderPanel({
                                     />
                                 ))}
                             </ul>
-                        </div>
-                    ))
+                            </div>
+                        );
+                    })
                 )}
             </div>
 

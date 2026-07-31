@@ -29,12 +29,13 @@ import { useUiStore } from '../state/ui-store';
 export type ProductScreenProps = {
     onPay: () => void;
     onSend: () => void;
+    onFireCourse: (courseUuid: string) => void;
     onBill: () => void;
     onSplit: () => void;
     onTransfer: () => void;
 };
 
-export function ProductScreen({ onPay, onSend, onBill, onSplit, onTransfer }: ProductScreenProps): JSX.Element {
+export function ProductScreen({ onPay, onSend, onFireCourse, onBill, onSplit, onTransfer }: ProductScreenProps): JSX.Element {
     const t = useT();
     const catalog = useCatalog();
     const orderUuid = useSelectedOrderUuid();
@@ -136,6 +137,7 @@ export function ProductScreen({ onPay, onSend, onBill, onSplit, onTransfer }: Pr
                     orderUuid={orderUuid}
                     onPay={onPay}
                     onSend={onSend}
+                    onFireCourse={onFireCourse}
                     onBill={onBill}
                     onSplit={onSplit}
                     onTransfer={onTransfer}
