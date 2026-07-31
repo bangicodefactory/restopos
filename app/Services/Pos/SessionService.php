@@ -226,6 +226,7 @@ final readonly class SessionService
         ?string $notes = null,
         bool $managerApproved = false,
         bool $force = false,
+        ?int $approvedByEmployeeId = null,
     ): PosSession {
         if ($session->state === SessionState::Closed) {
             throw new DomainException('This session is already closed.');
@@ -238,7 +239,7 @@ final readonly class SessionService
         }
 
         return $this->connection->transaction(function () use (
-            $session, $countedCash, $countedByMethod, $denominations, $employeeId, $userId, $notes, $managerApproved, $force, $drafts
+            $session, $countedCash, $countedByMethod, $denominations, $employeeId, $userId, $notes, $managerApproved, $force, $drafts, $approvedByEmployeeId
         ): PosSession {
             $expectedCash = $this->expectedCash($session);
             $counted = $countedCash ?? $expectedCash;
@@ -279,6 +280,8 @@ final readonly class SessionService
                 'cash_difference' => $difference,
                 'closing_forced' => $force && $drafts > 0,
                 'closing_force_reason' => $force && $drafts > 0 ? "{$drafts} draft order(s) left open" : null,
+                // Who signed off on the over-variance (REG-016); null on a within-threshold close.
+                'over_variance_approved_by_employee_id' => $managerApproved ? $approvedByEmployeeId : null,
             ])->save();
 
             $totals = $this->summaries->freeze($session, $countedByMethod);
