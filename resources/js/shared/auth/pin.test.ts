@@ -1,10 +1,15 @@
 import 'fake-indexeddb/auto';
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import type { EmployeeRow } from '@domain/types';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { META, PosDb, dbNameFor, getMeta } from '../db';
+import { importDeviceKey } from './device';
 import {
     LOCKOUT_MS,
     MAX_PIN_FAILURES,
@@ -33,16 +38,6 @@ const NOW = Date.parse('2026-07-28T12:00:00.000Z');
 let configId = 8000;
 let db: PosDb;
 let deviceKey: CryptoKey;
-
-async function importDeviceKey(secret: string): Promise<CryptoKey> {
-    return globalThis.crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(secret) as unknown as BufferSource,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign'],
-    );
-}
 
 function employee(partial: Partial<EmployeeRow> & Pick<EmployeeRow, 'id'>): EmployeeRow {
     return {
@@ -303,4 +298,77 @@ describe('verifyManagerApproval', () => {
         }
         expect(await verifyManagerApproval(deps(), attempt)).toMatchObject({ ok: false, reason: 'locked' });
     });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('cross-language verifier parity (BAN-397)', () => {
+    /**
+     * The one test that would have caught the offline-login blocker: the client must reproduce, hex
+     * for hex, the verifier the *server* emits — otherwise no cashier can ever log in with the
+     * network unplugged, which is the whole reason bootstrap ships verifiers at all.
+     *
+     * The self-referential test above ("build the verifier with sha256, then verify it") cannot see
+     * that divergence: it agrees with itself no matter which scheme it picks. So this block reads a
+     * shared fixture whose expected verifiers were produced by the PHP server formula
+     * ({@see \App\Services\Identity\EmployeeAuthService}) and asserts against those frozen values.
+     * `tests/Feature/BootstrapTest.php` reads the same file — the two suites meet on one string.
+     *
+     * It drives the *shipped* client path end to end: `importDeviceKey` (device.ts, which encodes the
+     * hex secret as UTF-8 to match the server's HMAC key) + `sha256Hex` + `hmacHex` (pin.ts). Revert
+     * pin.ts to HMAC the raw PIN, or device.ts to decode the hex to bytes, and these hexes diverge.
+     */
+    type ParityCase = { kind: 'pin' | 'badge'; employeeId: number; secret: string; verifier: string };
+    type ParityFixture = { deviceSecret: string; cases: ParityCase[] };
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const fixture = JSON.parse(
+        readFileSync(resolve(here, '../../../../tests/fixtures/auth/pin-verifier.json'), 'utf8'),
+    ) as ParityFixture;
+    const pinCases = fixture.cases.filter((c) => c.kind === 'pin');
+    const badgeCases = fixture.cases.filter((c) => c.kind === 'badge');
+
+    it('finds the shared fixture corpus', () => {
+        expect(fixture.deviceSecret).toMatch(/^[0-9a-f]{64}$/);
+        expect(fixture.cases.length).toBeGreaterThanOrEqual(4);
+        expect(pinCases.length).toBeGreaterThan(0);
+        expect(badgeCases.length).toBeGreaterThan(0);
+    });
+
+    // (1) The shipped primitives reproduce the server hex exactly — guards `sha256Hex`, `hmacHex`,
+    // and `importDeviceKey`'s UTF-8 encoding of the hex secret (the server keys the HMAC on the same
+    // bytes). If device.ts reverted to decoding the hex to bytes, every one of these would diverge.
+    it.each(fixture.cases)(
+        'primitive path reproduces the server $kind verifier for employee #$employeeId',
+        async ({ kind, employeeId, secret, verifier }) => {
+            const key = await importDeviceKey(fixture.deviceSecret);
+            expect(await hmacHex(key, `${kind}:${employeeId}:${await sha256Hex(secret)}`)).toBe(verifier);
+        },
+    );
+
+    // (2) The exact path BAN-397 broke: the shipped `verifyPin` / `verifyBadge` must accept the
+    // plaintext against a *server-emitted* verifier. When they HMAC'd the raw PIN instead of
+    // sha256(PIN), this returned `wrong_pin` for every cashier, forever, with the network down.
+    it.each(pinCases)(
+        'verifyPin accepts PIN "$secret" for employee #$employeeId against the server verifier',
+        async ({ employeeId, secret, verifier }) => {
+            const deviceKey = await importDeviceKey(fixture.deviceSecret);
+            const emp = employee({ id: employeeId, has_pin: true, pin_verifier: verifier });
+            expect(await verifyPin({ db, deviceKey, employees: [emp] }, employeeId, secret)).toMatchObject({
+                ok: true,
+            });
+        },
+    );
+
+    it.each(badgeCases)(
+        'verifyBadge authenticates badge "$secret" for employee #$employeeId against the server verifier',
+        async ({ employeeId, secret, verifier }) => {
+            const deviceKey = await importDeviceKey(fixture.deviceSecret);
+            const emp = employee({ id: employeeId, has_pin: true, badge_verifier: verifier });
+            expect(await verifyBadge({ db, deviceKey, employees: [emp] }, secret)).toMatchObject({
+                ok: true,
+                employee: emp,
+            });
+        },
+    );
 });
