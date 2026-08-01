@@ -17,10 +17,10 @@
  *  - **Rotating a table's token is a separate, explicit action**, never a side effect of saving
  *    geometry: `identifier` is the QR capability token and every printed code for that table dies
  *    with it. It has its own route (`POST /tables/{table}/rotate-token`) and its own confirmation.
- *  - **The geometry is sent and ignored.** `PATCH /floors/{floor}` validates the *floor's* four
- *    fields only; there is no back-office write for tables in the contract. The plan is still
- *    editable and still submitted — so the day the route lands nothing here changes — and the
- *    banner says exactly what happens today rather than letting a save look successful.
+ *  - **The whole plan is persisted on save (BOF-115).** `PATCH /floors/{floor}` reconciles the
+ *    submitted `tables[]`: existing tables are updated in place, new ones (client id < 0) are
+ *    created with a fresh token, and any table dropped from the plan is deleted. Geometry,
+ *    parenting and deletions survive a reload.
  *  - **The background image is a local overlay.** `background_media_id` is an id with no URL in
  *    the payload and no upload endpoint, so a chosen image aligns the plan in this browser
  *    session and is not persisted. Stated, not implied.
@@ -245,10 +245,6 @@ export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Elemen
             <Head title={`${t('floor.edit')} — ${floor.name}`} />
 
             <div className="space-y-4">
-                <Notice tone="warn" title={t('floor.geometryUnsupportedTitle')}>
-                    {t('floor.geometryUnsupported')}
-                </Notice>
-
                 <div className="grid gap-4 xl:grid-cols-[3fr_1fr]">
                     <div className="space-y-3">
                         <PlanToolbar

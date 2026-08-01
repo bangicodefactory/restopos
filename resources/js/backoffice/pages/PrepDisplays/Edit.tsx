@@ -9,10 +9,10 @@
  * move-up/move-down buttons next to the drag affordance — a keyboard user must be able to
  * reorder a state machine, not just look at it.
  *
- * **Honest write surface.** `PATCH /prep-displays/{prepDisplay}` validates the display's options
- * and `category_ids` and nothing else (`WRITABLE_DISPLAY_KEYS`): the `stages` array is sent with
- * the save and is dropped server-side today. That is stated on the panel — same treatment the
- * floor-plan geometry gets — so nobody discovers it by reloading.
+ * **The stage list is persisted on save (BOF-116).** `PATCH /prep-displays/{prepDisplay}`
+ * reconciles the submitted `stages[]`: existing stages keep their id (so in-flight tickets are not
+ * orphaned) and are updated, new ones are created, dropped ones are deleted, and the payload order
+ * becomes the stored `sequence` — which is what the board's next-stage behaviour follows.
  *
  * `alert_after_minutes` per stage is the per-lane escalation and is independent of the display's
  * global `late_threshold_minutes`; both are editable and the relationship between them is spelt
@@ -37,7 +37,7 @@ import { AppLayout } from '../../components/layout/AppLayout';
 import { ConfirmAction } from '../../components/ui/ConfirmAction';
 import { TokenField } from '../../components/ui/CopyButton';
 import { Tabs, type TabItem } from '../../components/ui/Tabs';
-import { Badge, Card, CardBody, CardHeader, EmptyState, Notice } from '../../components/ui/primitives';
+import { Badge, Card, CardBody, CardHeader, EmptyState } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { routes } from '../../lib/routes';
 
@@ -99,7 +99,7 @@ export default function PrepDisplayEdit({
     const submit = useCallback(() => {
         form.transform((data) => ({
             ...data,
-            // Sent for the day the contract accepts it; dropped by validation today.
+            // The list order is the state machine: index → sequence, persisted server-side.
             stages: editableStages.map((stage, index) => ({
                 id: stage.id,
                 name: stage.name,
@@ -324,10 +324,6 @@ function StageEditor({
 
     return (
         <div className="space-y-4">
-            <Notice tone="warn" title={t('display.stagesReadOnly')}>
-                {t('display.stagesSentAnyway')}
-            </Notice>
-
             <Card>
                 <CardHeader
                     title={t('display.stages')}
