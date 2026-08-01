@@ -8,11 +8,11 @@ import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
 import {
     addPayment,
+    commitPaidOrder,
     removePayment,
     setPaymentAmount,
     setPaymentStatus,
     setTip,
-    validateOrder,
 } from '../domain/order-actions';
 import { openDrawer } from '../domain/printing';
 import {
@@ -124,10 +124,22 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
             return;
         }
 
-        validateOrder(orderUuid);
-        // Bypass the debounce: the receipt screen is one navigation away and a crash in between
-        // would lose the sale.
-        await tryRuntime()?.syncer.drain();
+        // Validate, then force the sale to disk before navigating to the receipt (REG-217): the
+        // 250 ms write debounce would otherwise leave a crash window that loses the sale.
+        const runtime = tryRuntime();
+        const flushed = await commitPaidOrder(
+            orderUuid,
+            runtime
+                ? { flushNow: runtime.persistence.flushNow, drain: () => runtime.syncer.drain() }
+                : null,
+        );
+        if (!flushed) {
+            // The local replica write failed. The order was still pushed to the server, but
+            // IndexedDB is not durable, so warn rather than navigating past it — re-tapping validate
+            // retries the flush.
+            setError(t('reg.pay.saveFailed'));
+            return;
+        }
         onValidated();
     }, [
         catalog.paymentMethods,
