@@ -30,7 +30,8 @@ import { orderTotals } from '../domain/totals';
 export type Persistence = {
     persist: (orderUuid: string) => void;
     enqueue: (orderUuid: string) => void;
-    flushNow: () => Promise<void>;
+    /** Force the pending debounced write out immediately. Resolves `false` if a write failed. */
+    flushNow: () => Promise<boolean>;
     attachLifecycle: () => () => void;
 };
 
@@ -179,10 +180,15 @@ async function writeOrder(db: PosDb, state: OrderSlice, orderUuid: string): Prom
 
 export function createPersistence(db: PosDb, syncer: OutboxSyncer): Persistence {
     const dirty = new Set<string>();
+    // Whether the most recently completed flush hit a write error. flushNow() reads this after its
+    // own flush settles (flushes are serialised by the flusher) so it can tell the payment screen a
+    // sale did not reach durable storage instead of navigating past a silent loss.
+    let lastFlushFailed = false;
 
     const flush = async (): Promise<void> => {
         const batch = [...dirty];
         dirty.clear();
+        let failed = false;
         for (const orderUuid of batch) {
             const state = useOrderStore.getState();
             try {
@@ -190,8 +196,10 @@ export function createPersistence(db: PosDb, syncer: OutboxSyncer): Persistence 
             } catch {
                 // Re-arm: a failed write must not silently drop the order from the dirty set.
                 dirty.add(orderUuid);
+                failed = true;
             }
         }
+        lastFlushFailed = failed;
     };
 
     const flusher = createFlusher(flush, 250);
@@ -209,6 +217,7 @@ export function createPersistence(db: PosDb, syncer: OutboxSyncer): Persistence 
         flushNow: async () => {
             flusher.schedule();
             await flusher.flushNow();
+            return !lastFlushFailed;
         },
         attachLifecycle: flusher.attachLifecycle,
     };

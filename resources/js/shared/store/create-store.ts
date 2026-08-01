@@ -73,19 +73,21 @@ export function shallow<T>(a: T, b: T): boolean {
 export function createFlusher(flush: () => Promise<void>, debounceMs = 250) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pending = false;
-    let inFlight: Promise<void> | null = null;
+    // A single serial chain: a debounce-timer flush and a manual flushNow can both fire, and each
+    // must run *after* the previous one settles rather than racing a second writer over the same
+    // store. `then(flush, flush)` also runs the next flush even if the prior one rejected, so one
+    // failure can't wedge the chain.
+    let chain: Promise<void> = Promise.resolve();
 
     const run = async (): Promise<void> => {
         if (timer !== null) {
             clearTimeout(timer);
             timer = null;
         }
-        if (!pending) return inFlight ?? Promise.resolve();
+        if (!pending) return chain;
         pending = false;
-        inFlight = flush().finally(() => {
-            inFlight = null;
-        });
-        return inFlight;
+        chain = chain.then(flush, flush);
+        return chain;
     };
 
     const schedule = (): void => {

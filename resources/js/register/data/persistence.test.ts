@@ -32,6 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+    vi.restoreAllMocks();
     db.close();
     await Dexie.delete(dbNameFor(configId));
 });
@@ -48,12 +49,33 @@ it('flushNow writes the order to IndexedDB immediately, with no debounce window'
     // payment-validate flow must not leave open.
     expect(await db.orders.count()).toBe(0);
 
-    await persistence.flushNow();
-
-    // flushNow forces the whole order graph out immediately, no waiting on the debounce.
+    // flushNow forces the whole order graph out immediately, no waiting on the debounce, and
+    // reports success.
+    expect(await persistence.flushNow()).toBe(true);
     expect(await db.orders.count()).toBe(1);
     expect((await db.orders.get(orderUuid))?.uuid).toBe(orderUuid);
     expect((await db.lines.get(lineUuid))?.order_uuid).toBe(orderUuid);
+});
+
+it('reports false and keeps the order dirty when the local write fails', async () => {
+    const syncer = { enqueueOrder: vi.fn(async () => undefined) } as unknown as OutboxSyncer;
+    const persistence = createPersistence(db, syncer);
+    configureOrderActions({ persist: persistence.persist, enqueue: persistence.enqueue, onChange: () => {} });
+
+    const orderUuid = await createOrder({ tableId: 1 });
+    addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+    // Simulate a durable-store failure (e.g. a corrupt DB the quota rescue can't recover).
+    vi.spyOn(db.orders, 'put').mockRejectedValue(new Error('disk full'));
+
+    // The write is reported as failed rather than swallowed — the payment screen warns the cashier.
+    expect(await persistence.flushNow()).toBe(false);
+    expect(await db.orders.count()).toBe(0);
+
+    // The order stays dirty, so once writes work again a later flush recovers it.
+    vi.restoreAllMocks();
+    expect(await persistence.flushNow()).toBe(true);
+    expect(await db.orders.count()).toBe(1);
 });
 
 it('is a no-op when nothing is dirty', async () => {

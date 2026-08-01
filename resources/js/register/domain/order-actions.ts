@@ -1037,6 +1037,25 @@ export function validateOrder(orderUuid: string): void {
     commit(orderUuid);
 }
 
+/**
+ * Settle a paid order and force it to durable storage before the caller navigates away (REG-217).
+ *
+ * The ordering is the whole point: `flushNow()` writes the local IndexedDB replica *now* — the
+ * 250 ms debounce would otherwise leave a crash window between "paid" and "flushed" that loses the
+ * sale — and only then does `drain()` push to the server best-effort. The drain runs even when the
+ * flush failed, so the sale still reaches the server, and the flush result is returned so the caller
+ * can warn the cashier instead of silently navigating past a lost local write.
+ */
+export async function commitPaidOrder(
+    orderUuid: string,
+    durability: { flushNow: () => Promise<boolean>; drain: () => Promise<unknown> } | null,
+): Promise<boolean> {
+    validateOrder(orderUuid);
+    const flushed = (await durability?.flushNow()) ?? true;
+    await durability?.drain();
+    return flushed;
+}
+
 export function markPrinted(orderUuid: string): void {
     updateOrder(orderUuid, (order) => {
         order.print_count += 1;
