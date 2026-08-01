@@ -69,9 +69,12 @@ final class FloorController extends Controller
     {
         [, $config] = $this->deviceContext($request);
 
+        $data = $request->validated();
+        unset($data['tables']);
+
         /** @var Floor $floor */
         $floor = Floor::query()->create([
-            ...$request->validated(),
+            ...$data,
             'uuid' => (string) Str::uuid(),
             'company_id' => $config->company_id,
         ]);
@@ -84,7 +87,12 @@ final class FloorController extends Controller
     /** `PATCH /api/pos/floors/{floor}` */
     public function update(FloorRequest $request, Floor $floor): JsonResponse
     {
-        $floor->forceFill($request->validated())->save();
+        // `tables[]` is the back-office plan editor's concern (see Backoffice\FloorController);
+        // this endpoint writes floor attributes only.
+        $data = $request->validated();
+        unset($data['tables']);
+
+        $floor->forceFill($data)->save();
 
         return new JsonResponse(['floor' => $floor->attributesToArray()]);
     }

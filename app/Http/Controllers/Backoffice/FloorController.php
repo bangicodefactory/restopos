@@ -8,9 +8,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Restaurant\FloorRequest;
 use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -20,9 +23,18 @@ use Inertia\Response;
  * Table `identifier` is the QR capability token. Rotating it invalidates every
  * printed QR for that table, so it is an explicit action, never a side effect of
  * saving geometry.
+ *
+ * The editor submits the whole plan with the floor. `update()` reconciles it
+ * (BOF-115): existing tables keep their id (and therefore their QR token) and are
+ * updated in place, new tables (client id < 0) are created with a fresh token,
+ * and any existing table the payload no longer mentions is soft-deleted. Parent
+ * links are resolved and cycle-checked in a second pass, because a new table may
+ * be parented to another table created in the same save.
  */
 final class FloorController extends Controller
 {
+    public function __construct(private readonly ConnectionInterface $connection) {}
+
     public function index(): Response
     {
         return Inertia::render('Floors/Index', [
@@ -55,9 +67,145 @@ final class FloorController extends Controller
 
     public function update(FloorRequest $request, Floor $floor): RedirectResponse
     {
-        $floor->forceFill($request->validated())->save();
+        $data = $request->validated();
+        $tables = $data['tables'] ?? null;
+        unset($data['tables']);
+
+        $this->connection->transaction(function () use ($floor, $data, $tables): void {
+            $floor->forceFill($data)->save();
+
+            if ($tables !== null) {
+                $this->syncTables($floor, $tables);
+            }
+        });
 
         return back()->with('success', 'Floor saved.');
+    }
+
+    /**
+     * Reconcile the submitted plan against what is stored: update the tables that
+     * survive, create the new ones, soft-delete the ones the payload dropped, then
+     * wire up parent links once every table has a real id.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function syncTables(Floor $floor, array $rows): void
+    {
+        /** @var Collection<int, RestaurantTable> $existing */
+        $existing = RestaurantTable::query()
+            ->where('restaurant_floor_id', $floor->getKey())
+            ->get()
+            ->keyBy(static fn (RestaurantTable $t): int => (int) $t->getKey());
+
+        // Pass 1 — attributes only (parent links wait until every id exists).
+        /** @var array<int, RestaurantTable> $byClientId */
+        $byClientId = [];
+
+        foreach ($rows as $row) {
+            $clientId = (int) $row['id'];
+
+            $attributes = [
+                'table_number' => (int) $row['table_number'],
+                'name' => $row['name'] ?? null,
+                'shape' => $row['shape'] ?? null,
+                'position_x' => $row['position_x'] ?? null,
+                'position_y' => $row['position_y'] ?? null,
+                'width' => $row['width'] ?? null,
+                'height' => $row['height'] ?? null,
+                'seats' => (int) ($row['seats'] ?? 2),
+                'color' => $row['color'] ?? null,
+                'active' => (bool) ($row['active'] ?? true),
+            ];
+            // A null geometry/shape means "not sent"; keep the stored default rather than nulling it.
+            $attributes = array_filter($attributes, static fn (mixed $v): bool => $v !== null);
+
+            $model = $clientId > 0 ? $existing->get($clientId) : null;
+
+            if ($model !== null) {
+                $model->forceFill($attributes)->save();
+            } else {
+                /** @var RestaurantTable $model */
+                $model = RestaurantTable::query()->create([
+                    ...$attributes,
+                    'restaurant_floor_id' => $floor->getKey(),
+                    'company_id' => $floor->company_id,
+                    'uuid' => (string) Str::uuid(),
+                    // A new table gets its own QR capability token; it is never client-supplied.
+                    'identifier' => RestaurantTable::newIdentifier(),
+                ]);
+            }
+
+            $byClientId[$clientId] = $model;
+        }
+
+        // Deletions — any stored table the payload no longer mentions.
+        $keptIds = [];
+        foreach ($rows as $row) {
+            if ((int) $row['id'] > 0) {
+                $keptIds[] = (int) $row['id'];
+            }
+        }
+        $removed = $existing->keys()->diff($keptIds);
+        if ($removed->isNotEmpty()) {
+            RestaurantTable::query()->whereIn('id', $removed->all())->get()
+                ->each(static fn (RestaurantTable $t): ?bool => $t->delete());
+        }
+
+        // Pass 2 — parent links, resolved through the client→server id map and cycle-guarded.
+        $this->applyParentLinks($rows, $byClientId);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @param  array<int, RestaurantTable>  $byClientId  keyed by the client id sent in the payload
+     */
+    private function applyParentLinks(array $rows, array $byClientId): void
+    {
+        // Resolve each table's desired parent into server-id space, keyed by the child's server id.
+        // A parent that is not part of this save is dropped rather than trusted, so a stale client
+        // id can never point a table off its own floor.
+        /** @var array<int, array{model: RestaurantTable, parentId: ?int}> $desired */
+        $desired = [];
+
+        foreach ($rows as $row) {
+            $model = $byClientId[(int) $row['id']];
+            $rawParent = $row['parent_id'] ?? null;
+            $parent = $rawParent === null ? null : ($byClientId[(int) $rawParent] ?? null);
+            $desired[(int) $model->getKey()] = ['model' => $model, 'parentId' => $parent?->getKey()];
+        }
+
+        foreach ($desired as $childId => $link) {
+            if ($link['parentId'] !== null && $this->wouldCycle($desired, $childId, $link['parentId'])) {
+                throw ValidationException::withMessages([
+                    'tables' => 'A table link would create a cycle.',
+                ]);
+            }
+        }
+
+        foreach ($desired as $link) {
+            $link['model']->forceFill(['parent_id' => $link['parentId']])->save();
+        }
+    }
+
+    /**
+     * Walk the proposed parent chain from `$parentId` up; a return to `$childId`
+     * (or a self-link) is a cycle. Depth-bounded as a belt-and-braces stop.
+     *
+     * @param  array<int, array{model: RestaurantTable, parentId: ?int}>  $desired
+     */
+    private function wouldCycle(array $desired, int $childId, int $parentId): bool
+    {
+        $cursor = $parentId;
+        $depth = 0;
+
+        while ($cursor !== null && $depth++ < 32) {
+            if ($cursor === $childId) {
+                return true;
+            }
+            $cursor = $desired[$cursor]['parentId'] ?? null;
+        }
+
+        return false;
     }
 
     /** Rotating a table token invalidates its printed QR — deliberate, explicit. */
