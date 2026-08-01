@@ -157,14 +157,20 @@ final class PrepDisplayController extends Controller
             ->where('prep_display_id', $displayId)
             ->update(['sequence' => DB::raw('sequence + 100000')]);
 
+        // The board resolves a single default stage, so keep only the first one the payload marks.
+        $defaultTaken = false;
+
         foreach (array_values($rows) as $index => $row) {
+            $isDefault = (bool) ($row['is_default'] ?? false) && ! $defaultTaken;
+            $defaultTaken = $defaultTaken || $isDefault;
+
             $payload = [
                 'name' => (string) $row['name'],
                 'stage_type' => (string) $row['stage_type'],
                 'color' => $row['color'] ?? null,
                 'alert_after_minutes' => isset($row['alert_after_minutes']) ? (int) $row['alert_after_minutes'] : null,
                 'sequence' => ($index + 1) * 10,
-                'is_default' => (bool) ($row['is_default'] ?? false),
+                'is_default' => $isDefault,
                 'updated_at' => now(),
             ];
 

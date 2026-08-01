@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
+use App\Enums\TableShape;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Restaurant\FloorRequest;
 use App\Models\Restaurant\Floor;
@@ -104,20 +105,21 @@ final class FloorController extends Controller
         foreach ($rows as $row) {
             $clientId = (int) $row['id'];
 
+            // `name` and `color` are nullable and pass through as-is — clearing one must persist, not
+            // be swallowed. The geometry/shape columns are NOT NULL with DB defaults and the editor
+            // always sends them, so they are only coalesced as a belt-and-braces for a create.
             $attributes = [
                 'table_number' => (int) $row['table_number'],
                 'name' => $row['name'] ?? null,
-                'shape' => $row['shape'] ?? null,
-                'position_x' => $row['position_x'] ?? null,
-                'position_y' => $row['position_y'] ?? null,
-                'width' => $row['width'] ?? null,
-                'height' => $row['height'] ?? null,
+                'shape' => $row['shape'] ?? TableShape::Square->value,
+                'position_x' => $row['position_x'] ?? 10,
+                'position_y' => $row['position_y'] ?? 10,
+                'width' => $row['width'] ?? 50,
+                'height' => $row['height'] ?? 50,
                 'seats' => (int) ($row['seats'] ?? 2),
                 'color' => $row['color'] ?? null,
                 'active' => (bool) ($row['active'] ?? true),
             ];
-            // A null geometry/shape means "not sent"; keep the stored default rather than nulling it.
-            $attributes = array_filter($attributes, static fn (mixed $v): bool => $v !== null);
 
             $model = $clientId > 0 ? $existing->get($clientId) : null;
 

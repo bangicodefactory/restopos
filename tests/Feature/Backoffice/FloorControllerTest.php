@@ -102,6 +102,29 @@ it('never rotates a table QR token as a side effect of saving geometry', functio
     expect((string) $one->refresh()->identifier)->toBe($tokenBefore);
 });
 
+it('persists a cleared name and colour rather than swallowing the null', function (): void {
+    $one = $this->fx->tableOne; // starts as 'T1'
+    $one->forceFill(['color' => '#dbeafe'])->save();
+
+    $this->patch(route('floors.update', $this->fx->floor->uuid), [
+        'name' => 'Terrace',
+        'tables' => [
+            tablePayload([
+                'id' => $one->getKey(),
+                'table_number' => (int) $one->table_number,
+                'name' => null,
+                'color' => null,
+            ]),
+        ],
+    ])->assertRedirect();
+
+    $one->refresh();
+    expect($one->name)->toBeNull()
+        ->and($one->color)->toBeNull();
+    // Sanity: the clear was an update, not a delete — the table is still there.
+    expect(RestaurantTable::query()->whereKey($one->getKey())->exists())->toBeTrue();
+});
+
 it('links a table to a parent created in the same save', function (): void {
     $floorId = $this->fx->floor->getKey();
     $one = $this->fx->tableOne;

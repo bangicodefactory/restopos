@@ -105,6 +105,22 @@ it('reorders without tripping the unique (display, sequence) constraint', functi
         ->and(array_map(static fn ($s): int => $s['sequence'], $after))->toBe([10, 20, 30]);
 });
 
+it('keeps only the first default when the payload marks several', function (): void {
+    $displayId = $this->fx->display->getKey();
+    $before = collect(stagesInOrder($displayId))->keyBy('name');
+
+    $this->patch(route('prep-displays.update', $this->fx->display->uuid), [
+        'stages' => [
+            stagePayload($before['To do']['id'], 'To do', 'todo', true),
+            stagePayload($before['Cooking']['id'], 'Cooking', 'in_progress', true),
+            stagePayload($before['Ready']['id'], 'Ready', 'ready', true),
+        ],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $defaults = DB::table('prep_stages')->where('prep_display_id', $displayId)->where('is_default', true)->pluck('name');
+    expect($defaults->all())->toBe(['To do']);
+});
+
 it('rejects an invalid stage type instead of silently swallowing it', function (): void {
     $displayId = $this->fx->display->getKey();
 
