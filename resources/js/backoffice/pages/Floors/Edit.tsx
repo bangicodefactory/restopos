@@ -216,8 +216,8 @@ export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Elemen
 
     const submit = useCallback(() => {
         form.transform((data) => ({ ...data, tables: plan.map(toTablePayload) }));
-        form.patch(routes.floors.update(floor.id), { preserveScroll: true });
-    }, [floor.id, form, plan]);
+        form.patch(routes.floors.update(floor.uuid), { preserveScroll: true });
+    }, [floor.uuid, form, plan]);
 
     const collisions = useMemo(
         () => plan.filter((table) => findOverlaps(table, plan.filter((other) => other.id !== table.id)).length > 0),
@@ -576,7 +576,7 @@ function Inspector({
                             message={t('floor.rotateTokenConfirm', { name: tableLabel(table) })}
                             confirmPhrase={tableLabel(table)}
                             onConfirm={() =>
-                                router.post(routes.floors.rotateTableToken(table.id), {}, { preserveScroll: true })
+                                router.post(routes.floors.rotateTableToken(table.uuid), {}, { preserveScroll: true })
                             }
                         />
                     </div>

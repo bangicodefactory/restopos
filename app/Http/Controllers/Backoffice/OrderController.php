@@ -33,6 +33,7 @@ final class OrderController extends Controller
         ]);
 
         $orders = Order::query()
+            ->with('session:id,uuid')
             ->when($request->query('state'), fn ($q, $s) => $q->where('state', $s))
             ->when($request->query('config_id'), fn ($q, $c) => $q->where('pos_config_id', (int) $c))
             ->when($request->query('from'), fn ($q, $f) => $q->where('ordered_at', '>=', $f))
@@ -56,6 +57,7 @@ final class OrderController extends Controller
                 'ordered_at' => $o->ordered_at,
                 'amount_total' => (string) $o->amount_total,
                 'pos_session_id' => (int) $o->pos_session_id,
+                'pos_session_uuid' => $o->session?->uuid === null ? null : (string) $o->session->uuid,
                 'is_refund' => (bool) $o->is_refund,
             ]),
             'filters' => $request->only(['search', 'state', 'config_id', 'from', 'to']),
@@ -67,10 +69,13 @@ final class OrderController extends Controller
     {
         Gate::authorize('view', $order);
 
-        $order->load(['lines', 'payments', 'courses']);
+        $order->load(['lines', 'payments', 'courses', 'session:id,uuid']);
 
         return Inertia::render('Orders/Show', [
-            'order' => $order->attributesToArray(),
+            'order' => [
+                ...$order->attributesToArray(),
+                'pos_session_uuid' => $order->session?->uuid === null ? null : (string) $order->session->uuid,
+            ],
             'lines' => $order->lines->map(static fn ($l): array => $l->attributesToArray())->all(),
             'payments' => $order->payments->map(static fn ($p): array => $p->attributesToArray())->all(),
             'courses' => $order->courses->map(static fn ($c): array => $c->attributesToArray())->all(),

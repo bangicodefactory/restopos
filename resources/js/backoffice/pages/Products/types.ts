@@ -10,6 +10,7 @@ import type { Deferred, MoneyString, Paginator } from '../../types/inertia';
 
 export type ProductListRow = {
     id: number;
+    uuid: string;
     name: string;
     default_code: string | null;
     barcode: string | null;

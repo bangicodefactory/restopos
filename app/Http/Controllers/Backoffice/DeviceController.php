@@ -41,7 +41,7 @@ final class DeviceController extends Controller
                     'user_agent' => $d->user_agent,
                     'active' => (bool) $d->active,
                 ])->values()->all(),
-            'configs' => PosConfig::query()->where('active', true)->orderBy('name')->get(['id', 'name'])->all(),
+            'configs' => PosConfig::query()->where('active', true)->orderBy('name')->get(['id', 'uuid', 'name'])->all(),
         ]);
     }
 

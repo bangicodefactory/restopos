@@ -80,8 +80,8 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
     useDirtyGuard(form.isDirty, t('confirm.leave'));
 
     const submit = useCallback(() => {
-        form.patch(routes.products.update(product.id), { preserveScroll: true });
-    }, [form, product.id]);
+        form.patch(routes.products.update(product.uuid), { preserveScroll: true });
+    }, [form, product.uuid]);
 
     const marginAmount = subtractMoney(form.data.list_price, form.data.standard_price);
     const marginPercent = toDecimal(form.data.list_price).isZero()

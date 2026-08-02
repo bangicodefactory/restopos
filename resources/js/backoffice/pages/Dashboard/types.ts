@@ -6,6 +6,7 @@ import type { Deferred, MoneyString, NumericLike } from '../../types/inertia';
 
 export type DashboardSession = {
     id: number;
+    uuid: string;
     name: string;
     /** `opening_control | opened | closing_control | closed` */
     state: string;
@@ -16,6 +17,7 @@ export type DashboardSession = {
 
 export type DashboardRegister = {
     id: number;
+    uuid: string;
     name: string;
     is_restaurant: boolean;
     /** `nothing | consultation | mobile | kiosk` */
@@ -33,6 +35,7 @@ export type DashboardToday = {
 /** Raw `pos_sessions` columns, selected in the controller. */
 export type RescueSession = {
     id: number;
+    uuid: string;
     name: string;
     pos_config_id: number;
     opened_at: string | null;

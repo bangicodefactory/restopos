@@ -135,14 +135,17 @@ export default function OrdersIndex({ orders, filters, states }: OrdersIndexProp
             id: 'session',
             header: t('order.filterSession'),
             align: 'end',
-            cell: (row) => (
-                <Link
-                    href={routes.sessions.show(row.pos_session_id)}
-                    className={cn('rounded-pos px-1 tabular-nums text-brand-700 hover:underline', FOCUS_RING)}
-                >
-                    #{row.pos_session_id}
-                </Link>
-            ),
+            cell: (row) =>
+                row.pos_session_uuid === null ? (
+                    <span className="px-1 tabular-nums text-slate-500">#{row.pos_session_id}</span>
+                ) : (
+                    <Link
+                        href={routes.sessions.show(row.pos_session_uuid)}
+                        className={cn('rounded-pos px-1 tabular-nums text-brand-700 hover:underline', FOCUS_RING)}
+                    >
+                        #{row.pos_session_id}
+                    </Link>
+                ),
             sortValue: (row) => row.pos_session_id,
             exportValue: (row) => row.pos_session_id,
         },
@@ -173,7 +176,7 @@ export default function OrdersIndex({ orders, filters, states }: OrdersIndexProp
             align: 'end',
             cell: (row) => (
                 <Link
-                    href={routes.orders.show(row.id)}
+                    href={routes.orders.show(row.uuid)}
                     className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {t('action.details')}
@@ -214,7 +217,7 @@ export default function OrdersIndex({ orders, filters, states }: OrdersIndexProp
                         />
                     }
                     exportFilename="commandes"
-                    onRowHref={(row) => routes.orders.show(row.id)}
+                    onRowHref={(row) => routes.orders.show(row.uuid)}
                 />
 
                 <ClientFilterBar

@@ -739,7 +739,7 @@ function ClosingReview({
                         disabled={!canClose}
                         busy={form.processing}
                         onConfirm={() =>
-                            form.post(routes.sessions.close(session.id), { preserveScroll: true })
+                            form.post(routes.sessions.close(session.uuid), { preserveScroll: true })
                         }
                     />
 

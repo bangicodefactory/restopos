@@ -35,7 +35,7 @@ export default function PrepDisplaysIndex({ displays }: PrepDisplaysIndexProps):
             locked: true,
             cell: (row) => (
                 <Link
-                    href={routes.prepDisplays.edit(row.id)}
+                    href={routes.prepDisplays.edit(row.uuid)}
                     className={cn('rounded-pos font-medium text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {row.name}
@@ -119,7 +119,7 @@ export default function PrepDisplaysIndex({ displays }: PrepDisplaysIndexProps):
             align: 'end',
             cell: (row) => (
                 <Link
-                    href={routes.prepDisplays.edit(row.id)}
+                    href={routes.prepDisplays.edit(row.uuid)}
                     className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {t('action.edit')}
@@ -144,7 +144,7 @@ export default function PrepDisplaysIndex({ displays }: PrepDisplaysIndexProps):
                     perPage={50}
                     emptyTitle={t('state.empty')}
                     emptyHint={t('display.createMissing')}
-                    onRowHref={(row) => routes.prepDisplays.edit(row.id)}
+                    onRowHref={(row) => routes.prepDisplays.edit(row.uuid)}
                 />
 
                 <Notice tone="info" title={t('display.createMissingTitle')}>

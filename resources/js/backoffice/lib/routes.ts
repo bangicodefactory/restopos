@@ -4,6 +4,12 @@
  * No Ziggy: it is a runtime route dump plus a Blade directive, and this app has exactly the
  * routes below, all of them stable and all of them declared in spec 05 §12/§12.1. A typo here is
  * a compile error at the call site instead of a 404 in production.
+ *
+ * **Model-bound routes take the record's `uuid`, not its `id`.** Every model behind these routes
+ * uses the `HasUuid` trait, whose route-model binding resolves by `uuid` (never by `id`); passing
+ * an `id` 404s. The `uuid: string` parameter type is deliberate — it makes handing an id a compile
+ * error here rather than a 404 in production (BAN-499). Routes whose model is *not* `HasUuid`
+ * (categories, pricelists, taxes, payment methods, employees, printers) still take a numeric `id`.
  */
 
 export const routes = {
@@ -14,15 +20,15 @@ export const routes = {
 
     posConfigs: {
         index: (): string => '/pos-configs',
-        edit: (id: number): string => `/pos-configs/${id}/edit`,
-        update: (id: number): string => `/pos-configs/${id}`,
-        pairingCodes: (id: number): string => `/pos-configs/${id}/pairing-codes`,
+        edit: (uuid: string): string => `/pos-configs/${uuid}/edit`,
+        update: (uuid: string): string => `/pos-configs/${uuid}`,
+        pairingCodes: (uuid: string): string => `/pos-configs/${uuid}/pairing-codes`,
     },
 
     products: {
         index: (): string => '/products',
-        edit: (id: number): string => `/products/${id}/edit`,
-        update: (id: number): string => `/products/${id}`,
+        edit: (uuid: string): string => `/products/${uuid}/edit`,
+        update: (uuid: string): string => `/products/${uuid}`,
     },
 
     categories: {
@@ -55,20 +61,20 @@ export const routes = {
 
     floors: {
         index: (): string => '/floors',
-        edit: (id: number): string => `/floors/${id}/edit`,
-        update: (id: number): string => `/floors/${id}`,
-        rotateTableToken: (tableId: number): string => `/tables/${tableId}/rotate-token`,
+        edit: (uuid: string): string => `/floors/${uuid}/edit`,
+        update: (uuid: string): string => `/floors/${uuid}`,
+        rotateTableToken: (tableUuid: string): string => `/tables/${tableUuid}/rotate-token`,
     },
 
     orders: {
         index: (): string => '/orders',
-        show: (id: number | string): string => `/orders/${id}`,
+        show: (uuid: string): string => `/orders/${uuid}`,
     },
 
     sessions: {
         index: (): string => '/sessions',
-        show: (id: number): string => `/sessions/${id}`,
-        close: (id: number): string => `/sessions/${id}/close`,
+        show: (uuid: string): string => `/sessions/${uuid}`,
+        close: (uuid: string): string => `/sessions/${uuid}/close`,
         accountingExports: (): string => '/accounting-exports',
     },
 
@@ -86,19 +92,19 @@ export const routes = {
 
     prepDisplays: {
         index: (): string => '/prep-displays',
-        edit: (id: number): string => `/prep-displays/${id}/edit`,
-        update: (id: number): string => `/prep-displays/${id}`,
+        edit: (uuid: string): string => `/prep-displays/${uuid}/edit`,
+        update: (uuid: string): string => `/prep-displays/${uuid}`,
     },
 
     selfOrder: {
-        settings: (configId: number): string => `/self-order/${configId}/settings`,
-        update: (configId: number): string => `/self-order/${configId}/settings`,
-        rotateToken: (configId: number): string => `/self-order/${configId}/rotate-token`,
+        settings: (configUuid: string): string => `/self-order/${configUuid}/settings`,
+        update: (configUuid: string): string => `/self-order/${configUuid}/settings`,
+        rotateToken: (configUuid: string): string => `/self-order/${configUuid}/rotate-token`,
     },
 
     devices: {
         index: (): string => '/devices',
-        destroy: (id: number): string => `/devices/${id}`,
+        destroy: (uuid: string): string => `/devices/${uuid}`,
     },
 
     /** PWA shells — linked from the dashboard's "open the register" action. */

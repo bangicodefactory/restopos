@@ -46,6 +46,7 @@ final class SessionController extends Controller
         return Inertia::render('Sessions/Index', [
             'sessions' => $sessions->through(static fn (PosSession $s): array => [
                 'id' => (int) $s->getKey(),
+                'uuid' => (string) $s->uuid,
                 'name' => (string) $s->name,
                 'pos_config_id' => (int) $s->pos_config_id,
                 'state' => $s->state->value,

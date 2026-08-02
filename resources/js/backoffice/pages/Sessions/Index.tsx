@@ -129,7 +129,7 @@ export default function SessionsIndex({ sessions, filters, states }: SessionsInd
             align: 'end',
             cell: (row) => (
                 <Link
-                    href={routes.sessions.show(row.id)}
+                    href={routes.sessions.show(row.uuid)}
                     className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {t('action.details')}
@@ -209,7 +209,7 @@ export default function SessionsIndex({ sessions, filters, states }: SessionsInd
                     </>
                 }
                 exportFilename="sessions"
-                onRowHref={(row) => routes.sessions.show(row.id)}
+                onRowHref={(row) => routes.sessions.show(row.uuid)}
             />
         </AppLayout>
     );

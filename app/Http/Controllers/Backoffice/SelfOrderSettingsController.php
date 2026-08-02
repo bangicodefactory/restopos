@@ -29,6 +29,7 @@ final class SelfOrderSettingsController extends Controller
         return Inertia::render('SelfOrder/Settings', [
             'config' => [
                 'id' => (int) $config->getKey(),
+                'uuid' => (string) $config->uuid,
                 'name' => (string) $config->name,
                 'access_token' => (string) $config->access_token,
                 'self_ordering_mode' => $config->self_ordering_mode->value,

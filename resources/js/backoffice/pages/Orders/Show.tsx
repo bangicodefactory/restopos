@@ -199,12 +199,18 @@ function OrderHeader({
                 }
                 description={`${ORDER_SOURCE_LABEL[order.source] ?? order.source} · ${dateTime(order.ordered_at)}`}
                 actions={
-                    <Link
-                        href={routes.sessions.show(order.pos_session_id)}
-                        className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
-                    >
-                        {t('session.detail', { name: `#${order.pos_session_id}` })}
-                    </Link>
+                    order.pos_session_uuid === null ? (
+                        <span className="px-2 py-1 text-sm text-slate-500">
+                            {t('session.detail', { name: `#${order.pos_session_id}` })}
+                        </span>
+                    ) : (
+                        <Link
+                            href={routes.sessions.show(order.pos_session_uuid)}
+                            className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
+                        >
+                            {t('session.detail', { name: `#${order.pos_session_id}` })}
+                        </Link>
+                    )
                 }
             />
             <CardBody>

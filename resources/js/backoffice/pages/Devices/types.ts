@@ -22,6 +22,7 @@ export type DeviceRow = {
 
 export type DeviceConfigOption = {
     id: number;
+    uuid: string;
     name: string;
 };
 

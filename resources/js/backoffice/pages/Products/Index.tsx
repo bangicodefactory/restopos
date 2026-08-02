@@ -136,7 +136,7 @@ export default function ProductsIndex({ products, filters, categories }: Product
             align: 'end',
             cell: (row) => (
                 <Link
-                    href={routes.products.edit(row.id)}
+                    href={routes.products.edit(row.uuid)}
                     className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {t('action.edit')}
@@ -193,7 +193,7 @@ export default function ProductsIndex({ products, filters, categories }: Product
                     </>
                 }
                 exportFilename="produits"
-                onRowHref={(row) => routes.products.edit(row.id)}
+                onRowHref={(row) => routes.products.edit(row.uuid)}
             />
         </AppLayout>
     );

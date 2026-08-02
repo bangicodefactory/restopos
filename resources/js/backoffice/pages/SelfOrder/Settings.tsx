@@ -248,7 +248,7 @@ export default function SelfOrderSettings({
                         ) : null}
 
                         {tab === 'qr' ? (
-                            <QrPanel accessToken={config.access_token} venueUrl={venueUrl} configId={config.id} />
+                            <QrPanel accessToken={config.access_token} venueUrl={venueUrl} configUuid={config.uuid} />
                         ) : null}
                     </Tabs>
 
@@ -256,7 +256,7 @@ export default function SelfOrderSettings({
                         dirty={form.isDirty}
                         processing={form.processing}
                         errorCount={Object.keys(form.errors).length}
-                        onSave={() => form.patch(routes.selfOrder.update(config.id), { preserveScroll: true })}
+                        onSave={() => form.patch(routes.selfOrder.update(config.uuid), { preserveScroll: true })}
                         onCancel={() => form.reset()}
                     />
                 </CardBody>
@@ -311,11 +311,11 @@ function LinkPreview({ links }: { links: { id: number; name: string; url: string
 function QrPanel({
     accessToken,
     venueUrl,
-    configId,
+    configUuid,
 }: {
     accessToken: string;
     venueUrl: string;
-    configId: number;
+    configUuid: string;
 }): JSX.Element {
     const t = useT();
     const [raw, setRaw] = useState('');
@@ -338,7 +338,7 @@ function QrPanel({
                             message={t('self.rotateWarning')}
                             confirmPhrase={accessToken.slice(0, 8)}
                             onConfirm={() =>
-                                router.post(routes.selfOrder.rotateToken(configId), {}, { preserveScroll: true })
+                                router.post(routes.selfOrder.rotateToken(configUuid), {}, { preserveScroll: true })
                             }
                         />
                     </div>
