@@ -16,6 +16,9 @@ uses(TestCase::class, RefreshDatabase::class);
  * contract that made the front end 404) the same route addressed by id is not found.
  */
 beforeEach(function (): void {
+    // These GETs render the Inertia root view; the PHP CI job builds no front-end assets, so stub
+    // Vite rather than depend on a manifest. Route binding + the controller still run for real.
+    $this->withoutVite();
     $this->fx = PosFixtures::make()->withFloor()->withPrepDisplay()->withSession();
     $this->actingAs(User::factory()->create(['is_super_admin' => true]));
 });
