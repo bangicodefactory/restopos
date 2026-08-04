@@ -68,10 +68,12 @@ final readonly class SessionSummaryService
             ->selectRaw('payment_methods.name as name')
             ->selectRaw('payment_methods.is_cash_count as is_cash_count')
             ->selectRaw('payment_methods.ledger_code as ledger_code')
-            ->selectRaw('sum(pos_payments.amount) as expected_amount')
+            // A change row counts as leaving the drawer regardless of its stored sign (REG-204), so
+            // it is normalised to negative in the expected total and reported as a negative change.
+            ->selectRaw('sum(case when pos_payments.is_change then -abs(pos_payments.amount) else pos_payments.amount end) as expected_amount')
             ->selectRaw('count(*) as payment_count')
             ->selectRaw('sum(case when pos_payments.is_refund then pos_payments.amount else 0 end) as refund_amount')
-            ->selectRaw('sum(case when pos_payments.is_change then pos_payments.amount else 0 end) as change_amount')
+            ->selectRaw('sum(case when pos_payments.is_change then -abs(pos_payments.amount) else 0 end) as change_amount')
             ->get();
 
         $out = [];

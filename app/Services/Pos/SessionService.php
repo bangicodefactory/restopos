@@ -396,12 +396,16 @@ final readonly class SessionService
     /** Expected drawer content = opening float + cash sales + cash in/out. */
     public function expectedCash(PosSession $session): string
     {
+        // Change always *leaves* the drawer, so a change row counts as negative regardless of the
+        // sign it was stored with — a positive-signed change row would otherwise overstate expected
+        // cash by twice the change given (REG-204).
         $cashSales = (string) ($this->connection->table('pos_payments')
             ->join('payment_methods', 'payment_methods.id', '=', 'pos_payments.payment_method_id')
             ->where('pos_payments.pos_session_id', $session->getKey())
             ->whereNull('pos_payments.deleted_at')
             ->where('payment_methods.is_cash_count', true)
-            ->sum('pos_payments.amount') ?? '0');
+            ->selectRaw('coalesce(sum(case when pos_payments.is_change then -abs(pos_payments.amount) else pos_payments.amount end), 0) as cash')
+            ->value('cash') ?? '0');
 
         $movements = (string) ($this->connection->table('cash_movements')
             ->where('pos_session_id', $session->getKey())

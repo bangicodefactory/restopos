@@ -13,6 +13,7 @@ use App\Enums\SyncConflictType;
 use App\Enums\SyncResolution;
 use App\Events\Pos\OrderStateChanged;
 use App\Events\Pos\OrderSynced;
+use App\Exceptions\Pos\ChangeWithoutCashException;
 use App\Models\Identity\Customer;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
@@ -150,6 +151,13 @@ final readonly class OrderSyncService
 
         try {
             return $this->connection->transaction(fn (): array => $this->ingest($config, $device, $uuid, $command, $employeeId));
+        } catch (ChangeWithoutCashException $e) {
+            $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::Rejected, $uuid, [
+                'message' => $e->getMessage(),
+                'class' => $e::class,
+            ]);
+
+            return $this->rejected($uuid, 'change_without_cash', $e->getMessage());
         } catch (Throwable $e) {
             $this->logger->error('pos.sync.rejected', [
                 'order' => $uuid,
@@ -1002,6 +1010,15 @@ final readonly class OrderSyncService
             );
             $amount = (string) ($command['amount'] ?? '0');
 
+            // Change is a negative payment the server owns and re-derives (see reconcileChange). A
+            // client that asserts `is_change` with a positive amount would inflate the drawer by the
+            // change it claims to have given, so it is rejected rather than booked (REG-204).
+            if ((bool) ($command['is_change'] ?? false) && bccomp($amount, '0', 4) > 0) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'change_wrong_sign'];
+
+                continue;
+            }
+
             /** @var OrderPayment $payment */
             $payment = OrderPayment::query()->updateOrCreate(['uuid' => $uuid], [
                 'pos_order_id' => $order->getKey(),
@@ -1101,6 +1118,12 @@ final readonly class OrderSyncService
         }
 
         $totals = $result->totals;
+
+        // The change handed back is the server's to record, not the client's (REG-204). Derive it
+        // from the tender against the rounded total and write a single negative cash `is_change`
+        // row, so amount_change is real and the drawer is not overstated at close.
+        $this->reconcileChange($config, $order, $totals->roundedTotal);
+
         $payments = $this->paymentTotals($order);
         $netPaid = bcsub($payments['paid'], $payments['change'], 4);
 
@@ -1141,6 +1164,73 @@ final readonly class OrderSyncService
             'paid' => bcadd((string) ($rows->paid ?? '0'), '0', 4),
             'change' => ltrim(bcadd((string) ($rows->change_amount ?? '0'), '0', 4), '-'),
         ];
+    }
+
+    /**
+     * Record (or clear) the change handed back for an order (REG-204). Change is the overpayment —
+     * tender beyond the rounded total — given back from the drawer, so it is booked as a single
+     * **negative** payment on the config's cash method with `is_change = true`. It is fully
+     * server-owned and re-derived on every ingest: existing change rows are replaced, so the write
+     * is idempotent, and if the overpayment is edited away the row is removed.
+     *
+     * An overpayment with no cash method to give change from is a contract error, not a silent
+     * booking: `ChangeWithoutCashException` becomes a `change_without_cash` rejection.
+     */
+    private function reconcileChange(PosConfig $config, Order $order, string $roundedTotal): void
+    {
+        $tendered = bcadd((string) ($this->connection->table('pos_payments')
+            ->where('pos_order_id', $order->getKey())
+            ->whereNull('deleted_at')
+            ->where('is_change', false)
+            ->sum('amount') ?? '0'), '0', 4);
+
+        $changeDue = bcsub($tendered, $roundedTotal, 4);
+
+        /** @var Collection<int, OrderPayment> $existing */
+        $existing = OrderPayment::query()
+            ->where('pos_order_id', $order->getKey())
+            ->where('is_change', true)
+            ->get();
+
+        if (bccomp($changeDue, '0', 4) <= 0) {
+            // No overpayment (or the order grew past the tender): there is no change to record.
+            $existing->each(static fn (OrderPayment $p): ?bool => $p->forceDelete());
+
+            return;
+        }
+
+        $cashMethod = $config->paymentMethods()->where('payment_methods.is_cash_count', true)->first();
+
+        if ($cashMethod === null) {
+            throw new ChangeWithoutCashException;
+        }
+
+        $amount = '-'.$changeDue;
+        $attributes = [
+            'pos_order_id' => $order->getKey(),
+            'pos_session_id' => $order->pos_session_id,
+            'payment_method_id' => (int) $cashMethod->getKey(),
+            'company_id' => $order->company_id,
+            'currency_id' => $order->currency_id,
+            'amount' => $amount,
+            'amount_company_currency' => $amount,
+            'is_change' => true,
+            'is_refund' => false,
+            'label' => 'Change',
+            'paid_at' => now(),
+            'employee_id' => $order->employee_id,
+            'payment_status' => PaymentStatus::Done->value,
+        ];
+
+        // Keep one row, update it in place, and drop any duplicates so a resync never stacks change.
+        $keep = $existing->shift();
+        $existing->each(static fn (OrderPayment $p): ?bool => $p->forceDelete());
+
+        if ($keep === null) {
+            OrderPayment::query()->create([...$attributes, 'uuid' => (string) Str::uuid()]);
+        } else {
+            $keep->forceFill($attributes)->save();
+        }
     }
 
     /**

@@ -155,16 +155,10 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         totals.due,
     ]);
 
-    const quickAmounts = useCallback((): string[] => {
-        const due = Decimal.of(totals.due);
-        const rounded = due.roundToStep('5', 'up');
-        return [
-            due.withScale(2).toString(),
-            rounded.eq(due) ? rounded.add('5').withScale(2).toString() : rounded.withScale(2).toString(),
-            rounded.add('10').withScale(2).toString(),
-            rounded.add('20').withScale(2).toString(),
-        ];
-    }, [totals.due]);
+    const quickAmounts = useCallback(
+        (): string[] => quickAmountsFor(totals.due, catalog.bills),
+        [totals.due, catalog.bills],
+    );
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 till:flex-row">
@@ -355,6 +349,34 @@ function PaymentLine({
             </button>
         </li>
     );
+}
+
+/**
+ * The quick-tender keys (REG-205). When the currency has configured note denominations (`pos_bills`)
+ * these are the notes that can cover the due — so the cashier taps the note the customer handed
+ * over — with the exact due first. With no bills configured it falls back to the arithmetic ladder
+ * (due, next 5, +10, +20). Exported for the tests.
+ */
+export function quickAmountsFor(dueValue: string, bills: readonly { value: string }[]): string[] {
+    const due = Decimal.of(dueValue);
+    const exact = due.withScale(2).toString();
+
+    const notes = bills
+        .map((bill) => Decimal.of(bill.value))
+        .filter((value) => value.signum() > 0 && value.gte(due))
+        .sort((a, b) => a.compare(b));
+
+    if (notes.length > 0) {
+        return [...new Set([exact, ...notes.map((note) => note.withScale(2).toString())])].slice(0, 4);
+    }
+
+    const rounded = due.roundToStep('5', 'up');
+    return [
+        exact,
+        rounded.eq(due) ? rounded.add('5').withScale(2).toString() : rounded.withScale(2).toString(),
+        rounded.add('10').withScale(2).toString(),
+        rounded.add('20').withScale(2).toString(),
+    ];
 }
 
 /** Exported for the split-payment helper in the tests. */
