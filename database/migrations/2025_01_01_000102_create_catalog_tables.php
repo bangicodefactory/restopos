@@ -63,6 +63,10 @@ return new class extends Migration
             $table->string('name', 96);
             $table->string('path', 512)->index();
             $table->integer('sequence')->default(10);
+            // Revenue account this category's sales post to, echoed into the accounting export.
+            // Free-form so it fits whatever chart of accounts the site keeps; nullable because an
+            // uncategorised product must still export rather than block the period.
+            $table->string('ledger_code', 32)->nullable();
             $table->timestamps();
         });
 

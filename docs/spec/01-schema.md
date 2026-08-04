@@ -574,6 +574,7 @@ valuation — all ERP.
 | name | string(96) | |
 | path | string(512), index | |
 | sequence | integer default 10 | |
+| ledger_code | string(32) nullable | revenue account this category's sales post to; the source of `session_sales_summaries.ledger_code` |
 | timestamps | | |
 
 ### `products`
@@ -1514,6 +1515,7 @@ sessions, notes, theoretical-vs-counted arithmetic.
 | order_amount_total | decimal(16,4) default 0 | denormalised (paid orders) |
 | refund_amount_total | decimal(16,4) default 0 | |
 | payments_total | decimal(16,4) default 0 | Σ captured payments |
+| rounding_total | decimal(16,4) default 0 | Σ `pos_orders.amount_rounding`; frozen at close so the export's imbalance check never reads live orders |
 | is_rescue | boolean default false, index | auto-created recovery session for late offline pushes |
 | rescued_from_session_id | FK→pos_sessions.id nullable, set null | |
 | closing_forced | boolean default false | manager forced the close over an unauthorised difference |
@@ -1643,19 +1645,31 @@ New table (replaces Odoo's closing journal entry + `pos.close.session.wizard`).
 | company_id | FK→companies.id, cascade | |
 | period_start, period_end | date | |
 | format | enum('csv','json','xlsx','api') default 'csv' | |
-| state | enum('draft','generated','sent','failed') default 'draft', index | |
+| state | enum('draft','generated','exported','sent','failed') default 'draft', index | `exported` is the commit point — file written, pivot rows in, sessions marked |
 | session_count | unsignedInteger default 0 | |
 | total_sales | decimal(16,4) default 0 | |
 | total_tax | decimal(16,4) default 0 | |
 | total_payments | decimal(16,4) default 0 | |
-| imbalance_amount | decimal(16,4) default 0 | sales+tax−payments; non-zero triggers the "force balance" UI |
-| media_file_id | FK→media_files.id nullable, set null | generated file |
+| imbalance_amount | decimal(16,4) default 0 | sales+tax+rounding−payments; non-zero triggers the "force balance" UI |
+| media_file_id | FK→media_files.id nullable, set null | generated file; served only by the authenticated download route, never web-served |
 | generated_by_user_id | FK→users.id nullable, set null | |
 | error_message | text nullable | |
 | timestamps | | |
 
 ### `accounting_export_session` (pivot)
 `accounting_export_id` FK cascade U, `pos_session_id` FK cascade U.
+**unique(`pos_session_id`)** — `accounting_export_session_once`.
+
+**This pivot is the double-counting guard, not bookkeeping.** A session is exported exactly once:
+the build excludes any session already joined to an export in state `exported` or `sent`, and the
+whole build (row, pivot, file, session marking) commits in one transaction. A failed build releases
+its sessions rather than stranding them.
+
+The read-back alone is a check-then-act, so it is *not* the guarantee — two operators exporting the
+same period at once would both see the session as unclaimed and both commit, since their exports
+have different ids and the composite primary key admits both rows. The **unique index on
+`pos_session_id`** is what makes "at most one export" true. It is sound precisely because a
+rolled-back build leaves no pivot rows: every row here belongs to a committed export.
 
 ---
 

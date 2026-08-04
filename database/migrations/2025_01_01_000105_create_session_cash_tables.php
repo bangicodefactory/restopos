@@ -63,6 +63,10 @@ return new class extends Migration
             $table->decimal('order_amount_total', 16, 4)->default(0);
             $table->decimal('refund_amount_total', 16, 4)->default(0);
             $table->decimal('payments_total', 16, 4)->default(0);
+            // Cash rounding written off across the session. Frozen at close like every other
+            // figure here, because the accounting export reads these summaries and never the live
+            // order rows — the imbalance check needs it and must not go looking for it in orders.
+            $table->decimal('rounding_total', 16, 4)->default(0);
             $table->boolean('is_rescue')->default(false)->index();
             $table->foreignId('rescued_from_session_id')->nullable()->constrained('pos_sessions')->nullOnDelete();
             $table->boolean('closing_forced')->default(false);
@@ -189,6 +193,9 @@ return new class extends Migration
             $table->decimal('total_sales', 16, 4)->default(0);
             $table->decimal('total_tax', 16, 4)->default(0);
             $table->decimal('total_payments', 16, 4)->default(0);
+            // Without this the export's own figures do not add up on their face: sales + tax will
+            // not equal payments on any cash-rounded period, and the reader has no way to see why.
+            $table->decimal('total_rounding', 16, 4)->default(0);
             $table->decimal('imbalance_amount', 16, 4)->default(0);
             $table->foreignId('media_file_id')->nullable()->constrained('media_files')->nullOnDelete();
             $table->foreignId('generated_by_user_id')->nullable()->constrained('users')->nullOnDelete();
@@ -206,6 +213,20 @@ return new class extends Migration
             $table->foreignId('pos_session_id')->constrained('pos_sessions')->cascadeOnDelete();
 
             $table->primary(['accounting_export_id', 'pos_session_id'], 'accounting_export_session_primary');
+
+            // A session belongs to at most ONE export, enforced by the database rather than by the
+            // service's read-then-write.
+            //
+            // Reading the pivot back before inserting is a check-then-act: two operators exporting
+            // the same period at once — or one impatient double-click — both see the session as
+            // unclaimed and both commit, because their exports have different ids and the composite
+            // primary key above lets both rows in. That is precisely the double-counting the read
+            // was added to prevent.
+            //
+            // This constraint closes it because a rolled-back build leaves no pivot rows at all, so
+            // every row here belongs to a committed export. The loser of the race violates it, its
+            // transaction unwinds, and it is recorded as a failed build with nothing claimed.
+            $table->unique('pos_session_id', 'accounting_export_session_once');
         });
     }
 

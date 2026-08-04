@@ -169,33 +169,51 @@ class CatalogSeeder extends Seeder
 
     private function seedProductCategories(): void
     {
-        /** @var array<string, list<string>> $tree */
+        // The `ledger_code` is the revenue account a category's sales post to in the accounting
+        // export. French PCG 70x food/drink revenue accounts here, because the demo venue is French
+        // and a blank column in an export teaches nobody anything.
+        /** @var array<string, array{code: string, children: array<string, string>}> $tree */
         $tree = [
-            'Cuisine' => ['Entrées froides', 'Entrées chaudes', 'Plats principaux', 'Desserts'],
-            'Bar' => ['Boissons sans alcool', 'Bières & cidres', 'Vins', 'Spiritueux & cocktails'],
-            'Divers' => ['Articles techniques'],
+            'Cuisine' => ['code' => '7011', 'children' => [
+                'Entrées froides' => '7011',
+                'Entrées chaudes' => '7011',
+                'Plats principaux' => '7011',
+                'Desserts' => '7012',
+            ]],
+            'Bar' => ['code' => '7021', 'children' => [
+                'Boissons sans alcool' => '7021',
+                'Bières & cidres' => '7022',
+                'Vins' => '7023',
+                'Spiritueux & cocktails' => '7024',
+            ]],
+            'Divers' => ['code' => '7080', 'children' => [
+                'Articles techniques' => '7080',
+            ]],
         ];
 
         $sequence = 10;
-        foreach ($tree as $root => $children) {
+        foreach ($tree as $root => $branch) {
             $rootId = (int) DB::table('product_categories')->insertGetId([
                 'company_id' => $this->companyId,
                 'parent_id' => null,
                 'name' => $root,
                 'path' => '/'.Demo::slug($root),
                 'sequence' => $sequence,
+                'ledger_code' => $branch['code'],
                 'created_at' => $this->now,
                 'updated_at' => $this->now,
             ]);
             $this->productCategories[$root] = $rootId;
 
-            foreach ($children as $childIndex => $child) {
+            $childIndex = 0;
+            foreach ($branch['children'] as $child => $ledgerCode) {
                 $this->productCategories[$child] = (int) DB::table('product_categories')->insertGetId([
                     'company_id' => $this->companyId,
                     'parent_id' => $rootId,
                     'name' => $child,
                     'path' => '/'.Demo::slug($root).'/'.Demo::slug($child),
-                    'sequence' => ($childIndex + 1) * 10,
+                    'sequence' => (++$childIndex) * 10,
+                    'ledger_code' => $ledgerCode,
                     'created_at' => $this->now,
                     'updated_at' => $this->now,
                 ]);
