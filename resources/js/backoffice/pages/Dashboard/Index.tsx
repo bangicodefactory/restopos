@@ -138,7 +138,7 @@ export default function DashboardIndex({
                                                     >
                                                         <div className="min-w-0">
                                                             <Link
-                                                                href={routes.sessions.show(session.id)}
+                                                                href={routes.sessions.show(session.uuid)}
                                                                 className={cn(
                                                                     'rounded-pos font-medium text-brand-700 hover:underline',
                                                                     FOCUS_RING,
@@ -161,7 +161,7 @@ export default function DashboardIndex({
                                                             size="sm"
                                                             onClick={() =>
                                                                 (globalThis.location.href = routes.sessions.show(
-                                                                    session.id,
+                                                                    session.uuid,
                                                                 ))
                                                             }
                                                         >
@@ -309,7 +309,7 @@ function RegisterCard({
                         <div className="flex flex-wrap items-center gap-2">
                             <Badge tone={SESSION_TONE[session.state] ?? 'neutral'}>{session.state}</Badge>
                             <Link
-                                href={routes.sessions.show(session.id)}
+                                href={routes.sessions.show(session.uuid)}
                                 className={cn('rounded-pos text-sm font-medium text-brand-700 hover:underline', FOCUS_RING)}
                             >
                                 {session.name}
@@ -342,7 +342,7 @@ function RegisterCard({
                     </a>
 
                     <Link
-                        href={routes.posConfigs.edit(register.id)}
+                        href={routes.posConfigs.edit(register.uuid)}
                         className={cn(
                             'inline-flex min-h-touch items-center rounded-pos px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50',
                             FOCUS_RING,
@@ -402,7 +402,7 @@ function LiveSessionPanel({ register }: { register: DashboardRegister }): JSX.El
             />
 
             <Link
-                href={routes.sessions.show(session.id)}
+                href={routes.sessions.show(session.uuid)}
                 className={cn(
                     'inline-flex min-h-touch items-center rounded-pos px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50',
                     FOCUS_RING,

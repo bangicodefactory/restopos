@@ -36,11 +36,13 @@ final class DashboardController extends Controller
 
                 return [
                     'id' => (int) $config->getKey(),
+                    'uuid' => (string) $config->uuid,
                     'name' => (string) $config->name,
                     'is_restaurant' => (bool) $config->is_restaurant,
                     'self_ordering_mode' => $config->self_ordering_mode->value,
                     'session' => $session === null ? null : [
                         'id' => (int) $session->getKey(),
+                        'uuid' => (string) $session->uuid,
                         'name' => (string) $session->name,
                         'state' => $session->state->value,
                         'opened_at' => $session->opened_at,
@@ -69,7 +71,7 @@ final class DashboardController extends Controller
                 ->where('is_rescue', true)
                 ->where('state', '!=', SessionState::Closed->value)
                 ->orderByDesc('id')
-                ->get(['id', 'name', 'pos_config_id', 'opened_at', 'opening_notes', 'order_count'])
+                ->get(['id', 'uuid', 'name', 'pos_config_id', 'opened_at', 'opening_notes', 'order_count'])
                 ->map(static fn (object $s): array => (array) $s)
                 ->all()),
         ]);

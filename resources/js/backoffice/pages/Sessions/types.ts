@@ -14,6 +14,7 @@ import type { Deferred, EnumOption, MoneyString, Paginator } from '../../types/i
 
 export type SessionListRow = {
     id: number;
+    uuid: string;
     name: string;
     pos_config_id: number;
     state: string;

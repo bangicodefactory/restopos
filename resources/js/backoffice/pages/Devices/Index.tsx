@@ -156,7 +156,7 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
                     })}
                     confirmPhrase={String(row.device_identifier)}
                     disabled={!row.active}
-                    onConfirm={() => router.delete(routes.devices.destroy(row.id), { preserveScroll: true })}
+                    onConfirm={() => router.delete(routes.devices.destroy(row.uuid), { preserveScroll: true })}
                 />
             ),
         },
@@ -225,7 +225,8 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
 function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): JSX.Element {
     const t = useT();
     const toast = useToast();
-    const [configId, setConfigId] = useState<string>(configs[0] ? String(configs[0].id) : '');
+    // Pairing codes are minted per config by uuid (the route binds by uuid, not id).
+    const [configUuid, setConfigUuid] = useState<string>(configs[0]?.uuid ?? '');
     const [deviceType, setDeviceType] = useState<string>('register');
     const [name, setName] = useState('');
     const [busy, setBusy] = useState(false);
@@ -249,15 +250,14 @@ function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): J
     }, [code]);
 
     const mint = useCallback(async () => {
-        const parsed = Number(configId);
-        if (!Number.isInteger(parsed) || parsed <= 0) {
+        if (configUuid === '') {
             toast.show({ tone: 'danger', title: t('device.pairingNeedsConfig') });
             return;
         }
 
         setBusy(true);
         try {
-            const response = await postJson<PairingCodeResponse>(routes.posConfigs.pairingCodes(parsed), {
+            const response = await postJson<PairingCodeResponse>(routes.posConfigs.pairingCodes(configUuid), {
                 device_type: deviceType,
                 name: name.trim() === '' ? null : name.trim(),
             });
@@ -271,7 +271,7 @@ function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): J
         } finally {
             setBusy(false);
         }
-    }, [configId, deviceType, name, t, toast]);
+    }, [configUuid, deviceType, name, t, toast]);
 
     return (
         <Card>
@@ -282,8 +282,8 @@ function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): J
                         {t('report.config')}
                         <select
                             id="pairing-config"
-                            value={configId}
-                            onChange={(event) => setConfigId(event.target.value)}
+                            value={configUuid}
+                            onChange={(event) => setConfigUuid(event.target.value)}
                             className={cn(
                                 'min-h-touch rounded-pos bg-white px-3 text-sm ring-1 ring-inset ring-slate-300',
                                 FOCUS_RING,
@@ -291,7 +291,7 @@ function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): J
                         >
                             {configs.length === 0 ? <option value="">{t('state.none')}</option> : null}
                             {configs.map((config) => (
-                                <option key={config.id} value={String(config.id)}>
+                                <option key={config.id} value={config.uuid}>
                                     {config.name}
                                 </option>
                             ))}

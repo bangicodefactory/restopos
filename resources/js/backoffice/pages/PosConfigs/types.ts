@@ -13,6 +13,7 @@ import type { Deferred, MoneyString } from '../../types/inertia';
 
 export type PosConfigListRow = {
     id: number;
+    uuid: string;
     name: string;
     active: boolean;
     is_restaurant: boolean;

@@ -39,6 +39,7 @@ final class PosConfigController extends Controller
         return Inertia::render('PosConfigs/Index', [
             'configs' => PosConfig::query()->orderBy('name')->get()->map(static fn (PosConfig $c): array => [
                 'id' => (int) $c->getKey(),
+                'uuid' => (string) $c->uuid,
                 'name' => (string) $c->name,
                 'active' => (bool) $c->active,
                 'is_restaurant' => (bool) $c->is_restaurant,

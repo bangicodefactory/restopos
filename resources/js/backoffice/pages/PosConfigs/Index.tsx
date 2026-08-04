@@ -78,13 +78,13 @@ export default function PosConfigsIndex({ configs }: PosConfigsIndexProps): JSX.
             cell: (row) => (
                 <div className="flex flex-wrap justify-end gap-2">
                     <Link
-                        href={routes.posConfigs.edit(row.id)}
+                        href={routes.posConfigs.edit(row.uuid)}
                         className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                     >
                         {t('nav.settings')}
                     </Link>
                     <Link
-                        href={routes.selfOrder.settings(row.id)}
+                        href={routes.selfOrder.settings(row.uuid)}
                         className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                     >
                         {t('self.title')}
@@ -112,7 +112,7 @@ export default function PosConfigsIndex({ configs }: PosConfigsIndexProps): JSX.
                 caption={t('config.title')}
                 search={{ value: search, onChange: setSearch }}
                 exportFilename="points-de-vente"
-                onRowHref={(row) => routes.posConfigs.edit(row.id)}
+                onRowHref={(row) => routes.posConfigs.edit(row.uuid)}
                 perPage={25}
             />
         </AppLayout>

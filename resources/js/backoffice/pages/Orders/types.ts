@@ -23,6 +23,7 @@ export type OrderListRow = {
     ordered_at: string | null;
     amount_total: MoneyString;
     pos_session_id: number;
+    pos_session_uuid: string | null;
     is_refund: boolean;
 };
 
@@ -154,6 +155,7 @@ export type OrderRecord = {
     id: number;
     uuid: string;
     pos_session_id: number;
+    pos_session_uuid: string | null;
     pos_config_id: number;
     company_id: number;
     pos_device_id: number | null;

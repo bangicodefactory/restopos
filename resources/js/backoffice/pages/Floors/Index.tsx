@@ -39,7 +39,7 @@ export default function FloorsIndex({ floors }: FloorsIndexProps): JSX.Element {
                         style={{ backgroundColor: row.background_color ?? '#f8fafc' }}
                     />
                     <Link
-                        href={routes.floors.edit(row.id)}
+                        href={routes.floors.edit(row.uuid)}
                         className={cn('rounded-pos font-medium text-brand-700 hover:underline', FOCUS_RING)}
                     >
                         {row.name}
@@ -100,7 +100,7 @@ export default function FloorsIndex({ floors }: FloorsIndexProps): JSX.Element {
             align: 'end',
             cell: (row) => (
                 <Link
-                    href={routes.floors.edit(row.id)}
+                    href={routes.floors.edit(row.uuid)}
                     className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
                 >
                     {t('floor.edit')}
@@ -125,7 +125,7 @@ export default function FloorsIndex({ floors }: FloorsIndexProps): JSX.Element {
                     perPage={50}
                     emptyTitle={t('state.empty')}
                     emptyHint={t('floor.createMissing')}
-                    onRowHref={(row) => routes.floors.edit(row.id)}
+                    onRowHref={(row) => routes.floors.edit(row.uuid)}
                 />
 
                 <Notice tone="info" title={t('floor.createMissingTitle')}>

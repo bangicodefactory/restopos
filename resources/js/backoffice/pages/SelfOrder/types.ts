@@ -9,6 +9,7 @@ import type { EnumOption } from '../../types/inertia';
 
 export type SelfOrderConfig = {
     id: number;
+    uuid: string;
     name: string;
     access_token: string;
     self_ordering_mode: string;

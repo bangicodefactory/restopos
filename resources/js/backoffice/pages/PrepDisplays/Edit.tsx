@@ -110,8 +110,8 @@ export default function PrepDisplayEdit({
                 is_default: stage.is_default,
             })),
         }));
-        form.patch(routes.prepDisplays.update(display.id), { preserveScroll: true });
-    }, [display.id, editableStages, form]);
+        form.patch(routes.prepDisplays.update(display.uuid), { preserveScroll: true });
+    }, [display.uuid, editableStages, form]);
 
     const tabs: TabItem[] = [
         { id: 'options', label: t('config.group.general') },

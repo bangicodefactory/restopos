@@ -42,6 +42,7 @@ final class ProductController extends Controller
         return Inertia::render('Products/Index', [
             'products' => $products->through(static fn (Product $p): array => [
                 'id' => (int) $p->getKey(),
+                'uuid' => (string) $p->uuid,
                 'name' => (string) $p->name,
                 'default_code' => $p->default_code,
                 'barcode' => $p->barcode,

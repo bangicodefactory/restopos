@@ -139,8 +139,8 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
     }, [config, form.data]);
 
     const submit = useCallback(() => {
-        form.patch(routes.posConfigs.update(config.id), { preserveScroll: true });
-    }, [config.id, form]);
+        form.patch(routes.posConfigs.update(config.uuid), { preserveScroll: true });
+    }, [config.uuid, form]);
 
     const tabs: TabItem[] = [
         { id: 'general', label: t('config.group.general') },
@@ -571,7 +571,7 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                             <div className="space-y-4">
                                 <Notice tone="info">
                                     Les réglages de commande client vivent sur leur propre écran (
-                                    <a className="underline" href={routes.selfOrder.settings(config.id)}>
+                                    <a className="underline" href={routes.selfOrder.settings(config.uuid)}>
                                         {t('self.title')}
                                     </a>
                                     ), qui possède la seule route d’écriture prévue par le contrat.
@@ -685,7 +685,7 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
             </Card>
 
             <div className="mt-6">
-                <DevicesPanel configId={config.id} devices={devices} />
+                <DevicesPanel configUuid={config.uuid} devices={devices} />
             </div>
         </AppLayout>
     );
@@ -731,10 +731,10 @@ function Assignments({
  * code on their screen is still good.
  */
 function DevicesPanel({
-    configId,
+    configUuid,
     devices,
 }: {
-    configId: number;
+    configUuid: string;
     devices: PairedDevice[] | undefined;
 }): JSX.Element {
     const t = useT();
@@ -746,7 +746,7 @@ function DevicesPanel({
     const mint = useCallback(async () => {
         setBusy(true);
         try {
-            const response = await postJson<PairingCodeResponse>(routes.posConfigs.pairingCodes(configId), {
+            const response = await postJson<PairingCodeResponse>(routes.posConfigs.pairingCodes(configUuid), {
                 device_type: deviceType,
             });
             setCode(response);
@@ -759,7 +759,7 @@ function DevicesPanel({
         } finally {
             setBusy(false);
         }
-    }, [configId, deviceType, t, toast]);
+    }, [configUuid, deviceType, t, toast]);
 
     return (
         <Card>

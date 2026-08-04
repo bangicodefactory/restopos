@@ -144,15 +144,17 @@ export default function SessionReport({
                                         {truthy(session.closing_forced) ? (
                                             <Badge tone="warn">{t('session.forced')}</Badge>
                                         ) : null}
-                                        <Link
-                                            href={routes.sessions.show(session.id ?? 0)}
-                                            className={cn(
-                                                'rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline print:hidden',
-                                                FOCUS_RING,
-                                            )}
-                                        >
-                                            {t('action.details')}
-                                        </Link>
+                                        {session.uuid ? (
+                                            <Link
+                                                href={routes.sessions.show(session.uuid)}
+                                                className={cn(
+                                                    'rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline print:hidden',
+                                                    FOCUS_RING,
+                                                )}
+                                            >
+                                                {t('action.details')}
+                                            </Link>
+                                        ) : null}
                                     </>
                                 }
                             />
