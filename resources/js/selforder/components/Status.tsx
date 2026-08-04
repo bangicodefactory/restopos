@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 
 import { Notice, Price, Screen } from './Brand';
 import { useT } from '../i18n';
+import { requiresConnection } from '../logic/online-only';
 import { TRACKING_ORDER } from '../realtime';
 import type { KnownOrder, SelfOrderConfig, SelfOrderStatus, TrackingStep } from '../types';
 
@@ -20,6 +21,7 @@ export function CheckoutScreen({
     config,
     total,
     submitting,
+    offline,
     error,
     onPayCashier,
     onPayOnline,
@@ -28,6 +30,7 @@ export function CheckoutScreen({
     config: SelfOrderConfig;
     total: string;
     submitting: boolean;
+    offline: boolean;
     error: string | null;
     onPayCashier: () => void;
     onPayOnline: () => void;
@@ -36,8 +39,14 @@ export function CheckoutScreen({
     const t = useT();
     const onlineAvailable = config.online_payment_method_id !== null;
 
+    // Sending / paying are online-only from the one declared list (BAN-450) — disable rather than
+    // let a tap fail into a dropped network. The cart is kept; it sends when connectivity returns.
+    const submitBlocked = offline && requiresConnection('submit');
+    const onlineBlocked = offline && requiresConnection('pay-online');
+
     return (
         <Screen title={t('so.checkout.title')} onBack={onBack}>
+            {offline && <Notice tone="warn">{t('so.error.offlineSubmit')}</Notice>}
             {error && <Notice tone="danger">{t(error)}</Notice>}
 
             <div className="flex flex-col gap-3 p-3">
@@ -51,6 +60,7 @@ export function CheckoutScreen({
                     hint={t('so.checkout.payCashierHint')}
                     onClick={onPayCashier}
                     loading={submitting}
+                    disabled={submitBlocked}
                     primary
                 />
 
@@ -65,6 +75,7 @@ export function CheckoutScreen({
                         hint={t('so.checkout.payOnlineHint')}
                         onClick={onPayOnline}
                         loading={submitting}
+                        disabled={onlineBlocked}
                     />
                 )}
             </div>
@@ -77,19 +88,21 @@ function PaymentOption({
     hint,
     onClick,
     loading,
+    disabled,
     primary,
 }: {
     title: string;
     hint: string;
     onClick: () => void;
     loading: boolean;
+    disabled?: boolean;
     primary?: boolean;
 }): JSX.Element {
     return (
         <button
             type="button"
             onClick={onClick}
-            disabled={loading}
+            disabled={loading || disabled}
             className={cn(
                 'rounded-pos-lg px-5 py-5 text-start shadow-pos ring-1 ring-inset disabled:opacity-60',
                 primary ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-900 ring-slate-200',

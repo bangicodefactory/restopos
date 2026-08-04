@@ -9,6 +9,7 @@ import { useAlertSound, useNow } from './components/hooks';
 import { useT, type Locale } from './i18n';
 import { EMPTY_FILTER, buildBoard, type BoardFilter } from './logic/board';
 import { summarize, thresholdsFor } from './logic/elapsed';
+import { boardStale } from './logic/offline';
 import {
     HEARTBEAT_INTERVAL_MS,
     KITCHEN_EVENTS,
@@ -186,6 +187,11 @@ function BoardScreen({
     const firstSeen = useKitchenStore((state) => state.firstSeen);
     const queued = useKitchenStore((state) => state.queue.length);
     const online = useKitchenStore((state) => state.online);
+    const lastSyncAt = useKitchenStore((state) => state.lastSyncAt);
+
+    // Stale board (BAN-450): dark long enough (or queue at the cap) that what's on screen may no
+    // longer match the pass. Ticks with `now`, so the banner appears on its own after the window.
+    const staleBoard = boardStale({ online, lastSyncAt, queueLength: queued }, now);
     const realtime = useKitchenStore((state) => state.realtime);
     const prefs = useKitchenStore((state) => state.prefs);
     const selected = useKitchenStore((state) => state.display);
@@ -278,14 +284,21 @@ function BoardScreen({
                 onChange={applyFilter}
             />
 
-            {!online && (
+            {staleBoard ? (
+                <p
+                    role="alert"
+                    className="bg-kitchen-late px-3 py-1 text-center text-lg font-bold text-white"
+                >
+                    {t('kds.net.stale')}
+                </p>
+            ) : !online ? (
                 <p
                     role="status"
                     className="bg-kitchen-late/25 px-3 py-1 text-center text-lg font-bold text-kitchen-late"
                 >
                     {t('kds.net.queued')}
                 </p>
-            )}
+            ) : null}
 
             <main className="min-h-0 flex-1 pt-3">
                 <Board

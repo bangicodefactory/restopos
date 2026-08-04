@@ -106,6 +106,7 @@ export type SelfOrderState = {
 
     boot: (configToken: string, tableToken: string | null) => Promise<void>;
     refreshMenu: () => Promise<void>;
+    setOffline: (offline: boolean) => void;
 
     go: (screen: Screen) => void;
     openProduct: (productId: number, lineUuid?: string) => void;
@@ -309,6 +310,22 @@ export const useSelfOrderStore = createPosStore<SelfOrderState>((set, get) => {
             });
         },
 
+        /**
+         * Track the live network state (BAN-450). Wired to the browser's online/offline events so
+         * the online-only guards (submit) and the disabled checkout buttons reflect reality the
+         * moment the venue Wi-Fi drops, not just after the next failed fetch. A cleared error on
+         * reconnect lets the customer try again.
+         */
+        setOffline(offline) {
+            if (get().offline === offline) return;
+            set((state) => {
+                state.offline = offline;
+                if (!offline && state.submitError === 'so.error.offline') {
+                    state.submitError = null;
+                }
+            });
+        },
+
         openProduct(productId, lineUuid) {
             set((state) => {
                 state.detailProductId = productId;
@@ -405,6 +422,17 @@ export const useSelfOrderStore = createPosStore<SelfOrderState>((set, get) => {
             const catalog = catalogRef;
             if (!catalog || !config || cart.lines.length === 0) return false;
             if (!canOrder(config)) return false;
+
+            // Submitting is online-only and there is no customer-facing outbox (BAN-450): refuse
+            // before touching the network so the cart is kept intact and the order is sent exactly
+            // once, on the first attempt after connectivity returns — not fired blindly into a drop.
+            if (get().offline) {
+                set((state) => {
+                    state.submitError = 'so.error.offline';
+                });
+
+                return false;
+            }
 
             const validated = validateCart(cart, catalog);
             if (validated.issues.length > 0) {

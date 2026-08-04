@@ -72,6 +72,7 @@ export function TicketCard({
 
     return (
         <article
+            data-order-uuid={order.uuid}
             className={cn(
                 'flex flex-col overflow-hidden rounded-pos-lg bg-kitchen-surface text-kitchen-text shadow-pos-lg',
                 'touch-manipulation select-none',
