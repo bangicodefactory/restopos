@@ -402,7 +402,60 @@ final readonly class PreparationService
             ];
         }
 
+        // The kitchen ticket is rebuilt from the structured options, not `full_product_name` alone
+        // (KDS-006): the chosen no-variant attribute values and any custom text ("Happy Birthday")
+        // are appended so the line reads "Cake (Chocolate, Happy Birthday)". The composed name is
+        // what writeSnapshot stores, so this stays diff-stable across sends.
+        //
+        // The options ride onto the *initial* fire (a `New` change carries this name). Note the
+        // delta keys on quantity and note only, so changing an option on an already-sent line does
+        // not re-fire — Odoo cancels-and-readds there; we do not. Options are picked in the variant
+        // dialog before the line is sent, so this edge only bites a post-send re-pick.
+        $labels = $this->optionLabels(array_map(static fn (array $l): int => (int) $l['line_id'], $out));
+
+        foreach ($out as &$line) {
+            $extra = $labels[$line['line_id']] ?? [];
+            if ($extra !== []) {
+                $line['name'] = $line['name'].' ('.implode(', ', $extra).')';
+            }
+        }
+        unset($line);
+
         return $out;
+    }
+
+    /**
+     * Per-line option labels for the ticket: the selected attribute values by name, then any custom
+     * values, in a stable order.
+     *
+     * @param  list<int>  $lineIds
+     * @return array<int, list<string>>
+     */
+    private function optionLabels(array $lineIds): array
+    {
+        if ($lineIds === []) {
+            return [];
+        }
+
+        $labels = [];
+
+        foreach ($this->connection->table('pos_order_line_attribute_value as olav')
+            ->join('product_attribute_line_values as palv', 'palv.id', '=', 'olav.product_attribute_line_value_id')
+            ->join('product_attribute_values as pav', 'pav.id', '=', 'palv.product_attribute_value_id')
+            ->whereIn('olav.pos_order_line_id', $lineIds)
+            ->orderBy('olav.product_attribute_line_value_id')
+            ->get(['olav.pos_order_line_id as line_id', 'pav.name']) as $row) {
+            $labels[(int) $row->line_id][] = (string) $row->name;
+        }
+
+        foreach ($this->connection->table('pos_order_line_custom_attribute_values')
+            ->whereIn('pos_order_line_id', $lineIds)
+            ->orderBy('id')
+            ->get(['pos_order_line_id as line_id', 'custom_value']) as $row) {
+            $labels[(int) $row->line_id][] = (string) $row->custom_value;
+        }
+
+        return $labels;
     }
 
     /** @param array<string, mixed> $line */
