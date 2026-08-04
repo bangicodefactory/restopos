@@ -57,7 +57,7 @@ final class OrderController extends Controller
                 'ordered_at' => $o->ordered_at,
                 'amount_total' => (string) $o->amount_total,
                 'pos_session_id' => (int) $o->pos_session_id,
-                'pos_session_uuid' => $o->session?->uuid === null ? null : (string) $o->session->uuid,
+                'pos_session_uuid' => $o->session?->uuid,
                 'is_refund' => (bool) $o->is_refund,
             ]),
             'filters' => $request->only(['search', 'state', 'config_id', 'from', 'to']),
@@ -74,7 +74,7 @@ final class OrderController extends Controller
         return Inertia::render('Orders/Show', [
             'order' => [
                 ...$order->attributesToArray(),
-                'pos_session_uuid' => $order->session?->uuid === null ? null : (string) $order->session->uuid,
+                'pos_session_uuid' => $order->session?->uuid,
             ],
             'lines' => $order->lines->map(static fn ($l): array => $l->attributesToArray())->all(),
             'payments' => $order->payments->map(static fn ($p): array => $p->attributesToArray())->all(),

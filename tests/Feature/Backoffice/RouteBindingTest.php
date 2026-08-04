@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
 
@@ -32,6 +33,15 @@ it('resolves every uuid-bound back-office page for a real record', function (): 
     $this->get("/floors/{$fx->floor->uuid}/edit")->assertOk();
     $this->get("/prep-displays/{$fx->display->uuid}/edit")->assertOk();
     $this->get("/sessions/{$fx->session->uuid}")->assertOk();
+});
+
+it('resolves the order show page for a real order addressed by uuid', function (): void {
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())
+        ->postJson('/api/pos/sync', ['orders' => [$this->fx->orderCommand($uuid)]])
+        ->assertOk();
+
+    $this->get("/orders/{$uuid}")->assertOk();
 });
 
 it('404s when a uuid-bound page is addressed by numeric id (the bug that shipped)', function (): void {
