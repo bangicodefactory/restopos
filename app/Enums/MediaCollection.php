@@ -20,6 +20,8 @@ enum MediaCollection: string
     case FloorBackground = 'floor_background';
     case ReceiptLogo = 'receipt_logo';
     case Avatar = 'avatar';
+    /** Generated, non-image artefacts — the accounting export file and anything like it. */
+    case Document = 'document';
 
     public function label(): string
     {
@@ -31,6 +33,7 @@ enum MediaCollection: string
             self::FloorBackground => 'Floor background',
             self::ReceiptLogo => 'Receipt logo',
             self::Avatar => 'Avatar',
+            self::Document => 'Document',
         };
     }
 }

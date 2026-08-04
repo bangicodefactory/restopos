@@ -221,11 +221,12 @@ it('builds an accounting export from the frozen summaries', function (): void {
         ->postJson("/api/pos/sessions/{$id}/accounting-export");
 
     $response->assertCreated()
-        ->assertJsonPath('state', 'generated')
+        // `exported` is the commit point: file written, pivot rows in, sessions marked (BAN-448).
+        ->assertJsonPath('state', 'exported')
         ->assertJsonPath('total_sales', '20.0000')
         ->assertJsonPath('total_tax', '4.2000')
         ->assertJsonPath('total_payments', '24.2000')
-        // sales + tax − payments must net to zero.
+        // sales + tax + rounding − payments must net to zero.
         ->assertJsonPath('imbalance_amount', '0.0000');
 });
 

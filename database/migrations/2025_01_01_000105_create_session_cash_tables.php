@@ -63,6 +63,10 @@ return new class extends Migration
             $table->decimal('order_amount_total', 16, 4)->default(0);
             $table->decimal('refund_amount_total', 16, 4)->default(0);
             $table->decimal('payments_total', 16, 4)->default(0);
+            // Cash rounding written off across the session. Frozen at close like every other
+            // figure here, because the accounting export reads these summaries and never the live
+            // order rows — the imbalance check needs it and must not go looking for it in orders.
+            $table->decimal('rounding_total', 16, 4)->default(0);
             $table->boolean('is_rescue')->default(false)->index();
             $table->foreignId('rescued_from_session_id')->nullable()->constrained('pos_sessions')->nullOnDelete();
             $table->boolean('closing_forced')->default(false);
@@ -189,6 +193,9 @@ return new class extends Migration
             $table->decimal('total_sales', 16, 4)->default(0);
             $table->decimal('total_tax', 16, 4)->default(0);
             $table->decimal('total_payments', 16, 4)->default(0);
+            // Without this the export's own figures do not add up on their face: sales + tax will
+            // not equal payments on any cash-rounded period, and the reader has no way to see why.
+            $table->decimal('total_rounding', 16, 4)->default(0);
             $table->decimal('imbalance_amount', 16, 4)->default(0);
             $table->foreignId('media_file_id')->nullable()->constrained('media_files')->nullOnDelete();
             $table->foreignId('generated_by_user_id')->nullable()->constrained('users')->nullOnDelete();

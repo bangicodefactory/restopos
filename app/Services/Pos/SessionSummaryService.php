@@ -41,6 +41,7 @@ final readonly class SessionSummaryService
             'order_amount_total' => $orderTotals['order_amount_total'],
             'refund_amount_total' => $orderTotals['refund_amount_total'],
             'payments_total' => $orderTotals['payments_total'],
+            'rounding_total' => $orderTotals['rounding_total'],
         ])->save();
 
         return [
@@ -136,17 +137,29 @@ final readonly class SessionSummaryService
     {
         $this->connection->table('session_sales_summaries')->where('pos_session_id', $session->getKey())->delete();
 
+        // The revenue account comes from the product's *accounting* category, not the POS browsing
+        // tree: a product sits in several POS categories and only the first is frozen on the line,
+        // which would make the ledger code depend on how the grid happened to be arranged.
         $rows = $this->connection->table('pos_order_lines')
             ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+            ->leftJoin('products', 'products.id', '=', 'pos_order_lines.product_id')
+            ->leftJoin('product_categories', 'product_categories.id', '=', 'products.product_category_id')
             ->where('pos_orders.pos_session_id', $session->getKey())
             ->whereIn('pos_orders.state', [OrderState::Paid->value, OrderState::Done->value])
             ->whereNull('pos_orders.deleted_at')
             ->whereNull('pos_order_lines.deleted_at')
-            ->groupBy('pos_order_lines.pos_category_id', 'pos_order_lines.product_id', 'pos_order_lines.tax_signature', 'pos_orders.is_refund')
+            ->groupBy(
+                'pos_order_lines.pos_category_id',
+                'pos_order_lines.product_id',
+                'pos_order_lines.tax_signature',
+                'pos_orders.is_refund',
+                'product_categories.ledger_code',
+            )
             ->selectRaw('pos_order_lines.pos_category_id as pos_category_id')
             ->selectRaw('pos_order_lines.product_id as product_id')
             ->selectRaw('pos_order_lines.tax_signature as tax_signature')
             ->selectRaw('pos_orders.is_refund as is_refund')
+            ->selectRaw('product_categories.ledger_code as ledger_code')
             ->selectRaw('sum(pos_order_lines.quantity) as quantity')
             ->selectRaw('sum(pos_order_lines.price_subtotal) as base_amount')
             ->selectRaw('sum(pos_order_lines.discount_amount) as discount_amount')
@@ -171,7 +184,7 @@ final readonly class SessionSummaryService
                 'tax_amount' => $this->scale((string) ($row->tax_amount ?? '0')),
                 'total_amount' => $this->scale((string) ($row->total_amount ?? '0')),
                 'cost_amount' => $this->scale((string) ($row->cost_amount ?? '0')),
-                'ledger_code' => null,
+                'ledger_code' => $row->ledger_code === null ? null : (string) $row->ledger_code,
                 'created_at' => $now,
                 'updated_at' => $now,
             ];
@@ -273,6 +286,7 @@ final readonly class SessionSummaryService
             ->selectRaw('count(*) as order_count')
             ->selectRaw('sum(case when is_refund then 0 else amount_total end) as order_amount_total')
             ->selectRaw('sum(case when is_refund then amount_total else 0 end) as refund_amount_total')
+            ->selectRaw('sum(amount_rounding) as rounding_total')
             ->first();
 
         $payments = (string) ($this->connection->table('pos_payments')
@@ -285,6 +299,7 @@ final readonly class SessionSummaryService
             'order_amount_total' => $this->scale((string) ($row->order_amount_total ?? '0')),
             'refund_amount_total' => $this->scale((string) ($row->refund_amount_total ?? '0')),
             'payments_total' => $this->scale($payments),
+            'rounding_total' => $this->scale((string) ($row->rounding_total ?? '0')),
         ];
     }
 

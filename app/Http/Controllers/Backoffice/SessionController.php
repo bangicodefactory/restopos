@@ -6,15 +6,19 @@ namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\SessionState;
 use App\Http\Controllers\Controller;
+use App\Models\Pos\AccountingExport;
 use App\Models\Pos\PosSession;
 use App\Services\Pos\AccountingExportService;
 use App\Services\Pos\SessionService;
+use DomainException;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * `Sessions/Index` and `Sessions/Show` (spec 02 BOF-140…BOF-159).
@@ -112,14 +116,48 @@ final class SessionController extends Controller
             'session_ids' => ['nullable', 'array'],
         ]);
 
-        $this->exports->build(
-            companyId: (int) ($request->user()?->getAttribute('company_id') ?? 1),
-            periodStart: (string) $data['period_start'],
-            periodEnd: (string) $data['period_end'],
-            sessionIds: isset($data['session_ids']) ? array_map(intval(...), (array) $data['session_ids']) : null,
-            userId: (int) $request->user()?->getKey(),
-        );
+        try {
+            $this->exports->build(
+                companyId: (int) ($request->user()?->getAttribute('company_id') ?? 1),
+                periodStart: (string) $data['period_start'],
+                periodEnd: (string) $data['period_end'],
+                sessionIds: isset($data['session_ids']) ? array_map(intval(...), (array) $data['session_ids']) : null,
+                userId: (int) $request->user()?->getKey(),
+            );
+        } catch (DomainException $e) {
+            // Nothing left to export is an ordinary answer — the operator asked for a period whose
+            // sessions are already in a ledger. Tell them, do not hand them a 500 (BAN-448).
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Accounting export generated.');
+    }
+
+    /**
+     * Stream an export's file (BAN-448).
+     *
+     * The file is the period's takings, so it is never web-served directly: `media_files.is_public`
+     * stays false and this route is the only way to it. Same `export` ability as building one —
+     * being able to generate the month is being able to read it back.
+     */
+    public function download(AccountingExport $export): StreamedResponse
+    {
+        Gate::authorize('export', PosSession::class);
+
+        $media = $export->file;
+
+        if ($media === null) {
+            abort(404, 'This export has no file.');
+        }
+
+        $disk = Storage::disk($media->disk);
+
+        if (! $disk->exists($media->path)) {
+            abort(404, 'The export file is no longer on disk.');
+        }
+
+        return $disk->download($media->path, $media->filename, [
+            'Content-Type' => $media->mime_type,
+        ]);
     }
 }

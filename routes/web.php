@@ -94,6 +94,7 @@ Route::middleware(['auth'])->group(function (): void {
     Route::get('sessions/{session}', [SessionController::class, 'show'])->name('sessions.show');
     Route::post('sessions/{session}/close', [SessionController::class, 'close'])->name('sessions.close');
     Route::post('accounting-exports', [SessionController::class, 'export'])->name('accounting-exports.store');
+    Route::get('accounting-exports/{export}/download', [SessionController::class, 'download'])->name('accounting-exports.download');
 
     Route::get('reports/sales-details', [ReportController::class, 'salesDetails'])->name('reports.sales-details');
     Route::get('reports/session', [ReportController::class, 'sessionReport'])->name('reports.session');

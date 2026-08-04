@@ -19,6 +19,7 @@ use App\Services\Pos\SessionService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
  * Session lifecycle and cash control from the register (spec 02 REG-001…039).
@@ -204,12 +205,18 @@ final class SessionController extends Controller
     {
         $this->assertOwned($request, $session);
 
-        $export = $this->exports->build(
-            companyId: (int) $session->company_id,
-            periodStart: (string) $session->business_date,
-            periodEnd: (string) $session->business_date,
-            sessionIds: [(int) $session->getKey()],
-        );
+        try {
+            $export = $this->exports->build(
+                companyId: (int) $session->company_id,
+                periodStart: (string) $session->business_date,
+                periodEnd: (string) $session->business_date,
+                sessionIds: [(int) $session->getKey()],
+            );
+        } catch (DomainException $e) {
+            // Re-exporting a session that has already been consumed is a normal thing for an
+            // operator to try, not a server fault — 409 so the caller can say so (BAN-448).
+            throw new ConflictHttpException($e->getMessage(), $e);
+        }
 
         return new JsonResponse([
             'uuid' => (string) $export->uuid,
@@ -217,6 +224,7 @@ final class SessionController extends Controller
             'total_sales' => (string) $export->total_sales,
             'total_tax' => (string) $export->total_tax,
             'total_payments' => (string) $export->total_payments,
+            'total_rounding' => (string) $export->total_rounding,
             'imbalance_amount' => (string) $export->imbalance_amount,
         ], 201);
     }
