@@ -303,6 +303,37 @@ describe('aggregateState', () => {
             aggregateState({ state: 'pending', lines: [line({ state: 'cancelled' }), line({ state: 'todo' })] }),
         ).toBe('pending');
     });
+
+    // KDS-016 — the server books a cancellation as a *new* prep line with `change_type: 'cancelled'`
+    // in state `todo`. That row is an instruction to stop cooking, not something to cook.
+    describe('a cancellation row is not open work (KDS-016)', () => {
+        const cancellation = (): KitchenLine => line({ state: 'todo', change_type: 'cancelled' });
+
+        it('lets the rest of the card reach served with no cook interaction on it', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'served' }), cancellation()] }),
+            ).toBe('served');
+        });
+
+        it('does not hold the card at pending', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'ready' }), cancellation()] }),
+            ).toBe('ready');
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'in_progress' }), cancellation()] }),
+            ).toBe('in_progress');
+        });
+
+        it('is cancelled when the cancellation row is all that is left', () => {
+            expect(aggregateState({ state: 'pending', lines: [cancellation()] })).toBe('cancelled');
+        });
+
+        it('still counts a genuine todo line as open work', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'todo' }), cancellation()] }),
+            ).toBe('pending');
+        });
+    });
 });
 
 describe('optimistic mutation', () => {

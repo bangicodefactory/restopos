@@ -43,6 +43,9 @@ use Illuminate\Support\Str;
  */
 final readonly class PreparationService
 {
+    /** Guards the combo-parent walk in {@see inheritComboRouting()} against a cyclic parent chain. */
+    private const MAX_COMBO_DEPTH = 8;
+
     public function __construct(
         private ConnectionInterface $connection,
         private TicketRenderer $renderer,
@@ -402,6 +405,8 @@ final readonly class PreparationService
             ];
         }
 
+        $this->inheritComboRouting($out);
+
         // The kitchen ticket is rebuilt from the structured options, not `full_product_name` alone
         // (KDS-006): the chosen no-variant attribute values and any custom text ("Happy Birthday")
         // are appended so the line reads "Cake (Chocolate, Happy Birthday)". The composed name is
@@ -422,6 +427,67 @@ final readonly class PreparationService
         unset($line);
 
         return $out;
+    }
+
+    /**
+     * KDS-004 — a combo child inherits its parent's station.
+     *
+     * A combo child usually has no `pos_category_id` of its own: the category lives on the combo
+     * product the cashier tapped, not on the "Coke" inside it. Category routing then matched no
+     * station, `forCategories()` filtered the child out of every display and printer, and the item
+     * was simply never cooked — silently, because nothing errors when a line routes nowhere.
+     *
+     * Walks up rather than reading one level, since a combo can contain a combo. The depth guard is
+     * for a cycle that only bad data could produce; without it this is an infinite loop inside the
+     * send path.
+     *
+     * @param  array<string, array<string, mixed>>  $lines  keyed by uuid, mutated in place
+     */
+    private function inheritComboRouting(array &$lines): void
+    {
+        $byLineId = [];
+
+        foreach ($lines as $uuid => $line) {
+            $byLineId[(int) $line['line_id']] = $uuid;
+        }
+
+        foreach ($lines as $uuid => $line) {
+            $parentId = $line['combo_parent_line_id'] ?? null;
+
+            if ($parentId === null) {
+                continue;
+            }
+
+            $lines[$uuid]['combo_parent_uuid'] = $byLineId[(int) $parentId] ?? null;
+
+            if ($line['pos_category_id'] !== null) {
+                continue;
+            }
+
+            // Climb to the nearest ancestor that has a category of its own.
+            $cursor = (int) $parentId;
+
+            for ($depth = 0; $depth < self::MAX_COMBO_DEPTH; $depth++) {
+                $parentUuid = $byLineId[$cursor] ?? null;
+
+                if ($parentUuid === null) {
+                    break;
+                }
+
+                $parent = $lines[$parentUuid];
+
+                if ($parent['pos_category_id'] !== null) {
+                    $lines[$uuid]['pos_category_id'] = (int) $parent['pos_category_id'];
+                    break;
+                }
+
+                if ($parent['combo_parent_line_id'] === null) {
+                    break;
+                }
+
+                $cursor = (int) $parent['combo_parent_line_id'];
+            }
+        }
     }
 
     /**
@@ -473,7 +539,9 @@ final readonly class PreparationService
             internalNote: isset($line['note']) ? (string) $line['note'] : null,
             courseId: isset($line['course_id']) ? (int) $line['course_id'] : null,
             courseIndex: (int) ($line['course_index'] ?? 1),
-            comboParentUuid: null,
+            // Resolved by inheritComboRouting (KDS-004); the board groups a combo's children under
+            // their parent, which it cannot do if every line claims to be a root.
+            comboParentUuid: isset($line['combo_parent_uuid']) ? (string) $line['combo_parent_uuid'] : null,
         );
     }
 
@@ -641,14 +709,25 @@ final readonly class PreparationService
 
             $routed = $delta->forCategories($categoryIds, (bool) $printer->print_all_categories);
 
-            if ($routed === []) {
+            // KDS-053 — an order note is not a line, so it routes to no category and `$routed` is
+            // empty for every printer. Bailing here meant that adding "no onions" after the send
+            // produced zero print jobs and the kitchen never learned about it, even though
+            // `PreparationDelta::isEmpty()` correctly calls that delta non-empty.
+            //
+            // The note goes to the stations already cooking this order — they are the ones who can
+            // still act on it. A printer that has never seen the order has nothing to amend.
+            $noteOnly = $routed === [] && $delta->orderNoteChanged && $this->hasPrinted($order, (int) $printer->id);
+
+            if ($routed === [] && ! $noteOnly) {
                 continue;
             }
 
             foreach ([PrepChangeType::New, PrepChangeType::Cancelled, PrepChangeType::NoteUpdate] as $type) {
                 $subset = array_values(array_filter($routed, static fn (PreparationChange $c): bool => $c->changeType === $type));
 
-                if ($subset === []) {
+                // The order-note ticket carries no lines: the note itself is the whole message, and
+                // the renderer already puts it in the payload's `notes`.
+                if ($subset === [] && ! ($noteOnly && $type === PrepChangeType::NoteUpdate)) {
                     continue;
                 }
 
@@ -674,6 +753,15 @@ final readonly class PreparationService
         }
 
         return $jobs;
+    }
+
+    /** Has this printer already been sent anything for this order? (KDS-053) */
+    private function hasPrinted(Order $order, int $printerId): bool
+    {
+        return $this->connection->table('preparation_print_jobs')
+            ->where('pos_order_id', $order->getKey())
+            ->where('pos_printer_id', $printerId)
+            ->exists();
     }
 
     private function jobTypeFor(PrepChangeType $type): PrintJobType
@@ -719,7 +807,11 @@ final readonly class PreparationService
                 'quantity' => (string) $line['quantity'],
                 'name' => $line['name'],
                 'product_id' => $line['product_id'],
+                // Already resolved by inheritComboRouting, and it has to be: when the line is later
+                // deleted, its cancellation is built from *this* row, and a cancellation that
+                // routes nowhere is the same bug as a combo child that routes nowhere (KDS-004).
                 'pos_category_id' => $line['pos_category_id'],
+                'combo_parent_uuid' => $line['combo_parent_uuid'] ?? null,
                 'note' => $line['note'],
                 'customer_note' => $line['customer_note'],
                 'course_index' => $line['course_index'],

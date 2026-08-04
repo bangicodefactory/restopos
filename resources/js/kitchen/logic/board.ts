@@ -379,9 +379,15 @@ export function applyRecallLocally(order: KitchenOrder, stages: readonly Kitchen
  *
  * Precedence, least advanced wins: any line still to do ⇒ pending; any in progress ⇒ in progress;
  * all ready ⇒ ready; all served ⇒ served; everything cancelled ⇒ cancelled.
+ *
+ * "Cancelled" is `isLineCancelled`, not `state === 'cancelled'` (KDS-016). The server records a
+ * cancellation as a *new* prep line carrying `change_type: 'cancelled'` in state `todo` — that row
+ * is the kitchen's instruction to stop cooking something, not a thing to cook. Counting it as open
+ * work pinned the card at "pending" forever: the cook had to tap the cancellation through four
+ * states to clear a dish nobody was making.
  */
 export function aggregateState(order: Pick<KitchenOrder, 'lines' | 'state'>): KitchenOrder['state'] {
-    const active = order.lines.filter((line) => line.state !== 'cancelled');
+    const active = order.lines.filter((line) => !isLineCancelled(line));
     if (order.lines.length > 0 && active.length === 0) return 'cancelled';
     if (active.length === 0) return order.state;
     if (active.some((line) => line.state === 'todo')) return 'pending';
