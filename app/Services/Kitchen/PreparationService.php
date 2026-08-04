@@ -405,7 +405,7 @@ final readonly class PreparationService
             ];
         }
 
-        $this->inheritComboRouting($out);
+        $this->inheritComboRouting($order, $out);
 
         // The kitchen ticket is rebuilt from the structured options, not `full_product_name` alone
         // (KDS-006): the chosen no-variant attribute values and any custom text ("Happy Birthday")
@@ -441,10 +441,33 @@ final readonly class PreparationService
      * for a cycle that only bad data could produce; without it this is an infinite loop inside the
      * send path.
      *
+     * The ancestry is read from **all** the order's lines, not just the preparable ones. A parent
+     * flagged `skip_preparation` (or soft-deleted after the child was added) is absent from
+     * `$lines`, and resolving against that set alone would leave its children with no ancestor to
+     * inherit from — uncooked again, for a different reason.
+     *
+     * Safe to mutate while iterating: the climb reads `$lines[...]` live, so a parent already
+     * processed contributes its inherited category, and one not yet processed is simply climbed
+     * past. Either order reaches the same nearest ancestor that owns a category.
+     *
      * @param  array<string, array<string, mixed>>  $lines  keyed by uuid, mutated in place
      */
-    private function inheritComboRouting(array &$lines): void
+    private function inheritComboRouting(Order $order, array &$lines): void
     {
+        $hasCombo = false;
+
+        foreach ($lines as $line) {
+            if (($line['combo_parent_line_id'] ?? null) !== null) {
+                $hasCombo = true;
+                break;
+            }
+        }
+
+        if (! $hasCombo) {
+            return;
+        }
+
+        $ancestry = $this->comboAncestry($order);
         $byLineId = [];
 
         foreach ($lines as $uuid => $line) {
@@ -464,30 +487,55 @@ final readonly class PreparationService
                 continue;
             }
 
-            // Climb to the nearest ancestor that has a category of its own.
+            // Climb to the nearest ancestor that has a category of its own. Prefer the live value
+            // from `$lines` (it may already carry an inherited category) and fall back to the raw
+            // ancestry row for a parent this delta does not include.
             $cursor = (int) $parentId;
 
             for ($depth = 0; $depth < self::MAX_COMBO_DEPTH; $depth++) {
                 $parentUuid = $byLineId[$cursor] ?? null;
+                $parent = $parentUuid !== null ? $lines[$parentUuid] : ($ancestry[$cursor] ?? null);
 
-                if ($parentUuid === null) {
+                if ($parent === null) {
                     break;
                 }
 
-                $parent = $lines[$parentUuid];
-
-                if ($parent['pos_category_id'] !== null) {
+                if (($parent['pos_category_id'] ?? null) !== null) {
                     $lines[$uuid]['pos_category_id'] = (int) $parent['pos_category_id'];
                     break;
                 }
 
-                if ($parent['combo_parent_line_id'] === null) {
+                if (($parent['combo_parent_line_id'] ?? null) === null) {
                     break;
                 }
 
                 $cursor = (int) $parent['combo_parent_line_id'];
             }
         }
+    }
+
+    /**
+     * Every line of the order as `id => [pos_category_id, combo_parent_line_id]`, unfiltered.
+     *
+     * Deliberately ignores `skip_preparation` and `deleted_at`: a line that is not itself cooked can
+     * still be the only thing standing between its children and a station.
+     *
+     * @return array<int, array{pos_category_id: ?int, combo_parent_line_id: ?int}>
+     */
+    private function comboAncestry(Order $order): array
+    {
+        $out = [];
+
+        foreach ($this->connection->table('pos_order_lines')
+            ->where('pos_order_id', $order->getKey())
+            ->get(['id', 'pos_category_id', 'combo_parent_line_id']) as $row) {
+            $out[(int) $row->id] = [
+                'pos_category_id' => $row->pos_category_id === null ? null : (int) $row->pos_category_id,
+                'combo_parent_line_id' => $row->combo_parent_line_id === null ? null : (int) $row->combo_parent_line_id,
+            ];
+        }
+
+        return $out;
     }
 
     /**

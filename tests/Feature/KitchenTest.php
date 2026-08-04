@@ -551,3 +551,95 @@ it('routes a cancelled combo child to the station that was cooking it', function
     expect($cancellation)->not->toBeNull()
         ->and($cancellation->combo_parent_uuid)->toBe($parentUuid);
 });
+
+/** A category-scoped grill station, so routing has to actually decide something. */
+function grillDisplay(PosFixtures $fx): int
+{
+    $display = DB::table('prep_displays')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $fx->company->getKey(),
+        'name' => 'Grill',
+        'access_token' => Str::lower(Str::random(32)),
+        'show_all_categories' => false,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_prep_display')->insert([
+        'pos_config_id' => $fx->config->getKey(),
+        'prep_display_id' => $display,
+    ]);
+    DB::table('pos_category_prep_display')->insert([
+        'prep_display_id' => $display,
+        'pos_category_id' => $fx->category->getKey(),
+    ]);
+    DB::table('prep_stages')->insert([
+        'prep_display_id' => $display,
+        'name' => 'To do',
+        'stage_type' => 'todo',
+        'sequence' => 10,
+        'is_default' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    return $display;
+}
+
+it('inherits through a combo nested inside a combo', function (): void {
+    $display = grillDisplay($this->fx);
+
+    $rootUuid = (string) Str::uuid();
+    $midUuid = (string) Str::uuid();
+    $leafUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $rootUuid, 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $midUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $rootUuid],
+            ['op' => 'create', 'uuid' => $leafUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $midUuid],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    // Only the root owns a category — the walk has to climb two levels to find it.
+    DB::table('pos_order_lines')->whereIn('uuid', [$midUuid, $leafUuid])->update(['pos_category_id' => null]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+
+    $routed = DB::table('prep_order_lines')->where('prep_order_id', $prepOrderId)->pluck('pos_order_line_uuid')->all();
+
+    expect($routed)->toContain($rootUuid)->toContain($midUuid)->toContain($leafUuid);
+});
+
+it('inherits past a parent that is not itself prepared', function (): void {
+    // A combo parent flagged skip_preparation is absent from the delta entirely. Resolving ancestry
+    // from the delta alone would leave its children with nothing to inherit — uncooked again.
+    $display = grillDisplay($this->fx);
+
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $parentUuid, 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $childUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $parentUuid],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $childUuid)->update(['pos_category_id' => null]);
+    DB::table('pos_order_lines')->where('uuid', $parentUuid)->update(['skip_preparation' => true]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+    $routed = DB::table('prep_order_lines')->where('prep_order_id', $prepOrderId)->pluck('pos_order_line_uuid')->all();
+
+    // The parent is not cooked; the child still is.
+    expect($routed)->toContain($childUuid)
+        ->and($routed)->not->toContain($parentUuid);
+});

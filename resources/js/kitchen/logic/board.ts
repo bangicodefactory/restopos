@@ -21,6 +21,20 @@ import { elapsedSeconds, isOpenOrder, urgencyOf, type UrgencyThresholds } from '
 /** A line is only *work* while it is neither served nor cancelled. */
 const DONE_LINE_STATES = new Set<KitchenLineState>(['served', 'cancelled']);
 
+/**
+ * Is this line still work the kitchen owes? The single answer, used by everything that asks —
+ * the card's state, the column it renders in, and whether it can be cleared (KDS-016).
+ *
+ * It has to be one function. "Done" is *not* a property of `state` alone: the server books a
+ * cancellation as a new prep line carrying `change_type: 'cancelled'` in state `todo`, which is an
+ * instruction to stop cooking rather than something to cook. When that rule lived in three places,
+ * two of them had it wrong — the card reported "served" while still sitting in the To-Do column and
+ * refusing to clear.
+ */
+export function isLineOpen(line: Pick<KitchenLine, 'state' | 'change_type'>): boolean {
+    return !DONE_LINE_STATES.has(line.state) && !isLineCancelled(line);
+}
+
 /** How the per-line states map onto the four stage types when a stage id is unusable. */
 const STATE_TO_STAGE_TYPE: Record<KitchenLineState, PrepStageType> = {
     todo: 'todo',
@@ -99,7 +113,9 @@ export function effectiveStageId(order: KitchenOrder, stages: readonly KitchenSt
         const lineRank = rankOf(line);
         if (lineRank === null) continue;
         if (highestAny === null || lineRank > highestAny) highestAny = lineRank;
-        if (DONE_LINE_STATES.has(line.state)) continue;
+        // A cancellation row sits in the To-Do stage but is not open work: counting it here parked
+        // the whole card in the To-Do column however far along the real food was (KDS-016).
+        if (!isLineOpen(line)) continue;
         if (lowestOpen === null || lineRank < lowestOpen) lowestOpen = lineRank;
     }
 
@@ -245,9 +261,14 @@ export function groupLinesByCourse(lines: readonly KitchenLine[]): CourseGroup[]
 /** True when nothing on the card is still work — drives the "all done" affordance. */
 export function isCardComplete(order: Pick<KitchenOrder, 'lines'>): boolean {
     if (order.lines.length === 0) return false;
-    return order.lines.every((line) => DONE_LINE_STATES.has(line.state));
+    return order.lines.every((line) => !isLineOpen(line));
 }
 
+/**
+ * Is this line *finished*, as opposed to cancelled? Drives the struck-through vs ticked styling, so
+ * unlike {@link isLineOpen} it deliberately does not fold the two together — the cook needs to see
+ * the difference between "I cooked that" and "that was called off".
+ */
 export function isLineDone(line: Pick<KitchenLine, 'state'>): boolean {
     return DONE_LINE_STATES.has(line.state);
 }
@@ -380,11 +401,9 @@ export function applyRecallLocally(order: KitchenOrder, stages: readonly Kitchen
  * Precedence, least advanced wins: any line still to do ⇒ pending; any in progress ⇒ in progress;
  * all ready ⇒ ready; all served ⇒ served; everything cancelled ⇒ cancelled.
  *
- * "Cancelled" is `isLineCancelled`, not `state === 'cancelled'` (KDS-016). The server records a
- * cancellation as a *new* prep line carrying `change_type: 'cancelled'` in state `todo` — that row
- * is the kitchen's instruction to stop cooking something, not a thing to cook. Counting it as open
- * work pinned the card at "pending" forever: the cook had to tap the cancellation through four
- * states to clear a dish nobody was making.
+ * The set to aggregate over is "not cancelled" ({@link isLineCancelled}), **not** {@link isLineOpen}
+ * — a served line is finished rather than open, but it still has to be counted, because "everything
+ * served" is what makes the card served. Only cancellations drop out entirely (KDS-016).
  */
 export function aggregateState(order: Pick<KitchenOrder, 'lines' | 'state'>): KitchenOrder['state'] {
     const active = order.lines.filter((line) => !isLineCancelled(line));
