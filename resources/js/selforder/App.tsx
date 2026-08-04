@@ -32,6 +32,7 @@ export function App({ configToken, tableToken }: { configToken: string; tableTok
     const phase = useSelfOrderStore((state) => state.phase);
     const fatal = useSelfOrderStore((state) => state.fatal);
     const offline = useSelfOrderStore((state) => state.offline);
+    const setOffline = useSelfOrderStore((state) => state.setOffline);
     const config = useSelfOrderStore((state) => state.config);
     const table = useSelfOrderStore((state) => state.table);
     const screen = useSelfOrderStore((state) => state.screen);
@@ -79,6 +80,12 @@ export function App({ configToken, tableToken }: { configToken: string; tableTok
         booted.current = true;
         void boot(configToken, tableToken);
     }, [boot, configToken, tableToken]);
+
+    // Keep the store's offline flag on the live network state so the online-only guards and the
+    // disabled checkout buttons react the instant the connection drops or returns (BAN-450).
+    useEffect(() => {
+        setOffline(!browserOnline);
+    }, [browserOnline, setOffline]);
 
     useVenueTheme(config);
 

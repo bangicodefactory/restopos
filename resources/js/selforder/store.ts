@@ -106,6 +106,7 @@ export type SelfOrderState = {
 
     boot: (configToken: string, tableToken: string | null) => Promise<void>;
     refreshMenu: () => Promise<void>;
+    setOffline: (offline: boolean) => void;
 
     go: (screen: Screen) => void;
     openProduct: (productId: number, lineUuid?: string) => void;
@@ -306,6 +307,22 @@ export const useSelfOrderStore = createPosStore<SelfOrderState>((set, get) => {
                 state.detailProductId = null;
                 state.editingLineUuid = null;
                 if (screen !== 'cart') state.cartIssues = [];
+            });
+        },
+
+        /**
+         * Track the live network state (BAN-450). Wired to the browser's online/offline events so
+         * the online-only guards (submit) and the disabled checkout buttons reflect reality the
+         * moment the venue Wi-Fi drops, not just after the next failed fetch. A cleared error on
+         * reconnect lets the customer try again.
+         */
+        setOffline(offline) {
+            if (get().offline === offline) return;
+            set((state) => {
+                state.offline = offline;
+                if (!offline && state.submitError === 'so.error.offline') {
+                    state.submitError = null;
+                }
             });
         },
 
