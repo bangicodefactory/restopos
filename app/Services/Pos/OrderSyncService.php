@@ -1192,8 +1192,11 @@ final readonly class OrderSyncService
             ->where('is_change', true)
             ->get();
 
-        if (bccomp($changeDue, '0', 4) <= 0) {
-            // No overpayment (or the order grew past the tender): there is no change to record.
+        // Change is excess *positive cash tender* over the total. A refund has a negative total and
+        // non-positive tender, so `changeDue` (= tender − total) would read positive there — guard on
+        // the tender sign too, or a refund would book phantom change (BAN-440).
+        if (bccomp($changeDue, '0', 4) <= 0 || bccomp($tendered, '0', 4) <= 0) {
+            // No overpayment (or a refund / an order grown past its tender): no change to record.
             $existing->each(static fn (OrderPayment $p): ?bool => $p->forceDelete());
 
             return;

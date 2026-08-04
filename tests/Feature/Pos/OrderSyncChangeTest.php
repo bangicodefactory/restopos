@@ -91,6 +91,36 @@ it('rejects a client payment that asserts is_change with a positive amount', fun
         ->and((float) $order->amount_due)->toBe(0.0);
 });
 
+it('never books change on a refund order (negative total is not an overpayment)', function (): void {
+    // A refund has a negative total and no tender; changeDue reads positive there, so without the
+    // tender guard it would book phantom change — and reject the refund when no cash method exists.
+    $uuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [[
+            'uuid' => $uuid,
+            'op' => 'upsert',
+            'order' => [
+                'session_id' => $this->fx->session->getKey(),
+                'state' => OrderState::Draft->value,
+                'is_refund' => true,
+                'access_token' => (string) Str::uuid(),
+            ],
+            'lines' => [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'variant_id' => $this->fx->variant->getKey(), 'qty' => '-1', 'price_unit' => '10.00', 'discount' => '0',
+            ]],
+            'payments' => [],
+        ]],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((float) $order->amount_total)->toBeLessThan(0.0)
+        ->and(Payment::query()->where('pos_order_id', $order->getKey())->where('is_change', true)->count())->toBe(0)
+        ->and((float) $order->amount_change)->toBe(0.0);
+});
+
 it('rejects an overpayment when the config has no cash method (REG-204)', function (): void {
     // Leave only the (non-cash) card method on the config.
     $this->fx->config->paymentMethods()->detach($this->fx->cash->getKey());
