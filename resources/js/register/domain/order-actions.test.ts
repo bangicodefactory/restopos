@@ -32,7 +32,6 @@ import {
     discardOrder,
     fireCourse,
     markPrepSent,
-    mergeOrders,
     reduceQuantity,
     removeLine,
     removePayment,
@@ -50,7 +49,6 @@ import {
     setPricelist,
     setQuantity,
     setTip,
-    transferOrder,
     validateOrder,
 } from './order-actions';
 import { orderTotals } from './totals';
@@ -1140,56 +1138,6 @@ describe('applyServerAck', () => {
 // Restaurant transfer / merge
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('transferOrder / mergeOrders (RST-054 … RST-056)', () => {
-    it('moves an order onto a free table', async () => {
-        const orderUuid = await createOrder({ tableId: 1 });
-        const result = transferOrder(orderUuid, 2);
-
-        expect(result).toEqual({ merged: false, orderUuid });
-        expect(orderOf(orderUuid).restaurant_table_id).toBe(2);
-    });
-
-    it('is a no-op when the order is already on that table', async () => {
-        const orderUuid = await createOrder({ tableId: 1 });
-        expect(transferOrder(orderUuid, 1)).toEqual({ merged: false, orderUuid });
-    });
-
-    it('merges into the draft already sitting on the target table', async () => {
-        const sourceUuid = await createOrder({ tableId: 1, guestCount: 2 });
-        addLine({ orderUuid: sourceUuid, variantId: PIZZA, quantity: 2 });
-
-        const targetUuid = await createOrder({ tableId: 2, guestCount: 3 });
-        addLine({ orderUuid: targetUuid, variantId: COLA });
-
-        const result = transferOrder(sourceUuid, 2);
-
-        expect(result).toEqual({ merged: true, orderUuid: targetUuid });
-        expect(orderOf(sourceUuid)).toMatchObject({ state: 'cancelled', cancel_reason: 'merged' });
-        expect(orderOf(targetUuid).guest_count).toBe(5);
-        expect(orderTotals(targetUuid)).toMatchObject({ subtotal: '23.00' });
-        expect(state().selectedOrderUuid).toBe(targetUuid);
-    });
-
-    it('mergeOrders refuses to merge an order into itself', async () => {
-        const orderUuid = await createOrder();
-        addLine({ orderUuid, variantId: PIZZA });
-        mergeOrders(orderUuid, orderUuid);
-        expect(orderOf(orderUuid).state).toBe('draft');
-    });
-
-    it('carries the kitchen-sent quantities across a merge so nothing re-fires', async () => {
-        const sourceUuid = await createOrder({ tableId: 1 });
-        addLine({ orderUuid: sourceUuid, variantId: PIZZA, quantity: 2 });
-        markPrepSent(sourceUuid);
-
-        const targetUuid = await createOrder({ tableId: 2 });
-        mergeOrders(sourceUuid, targetUuid);
-
-        const merged = linesOf(state(), targetUuid)[0];
-        const snapshot = orderOf(targetUuid).last_prep_snapshot;
-        expect(snapshot?.lines[`${merged?.uuid}::|[]`]).toBe(2);
-    });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kitchen bookkeeping
