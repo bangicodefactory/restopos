@@ -6,6 +6,8 @@ use App\Enums\AccountingExportState;
 use App\Enums\OrderState;
 use App\Models\Catalog\ProductCategory;
 use App\Models\Identity\MediaFile;
+use App\Models\Identity\Permission;
+use App\Models\Identity\Role;
 use App\Models\Pos\AccountingExport;
 use App\Models\Pricing\CashRounding;
 use App\Models\User;
@@ -50,6 +52,25 @@ function closeSessionWith(PosFixtures $fx, string $tender = '24.20'): int
         ->assertOk();
 
     return (int) $id;
+}
+
+/**
+ * The export's CSV keyed by row kind, each row an associative array of its columns.
+ *
+ * @return array<string, array<string, string>>
+ */
+function csvRows(AccountingExport $export): array
+{
+    $lines = array_values(array_filter(explode("\n", (string) Storage::disk($export->file->disk)->get($export->file->path))));
+    $header = str_getcsv(array_shift($lines));
+
+    $out = [];
+    foreach ($lines as $line) {
+        $row = array_combine($header, str_getcsv($line));
+        $out[$row['kind']] = $row;
+    }
+
+    return $out;
 }
 
 function buildExport(PosFixtures $fx): AccountingExport
@@ -101,6 +122,41 @@ it('reports the rounding term on the export row', function (): void {
     // and a missing term makes a balanced export look like it does not add up.
     expect($export->total_rounding)->not->toBeNull()
         ->and((float) $export->total_rounding)->toBe(0.0);
+});
+
+it('lets the database refuse a session two exports race for', function (): void {
+    $sessionId = closeSessionWith($this->fx);
+
+    // Stand in for the concurrent build that committed a fraction of a second earlier: the read
+    // this service does before inserting cannot see it, so only the constraint can stop the second.
+    $winner = AccountingExport::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'period_start' => $this->fx->session->business_date,
+        'period_end' => $this->fx->session->business_date,
+        'format' => 'csv',
+        'state' => AccountingExportState::Exported->value,
+        'session_count' => 1,
+    ]);
+    DB::table('accounting_export_session')->insert([
+        'accounting_export_id' => $winner->getKey(),
+        'pos_session_id' => $sessionId,
+    ]);
+
+    // Force the loser past the read-time guard the way a real race would.
+    DB::table('accounting_exports')->where('id', $winner->getKey())
+        ->update(['state' => AccountingExportState::Draft->value]);
+
+    $loser = buildExport($this->fx);
+
+    DB::table('accounting_exports')->where('id', $winner->getKey())
+        ->update(['state' => AccountingExportState::Exported->value]);
+
+    expect($loser->state)->toBe(AccountingExportState::Failed)
+        // Told what actually happened, not handed a raw constraint name.
+        ->and($loser->error_message)->toContain('Another export claimed these sessions first')
+        // And the winner still owns the session, exactly once.
+        ->and(DB::table('accounting_export_session')->where('pos_session_id', $sessionId)->count())->toBe(1);
 });
 
 it('records the pivot row and marks the session exported', function (): void {
@@ -156,6 +212,41 @@ it('refuses the download to an unauthenticated caller', function (): void {
         ->assertUnauthorized();
 });
 
+it('refuses the download to a user from another company', function (): void {
+    closeSessionWith($this->fx);
+    $export = buildExport($this->fx);
+
+    // Holding the ability is not enough — the export has to be yours. `BelongsToCompany` is an
+    // opt-in scope, so route-model binding resolves any tenant's export from its uuid alone.
+    $role = Role::query()->create(['name' => 'Accountant', 'slug' => 'accountant']);
+    $permission = Permission::query()->firstOrCreate(
+        ['slug' => 'pos.accounting.export'],
+        ['group' => 'pos'],
+    );
+    $role->permissions()->syncWithoutDetaching([$permission->getKey()]);
+
+    $outsider = User::factory()->create(['company_id' => (int) $this->fx->company->getKey() + 1]);
+    $outsider->roles()->syncWithoutDetaching([$role->getKey()]);
+
+    $this->actingAs($outsider)
+        ->get(route('accounting-exports.download', ['export' => $export->uuid]))
+        ->assertNotFound();
+});
+
+it('lets a super admin cross companies, as it does everywhere else', function (): void {
+    closeSessionWith($this->fx);
+    $export = buildExport($this->fx);
+
+    $platformOperator = User::factory()->create([
+        'is_super_admin' => true,
+        'company_id' => (int) $this->fx->company->getKey() + 1,
+    ]);
+
+    $this->actingAs($platformOperator)
+        ->get(route('accounting-exports.download', ['export' => $export->uuid]))
+        ->assertOk();
+});
+
 it('carries a ledger code in the CSV label column for every row', function (): void {
     // A configured site: a revenue account on the product's accounting category, a cash account on
     // the payment method. Both are nullable in the schema, so this is what "configured" looks like.
@@ -171,19 +262,33 @@ it('carries a ledger code in the CSV label column for every row', function (): v
     closeSessionWith($this->fx);
     $export = buildExport($this->fx);
 
-    $csv = Storage::disk($export->file->disk)->get($export->file->path);
-    $lines = array_values(array_filter(explode("\n", (string) $csv)));
+    $rows = csvRows($export);
 
-    expect($lines)->toHaveCount(4); // header + sales + tax + payment
+    // Assert on what each row *is*, not on how many the fixture happens to produce.
+    expect(array_keys($rows))->toEqualCanonicalizing(['sales', 'tax', 'payment']);
 
-    // Column 5 is `label`. Every data row carries one — the revenue account for sales, the tax
-    // group's label for tax, the payment method's ledger code for payments.
-    foreach (array_slice($lines, 1) as $line) {
-        $label = str_getcsv($line)[4] ?? '';
-        expect($label)->not->toBe('');
+    // Every data row carries a label: the revenue account for sales, the tax group's label for
+    // tax, the payment method's ledger code for payments.
+    foreach ($rows as $kind => $row) {
+        expect($row['label'])->not->toBe('', "the {$kind} row has no label");
     }
 
-    expect(str_getcsv($lines[1])[4])->toBe('7011'); // Plats principaux → PCG food revenue
+    expect($rows['sales']['label'])->toBe('7011')   // Plats principaux → PCG food revenue
+        ->and($rows['payment']['label'])->toBe('5310');
+});
+
+it('carries the business date on every CSV row', function (): void {
+    closeSessionWith($this->fx);
+    $export = buildExport($this->fx);
+
+    $expected = (string) $this->fx->session->fresh()->business_date;
+
+    // The header has always promised this column and every row shipped it empty. An export the
+    // accountant cannot sort by date is most of the way to useless.
+    foreach (csvRows($export) as $kind => $row) {
+        expect($row['business_date'])->not->toBe('', "the {$kind} row has no business date")
+            ->and($row['business_date'])->toStartWith(substr($expected, 0, 10));
+    }
 });
 
 it('balances a cash-rounded period to exactly zero', function (): void {
@@ -240,6 +345,9 @@ it('leaves the sessions available when a build blows up', function (): void {
     $sessionId = closeSessionWith($this->fx);
 
     // A disk that refuses writes fails the build after the pivot rows are inserted.
+    //
+    // Order matters: this swaps the container's filesystem factory, and the service takes its copy
+    // at construction — so it must be resolved *after* the mock, not before.
     Storage::shouldReceive('disk')->andThrow(new RuntimeException('disk is full'));
 
     $failed = app(AccountingExportService::class)->build(

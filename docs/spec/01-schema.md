@@ -1658,11 +1658,18 @@ New table (replaces Odoo's closing journal entry + `pos.close.session.wizard`).
 
 ### `accounting_export_session` (pivot)
 `accounting_export_id` FK cascade U, `pos_session_id` FK cascade U.
+**unique(`pos_session_id`)** — `accounting_export_session_once`.
 
 **This pivot is the double-counting guard, not bookkeeping.** A session is exported exactly once:
 the build excludes any session already joined to an export in state `exported` or `sent`, and the
 whole build (row, pivot, file, session marking) commits in one transaction. A failed build releases
 its sessions rather than stranding them.
+
+The read-back alone is a check-then-act, so it is *not* the guarantee — two operators exporting the
+same period at once would both see the session as unclaimed and both commit, since their exports
+have different ids and the composite primary key admits both rows. The **unique index on
+`pos_session_id`** is what makes "at most one export" true. It is sound precisely because a
+rolled-back build leaves no pivot rows: every row here belongs to a committed export.
 
 ---
 

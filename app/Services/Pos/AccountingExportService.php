@@ -13,6 +13,7 @@ use App\Models\Pos\AccountingExport;
 use DomainException;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -126,16 +127,19 @@ final readonly class AccountingExportService
                     'generated_by_user_id' => $userId,
                 ]);
 
-                foreach ($ids as $sessionId) {
-                    $this->connection->table('accounting_export_session')->insert([
+                // One statement, not one per session: a month of two registers is ~60 round trips
+                // inside the transaction otherwise. This is also where a concurrent build loses —
+                // `accounting_export_session_once` rejects a session another export already holds.
+                $this->connection->table('accounting_export_session')->insert(
+                    array_map(static fn (int $sessionId): array => [
                         'accounting_export_id' => $export->getKey(),
                         'pos_session_id' => $sessionId,
-                    ]);
-                }
+                    ], $ids),
+                );
 
                 $body = $format === AccountingExportFormat::Json
                     ? $this->renderJson($export, $ids)
-                    : $this->renderCsv($ids);
+                    : $this->renderCsv($ids, $companyId);
 
                 $media = $this->persist($export, $companyId, $format, $body);
 
@@ -154,7 +158,8 @@ final readonly class AccountingExportService
         } catch (\Throwable $e) {
             // The transaction rolled the whole attempt back, sessions included, so they stay
             // available for the next run. Record the failure outside it so the operator can see
-            // what happened rather than being told nothing at all.
+            // what happened rather than being told nothing at all — with the full set of figures,
+            // because a row showing an imbalance and no components explains nothing.
             /** @var AccountingExport $failed */
             $failed = AccountingExport::query()->create([
                 'uuid' => (string) Str::uuid(),
@@ -164,14 +169,34 @@ final readonly class AccountingExportService
                 'format' => $format->value,
                 'state' => AccountingExportState::Failed->value,
                 'session_count' => count($ids),
+                'total_sales' => $totalSales,
+                'total_tax' => $totalTax,
+                'total_payments' => $totalPayments,
                 'total_rounding' => $totalRounding,
                 'imbalance_amount' => $imbalance,
                 'generated_by_user_id' => $userId,
-                'error_message' => $e->getMessage(),
+                'error_message' => $this->describe($e),
             ]);
 
             return $failed;
         }
+    }
+
+    /**
+     * Turn a build failure into something an operator can act on.
+     *
+     * Losing the race for a session is the one failure with an obvious human explanation, and a
+     * raw "UNIQUE constraint failed: accounting_export_session.pos_session_id" tells nobody that
+     * their colleague simply got there first.
+     */
+    private function describe(\Throwable $e): string
+    {
+        if ($e instanceof UniqueConstraintViolationException
+            || str_contains($e->getMessage(), 'accounting_export_session_once')) {
+            return 'Another export claimed these sessions first. Reload and check the export list.';
+        }
+
+        return $e->getMessage();
     }
 
     /**
@@ -236,15 +261,27 @@ final readonly class AccountingExportService
         return $out;
     }
 
-    /** @param list<int> $sessionIds */
-    private function renderCsv(array $sessionIds): string
+    /**
+     * @param  list<int>  $sessionIds
+     * @param  int  $companyId  scopes the label lookups; the summaries are already session-scoped
+     */
+    private function renderCsv(array $sessionIds, int $companyId): string
     {
         $rows = [['session_id', 'business_date', 'kind', 'key', 'label', 'base', 'tax', 'total']];
+
+        // The header has always promised a business date and every row has always shipped it empty.
+        // An export the accountant cannot sort by date is most of the way to useless, and the
+        // sessions are already in hand.
+        $businessDates = $this->connection->table('pos_sessions')
+            ->whereIn('id', $sessionIds)
+            ->pluck('business_date', 'id');
+
+        $dateOf = static fn (mixed $sessionId): string => (string) ($businessDates[$sessionId] ?? '');
 
         foreach ($this->connection->table('session_sales_summaries')->whereIn('pos_session_id', $sessionIds)->get() as $row) {
             $rows[] = [
                 (string) $row->pos_session_id,
-                '',
+                $dateOf($row->pos_session_id),
                 'sales',
                 (string) $row->tax_signature,
                 (string) ($row->ledger_code ?? ''),
@@ -258,12 +295,13 @@ final readonly class AccountingExportService
         // receipt label is the name the accountant already sees on the till roll, so the column
         // carries something meaningful for this row kind too rather than being blank.
         $taxGroupLabels = $this->connection->table('tax_groups')
+            ->where('company_id', $companyId)
             ->pluck($this->connection->raw('coalesce(receipt_label, name)'), 'id');
 
         foreach ($this->connection->table('session_tax_summaries')->whereIn('pos_session_id', $sessionIds)->get() as $row) {
             $rows[] = [
                 (string) $row->pos_session_id,
-                '',
+                $dateOf($row->pos_session_id),
                 'tax',
                 (string) $row->tax_id,
                 (string) ($taxGroupLabels[$row->tax_group_id] ?? ''),
@@ -276,7 +314,7 @@ final readonly class AccountingExportService
         foreach ($this->connection->table('session_payment_totals')->whereIn('pos_session_id', $sessionIds)->get() as $row) {
             $rows[] = [
                 (string) $row->pos_session_id,
-                '',
+                $dateOf($row->pos_session_id),
                 'payment',
                 (string) $row->payment_method_id,
                 (string) ($row->ledger_code ?? ''),

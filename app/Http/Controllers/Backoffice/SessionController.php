@@ -140,9 +140,24 @@ final class SessionController extends Controller
      * stays false and this route is the only way to it. Same `export` ability as building one —
      * being able to generate the month is being able to read it back.
      */
-    public function download(AccountingExport $export): StreamedResponse
+    public function download(Request $request, AccountingExport $export): StreamedResponse
     {
         Gate::authorize('export', PosSession::class);
+
+        // The ability is company-blind and `BelongsToCompany` is an opt-in scope, not a global one,
+        // so route-model binding will happily resolve another tenant's export. Without this, one
+        // company's uuid is all it takes to read another's month of takings.
+        //
+        // Super admins cross companies, matching `User::hasPermission()` — that flag is already the
+        // platform-operator escape hatch, and carving an exception here would be inconsistent
+        // rather than safer. Everyone else is pinned to their own company, and a user with no
+        // company at all is pinned to nothing. 404 rather than 403: whether some other tenant's
+        // export exists is itself not this caller's business.
+        $user = $request->user();
+
+        if ($user?->is_super_admin !== true && (int) $export->company_id !== (int) ($user?->company_id ?? 0)) {
+            abort(404);
+        }
 
         $media = $export->file;
 

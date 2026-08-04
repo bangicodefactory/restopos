@@ -213,6 +213,20 @@ return new class extends Migration
             $table->foreignId('pos_session_id')->constrained('pos_sessions')->cascadeOnDelete();
 
             $table->primary(['accounting_export_id', 'pos_session_id'], 'accounting_export_session_primary');
+
+            // A session belongs to at most ONE export, enforced by the database rather than by the
+            // service's read-then-write.
+            //
+            // Reading the pivot back before inserting is a check-then-act: two operators exporting
+            // the same period at once — or one impatient double-click — both see the session as
+            // unclaimed and both commit, because their exports have different ids and the composite
+            // primary key above lets both rows in. That is precisely the double-counting the read
+            // was added to prevent.
+            //
+            // This constraint closes it because a rolled-back build leaves no pivot rows at all, so
+            // every row here belongs to a committed export. The loser of the race violates it, its
+            // transaction unwinds, and it is recorded as a failed build with nothing claimed.
+            $table->unique('pos_session_id', 'accounting_export_session_once');
         });
     }
 
