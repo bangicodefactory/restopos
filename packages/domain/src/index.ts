@@ -20,11 +20,31 @@ export {
     DOWN,
     type RoundingMode,
 } from './money/rounding';
+export {
+    DEFAULT_MONEY_DIGITS,
+    DEFAULT_PRICE_DIGITS,
+    DEFAULT_QUANTITY_DIGITS,
+    PRECISION_DISCOUNT,
+    PRECISION_PAYMENT_TERMINAL,
+    PRECISION_PRODUCT_PRICE,
+    PRECISION_PRODUCT_UOM,
+    epsilonForDigits,
+    equalsAtPrecision,
+    isZeroAtPrecision,
+    roundToPrecision,
+    stepForDigits,
+} from './money/precision';
 
 // ---------------------------------------------------------------- tax (spec §5 - §9)
 export { TaxEngine, taxEngine, computeOrderTaxes, flattenTaxes, MAX_GROUP_DEPTH } from './tax/engine';
 export { mapTaxes } from './tax/fiscal-position';
-export { CurrencyRounder, CashRoundingCalculator, type CashRoundingResult } from './tax/rounder';
+export {
+    CurrencyRounder,
+    CashRoundingCalculator,
+    fullyPaidTolerance,
+    isFullyPaid,
+    type CashRoundingResult,
+} from './tax/rounder';
 export type {
     CashRounding,
     CashRoundingStrategy,

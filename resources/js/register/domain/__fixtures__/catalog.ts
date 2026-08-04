@@ -287,6 +287,8 @@ export type CatalogParts = {
     categories?: readonly PosCategoryRow[];
     taxes?: readonly TaxRow[];
     uoms?: readonly UomRow[];
+    /** `decimal_precisions` by name → digits (REG-177). */
+    decimalPrecisions?: ReadonlyMap<string, number>;
     pricelists?: readonly Pricelist[];
     fiscalPositions?: ReadonlyMap<number, FiscalPosition>;
     cashRounding?: CashRounding | null;
@@ -367,6 +369,7 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
         presets: parts.presets ?? [],
         employees: parts.employees ?? [],
         uoms: new Map(uoms.map((u) => [u.id, u])),
+        decimalPrecisions: parts.decimalPrecisions ?? new Map<string, number>(),
         nomenclature: parts.nomenclature ?? null,
         fallbackNomenclature: parts.fallbackNomenclature ?? null,
     }) as CatalogIndex;

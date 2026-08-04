@@ -13,6 +13,7 @@ import type {
     CourseRow,
     CurrencyRow,
     CustomerRow,
+    DecimalPrecisionRow,
     EmployeeRow,
     FiscalPositionRow,
     FiscalPositionTaxRow,
@@ -78,6 +79,7 @@ import Dexie, { type Table } from 'dexie';
 export class PosDb extends Dexie {
     // ── static (server-owned, keyed by id) ───────────────────────────────────
     settings!: Table<SettingRow, number>;
+    decimalPrecisions!: Table<DecimalPrecisionRow, number>;
     currencies!: Table<CurrencyRow, number>;
     companies!: Table<CompanyRow, number>;
     countries!: Table<CountryRow, number>;
@@ -214,6 +216,13 @@ export class PosDb extends Dexie {
             auditLog: 'uuid, at, syncedAt',
             blobs: 'key',
         });
+
+        // v2 — `decimal_precisions` (REG-177). The server has always sent it; the client used to
+        // drop it on the floor, which is why quantity precision was hardcoded. Dexie carries the
+        // v1 stores forward, so this version declares only the new one.
+        this.version(2).stores({
+            decimalPrecisions: 'id, name',
+        });
     }
 }
 
@@ -224,6 +233,7 @@ export function dbNameFor(configId: number): string {
 /** Entity name (as sent by the bootstrap payload) → Dexie table. Order = spec 01 §5.2. */
 export const ENTITY_TABLES: Record<string, keyof PosDb> = {
     settings: 'settings',
+    decimal_precisions: 'decimalPrecisions',
     currencies: 'currencies',
     companies: 'companies',
     countries: 'countries',
@@ -286,6 +296,7 @@ export const UUID_KEYED_ENTITIES = new Set([
 /** Dependency order for applying a bootstrap/delta payload (spec 01 §5.2). */
 export const LOAD_ORDER: readonly string[] = [
     'settings',
+    'decimal_precisions',
     'currencies',
     'companies',
     'countries',

@@ -63,6 +63,8 @@ const COLA = 102;
 const FRIES = 103;
 const TIP = 104;
 const BULK = 105;
+/** Sold by the half-crate: its UoM rounds to 0.5, so 0.001 of it does not exist (REG-177). */
+const CRATE = 106;
 
 const KETCHUP: ProductAttributeValueRow = {
     id: 901,
@@ -100,13 +102,18 @@ function install(overrides: Parameters<typeof installCatalog>[0] = {}): void {
     installCatalog({
         config: makeConfig({ available_pricelist_ids: [7], available_fiscal_position_ids: [9] }),
         taxes: [TVA20],
-        uoms: [makeUom({ id: 1 }), makeUom({ id: 2, name: 'kg', is_pos_groupable: false })],
+        uoms: [
+            makeUom({ id: 1 }),
+            makeUom({ id: 2, name: 'kg', is_pos_groupable: false }),
+            makeUom({ id: 3, name: 'crate', rounding: '0.5' }),
+        ],
         products: [
             makeProduct({ id: 1, name: 'Pizza', list_price: '10.00', tax_ids: [TVA20.id], pos_category_ids: [50] }),
             makeProduct({ id: 2, name: 'Cola', list_price: '3.00', tax_ids: [TVA20.id], pos_category_ids: [51] }),
             makeProduct({ id: 3, name: 'Frites', list_price: '4.00', tax_ids: [TVA20.id], attribute_count: 1 }),
             makeProduct({ id: 4, name: 'Pourboire', list_price: '0', special_kind: 'tip', is_special: true }),
             makeProduct({ id: 5, name: 'Fromage', list_price: '20.00', uom_id: 2 }),
+            makeProduct({ id: 6, name: 'Cageot', list_price: '30.00', uom_id: 3 }),
         ],
         variants: [
             makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' }),
@@ -114,6 +121,7 @@ function install(overrides: Parameters<typeof installCatalog>[0] = {}): void {
             makeVariant({ id: FRIES, product_id: 3, display_name: 'Frites' }),
             makeVariant({ id: TIP, product_id: 4, display_name: 'Pourboire' }),
             makeVariant({ id: BULK, product_id: 5, display_name: 'Fromage' }),
+            makeVariant({ id: CRATE, product_id: 6, display_name: 'Cageot' }),
         ],
         attributeValues: [KETCHUP, MAYO, TRUFFLE],
         attributeLineValues: [LV_KETCHUP, LV_MAYO, LV_TRUFFLE],
@@ -429,6 +437,34 @@ describe('setQuantity', () => {
         const before = orderOf(orderUuid).rev;
         setQuantity('nope', 5);
         expect(orderOf(orderUuid).rev).toBe(before);
+    });
+
+    it('snaps to the line unit of measure step rather than 3 dp (REG-177)', async () => {
+        const orderUuid = await createOrder();
+        const lineUuid = addLine({ orderUuid, variantId: CRATE });
+
+        // 0.001 of a unit that only exists in halves is a typo, not a quantity.
+        setQuantity(lineUuid, 0.001);
+        expect(lineOf(lineUuid).quantity).toBe(0);
+
+        setQuantity(lineUuid, 1.2);
+        expect(lineOf(lineUuid).quantity).toBe(1);
+
+        setQuantity(lineUuid, 1.3);
+        expect(lineOf(lineUuid).quantity).toBe(1.5);
+
+        setQuantity(lineUuid, 2.5);
+        expect(lineOf(lineUuid).quantity).toBe(2.5);
+    });
+
+    it('honours the configured Product Unit of Measure digits (REG-177)', async () => {
+        install({ decimalPrecisions: new Map([['Product Unit of Measure', 1]]) });
+        const orderUuid = await createOrder();
+        const lineUuid = addLine({ orderUuid, variantId: PIZZA });
+
+        // The UoM step (0.001) still snaps first; the digit count then trims the result.
+        setQuantity(lineUuid, 1.234);
+        expect(lineOf(lineUuid).quantity).toBe(1.2);
     });
 });
 

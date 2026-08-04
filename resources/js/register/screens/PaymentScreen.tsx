@@ -1,8 +1,10 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
-import type { PaymentRow } from '@domain/types';
+import { CashRoundingCalculator, isFullyPaid } from '@domain/tax/rounder';
+import type { CashRounding } from '@domain/tax/types';
+import type { PaymentMethodRow, PaymentRow } from '@domain/types';
 import { Button, NumPad, cn } from '@shared/ui';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
@@ -34,6 +36,10 @@ import { useUiStore } from '../state/ui-store';
  *    creates a negative `is_change` payment, because a client that does produces double counting.
  *  - **Overpaying is only legal when a cash method exists** (REG-203) — otherwise there is no way to
  *    give the difference back.
+ *  - **"Fully paid" is a tolerance, not a sign test** (REG-176). With cash rounding on, the amount
+ *    the drawer can physically take differs from the arithmetic total, so `due > 0` would leave
+ *    rounded orders permanently open. See `isFullyPaid` — and note the tolerance is granted only
+ *    once cash is actually in the tender, because a card can always be charged the exact amount.
  *  - **Validation flushes IndexedDB immediately** (REG-217), before navigating to the receipt. A
  *    crash between "paid" and "flushed" loses a sale, and the 250 ms debounce is exactly long enough
  *    for that to happen.
@@ -63,21 +69,52 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         (catalog.config?.payment_method_ids ?? []).includes(method.id),
     );
     const hasCash = methods.some((method) => method.is_cash_count);
+    const cashRounding = catalog.cashRounding;
+
+    /**
+     * REG-202 — a new line pre-fills the remaining due, cash-rounded for a cash method.
+     *
+     * Pre-filling the raw due on a cash line hands the cashier an amount the drawer cannot make,
+     * so they tender something else and the line no longer matches what was taken. A card can be
+     * charged the exact figure, so a card line pre-fills with the due untouched.
+     */
+    const prefillFor = useCallback(
+        (methodId: number): string => {
+            const due = Decimal.of(totals.due);
+            if (due.signum() <= 0) return '0';
+            const method = catalog.paymentMethods.find((candidate) => candidate.id === methodId);
+            return cashRounded(due, method?.is_cash_count === true ? cashRounding : null)
+                .withScale(2)
+                .toString();
+        },
+        [cashRounding, catalog.paymentMethods, totals.due],
+    );
+
+    /**
+     * REG-176 — the ±rounding tolerance is a *cash* concession: it exists because the drawer has no
+     * coin smaller than the step. A card can be charged the exact amount, so a settlement with no
+     * cash in it stays on the strict `due <= 0` test and cannot be closed a few cents short.
+     */
+    const paidInFull = useMemo(() => {
+        const tolerated = cashRounding !== null && hasCashTender(payments, catalog.paymentMethods);
+        return isFullyPaid(
+            totals.due,
+            tolerated ? cashRounding.rounding : null,
+            tolerated ? cashRounding.method : undefined,
+        );
+    }, [cashRounding, catalog.paymentMethods, payments, totals.due]);
 
     // REG-201 — a single configured method needs no tap.
     useEffect(() => {
         if (payments.length === 0 && methods.length === 1 && Decimal.of(totals.due).signum() > 0) {
             const only = methods[0];
-            if (only) setSelectedPayment(addPayment(orderUuid, only.id, totals.due));
+            if (only) setSelectedPayment(addPayment(orderUuid, only.id, prefillFor(only.id)));
         }
-    }, [methods, orderUuid, payments.length, totals.due]);
+    }, [methods, orderUuid, payments.length, prefillFor, totals.due]);
 
     const tender = useCallback(
         (methodId: number) => {
-            // REG-202 — a new line pre-fills the (cash-rounded) remaining due.
-            const due = Decimal.of(totals.due);
-            const amount = due.signum() > 0 ? due.withScale(2).toString() : '0';
-            const uuid = addPayment(orderUuid, methodId, amount);
+            const uuid = addPayment(orderUuid, methodId, prefillFor(methodId));
             setSelectedPayment(uuid);
             setBuffer('');
             const method = catalog.paymentMethods.find((candidate) => candidate.id === methodId);
@@ -86,7 +123,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                 if (runtime) void openDrawer(runtime.printer);
             }
         },
-        [catalog.paymentMethods, orderUuid, totals.due],
+        [catalog.paymentMethods, orderUuid, prefillFor],
     );
 
     const applyBuffer = useCallback(
@@ -104,7 +141,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
             setError(t('reg.pay.emptyOrder'));
             return;
         }
-        if (Decimal.of(totals.due).signum() > 0) {
+        if (!paidInFull) {
             setError(t('reg.pay.notEnough'));
             return;
         }
@@ -149,10 +186,10 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         openDialog,
         order?.customer_id,
         orderUuid,
+        paidInFull,
         payments,
         t,
         totals.change,
-        totals.due,
     ]);
 
     const quickAmounts = useCallback(
@@ -272,7 +309,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                         size="xl"
                         variant="success"
                         className="flex-1"
-                        disabled={Decimal.of(totals.due).signum() > 0}
+                        disabled={!paidInFull}
                         onClick={() => void validate()}
                     >
                         {t('reg.pay.validate')}
@@ -348,6 +385,28 @@ function PaymentLine({
                 ×
             </button>
         </li>
+    );
+}
+
+/**
+ * The remaining due snapped to what the drawer can make (REG-202). Without cash rounding the due
+ * is already exact and comes back untouched.
+ */
+export function cashRounded(due: Decimal, cashRounding: CashRounding | null): Decimal {
+    if (cashRounding === null || due.signum() <= 0) return due;
+    return new CashRoundingCalculator(cashRounding).apply(due).roundedTotal;
+}
+
+/** Whether any live payment line on the order was tendered with a cash method (REG-176). */
+export function hasCashTender(
+    payments: readonly PaymentRow[],
+    methods: readonly PaymentMethodRow[],
+): boolean {
+    return payments.some(
+        (payment) =>
+            payment.payment_status !== 'failed' &&
+            payment.payment_status !== 'cancelled' &&
+            methods.find((method) => method.id === payment.payment_method_id)?.is_cash_count === true,
     );
 }
 
