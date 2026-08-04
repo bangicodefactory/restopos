@@ -50,6 +50,20 @@ function requireOnline(): NonNullable<ReturnType<typeof tryRuntime>> {
     return runtime;
 }
 
+/**
+ * Rebuild the local order slice after the server has already applied the change. The server op is
+ * the source of truth and has committed, so a failed refresh here is not a failed action — swallow
+ * it and let the next sync reconcile, rather than reporting a move that actually happened as a
+ * failure.
+ */
+async function refreshAfterServerAction(): Promise<void> {
+    try {
+        await reloadAllOrders();
+    } catch {
+        // Already applied server-side; the next delta pull will bring the local replica in line.
+    }
+}
+
 /** Turn an ApiClient failure into a typed TableActionError carrying the server's `error.code`. */
 function fail(error: unknown): never {
     if (error instanceof ApiError) {
@@ -77,6 +91,10 @@ export async function transferOrder(
 
     const runtime = requireOnline();
 
+    // Push any pending local edits first so the server transfers the *current* order, not a stale
+    // copy it would then echo back over those edits when we reload.
+    await runtime.syncer.drain();
+
     let response: TransferResponse | null;
     try {
         response = (
@@ -94,7 +112,7 @@ export async function transferOrder(
     if (response.merged && response.merge_id !== null) {
         mergeBySurvivor.set(response.order.uuid, response.merge_id);
     }
-    await reloadAllOrders();
+    await refreshAfterServerAction();
 
     return { merged: response.merged, orderUuid: response.order.uuid, mergeId: response.merge_id };
 }
@@ -104,6 +122,9 @@ export async function mergeOrders(sourceUuid: string, targetUuid: string): Promi
     if (sourceUuid === targetUuid) return null;
 
     const runtime = requireOnline();
+
+    // Push pending local edits on both orders so the server merges their current state.
+    await runtime.syncer.drain();
 
     let response: MergeResponse | null;
     try {
@@ -120,7 +141,7 @@ export async function mergeOrders(sourceUuid: string, targetUuid: string): Promi
     if (!response) throw new TableActionError('failed', 'The merge returned no order.');
 
     if (response.merge_id !== null) mergeBySurvivor.set(response.order.uuid, response.merge_id);
-    await reloadAllOrders();
+    await refreshAfterServerAction();
 
     return response.merge_id;
 }
@@ -140,6 +161,6 @@ export async function unmergeOrder(mergeId: number): Promise<string> {
 
     if (!restoredUuid) throw new TableActionError('failed', 'The unmerge returned no order.');
 
-    await reloadAllOrders();
+    await refreshAfterServerAction();
     return restoredUuid;
 }

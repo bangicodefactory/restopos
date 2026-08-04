@@ -7,14 +7,15 @@ import { beforeEach, expect, it, vi } from 'vitest';
  * success triggers the local reload. The server behaviour itself is covered by RestaurantTest.
  */
 
-const { post, orders, reloadAllOrders } = vi.hoisted(() => ({
+const { post, drain, orders, reloadAllOrders } = vi.hoisted(() => ({
     post: vi.fn(),
+    drain: vi.fn(async () => ({ sent: 0, failed: 0 })),
     orders: {} as Record<string, { restaurant_table_id: number | null }>,
     reloadAllOrders: vi.fn(async () => {}),
 }));
 
 vi.mock('../boot', () => ({ reloadAllOrders }));
-vi.mock('../data/runtime', () => ({ tryRuntime: () => ({ api: { post } }) }));
+vi.mock('../data/runtime', () => ({ tryRuntime: () => ({ api: { post }, syncer: { drain } }) }));
 vi.mock('../state/order-store', () => ({ useOrderStore: { getState: () => ({ orders }) } }));
 vi.mock('@shared/sync', async (importOriginal) => ({
     ...((await importOriginal()) as Record<string, unknown>),
@@ -40,6 +41,18 @@ it('routes a transfer to the server and returns the survivor', async () => {
     expect(post).toHaveBeenCalledWith('pos/orders/o1/transfer', { table_id: 2, employee_id: null });
     expect(result).toEqual({ merged: false, orderUuid: 'o1', mergeId: null });
     expect(reloadAllOrders).toHaveBeenCalledOnce();
+    // The outbox is drained before the server call so it acts on the current order.
+    expect(drain).toHaveBeenCalledOnce();
+    expect(Number(drain.mock.invocationCallOrder[0])).toBeLessThan(Number(post.mock.invocationCallOrder[0]));
+});
+
+it('still reports success when the local refresh fails after the server applied the move', async () => {
+    orders['o1'] = { restaurant_table_id: 1 };
+    post.mockResolvedValue({ data: { order: { uuid: 'o1', restaurant_table_id: 2 }, merged: false, merge_id: null } });
+    reloadAllOrders.mockRejectedValueOnce(new Error('network dropped mid-refresh'));
+
+    // The server already moved the order; a failed refresh must not read as a failed transfer.
+    await expect(transferOrder('o1', 2)).resolves.toEqual({ merged: false, orderUuid: 'o1', mergeId: null });
 });
 
 it('remembers the merge id when a transfer merges into an occupied table', async () => {
