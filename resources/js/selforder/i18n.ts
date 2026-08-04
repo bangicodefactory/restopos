@@ -121,6 +121,7 @@ const en = {
     'so.pwa.dismiss': 'Not now',
 
     'so.error.offline': 'You are offline. The menu below may be out of date.',
+    'so.error.offlineSubmit': 'You are offline — your order will send when the connection returns. Your cart is saved.',
     'so.error.load': 'We could not load the menu.',
     'so.error.invalidToken': 'This QR code is no longer valid. Please ask a member of staff.',
     'so.error.orderingDisabled': 'Ordering is not available at this venue.',
@@ -228,6 +229,7 @@ const fr: SelfOrderDictionary = {
     'so.pwa.dismiss': 'Plus tard',
 
     'so.error.offline': 'Vous êtes hors ligne. La carte ci-dessous peut être obsolète.',
+    'so.error.offlineSubmit': 'Vous êtes hors ligne — votre commande partira au retour de la connexion. Votre panier est enregistré.',
     'so.error.load': 'Impossible de charger la carte.',
     'so.error.invalidToken': 'Ce QR code n’est plus valide. Adressez-vous au personnel.',
     'so.error.orderingDisabled': 'La commande n’est pas disponible dans cet établissement.',
@@ -332,6 +334,7 @@ const ar: SelfOrderDictionary = {
     'so.pwa.dismiss': 'ليس الآن',
 
     'so.error.offline': 'أنت غير متصل. قد تكون القائمة قديمة.',
+    'so.error.offlineSubmit': 'أنت غير متصل — سيُرسَل طلبك عند عودة الاتصال. سلتك محفوظة.',
     'so.error.load': 'تعذر تحميل القائمة.',
     'so.error.invalidToken': 'رمز QR لم يعد صالحًا. يرجى سؤال أحد الموظفين.',
     'so.error.orderingDisabled': 'الطلب غير متاح في هذا المكان.',

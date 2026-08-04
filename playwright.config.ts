@@ -66,7 +66,8 @@ export default defineConfig({
                 viewport: { width: 1280, height: 800 },
                 hasTouch: true,
             },
-            testMatch: /offline\/.*\.spec\.ts$/,
+            // `offline/foo.spec.ts` and the top-level `offline-kds.spec.ts` / `offline-selforder.spec.ts`.
+            testMatch: /offline[-/].*\.spec\.ts$/,
         },
     ],
 

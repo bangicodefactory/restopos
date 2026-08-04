@@ -130,7 +130,7 @@ export function MenuScreen(props: MenuScreenProps): JSX.Element {
                 <div className="pos-safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white px-3 py-3">
                     <Button size="xl" block onClick={props.onCart}>
                         <span className="flex w-full items-center justify-between gap-3">
-                            <span className="rounded-full bg-white/25 px-3 py-0.5 tabular-nums">
+                            <span data-cart-count={props.cartCount} className="rounded-full bg-white/25 px-3 py-0.5 tabular-nums">
                                 {props.cartCount}
                             </span>
                             <span>{t('so.cart.checkout')}</span>

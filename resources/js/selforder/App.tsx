@@ -270,6 +270,7 @@ export function App({ configToken, tableToken }: { configToken: string; tableTok
                     config={config}
                     total={totals.display}
                     submitting={submitting}
+                    offline={offline}
                     error={submitError}
                     onPayCashier={() => void submit()}
                     onPayOnline={() => {

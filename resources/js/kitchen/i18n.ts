@@ -98,6 +98,7 @@ const en = {
     'kds.net.polling': 'Polling',
     'kds.net.offline': 'Offline — board frozen',
     'kds.net.queued': 'Changes will be sent when the network returns.',
+    'kds.net.stale': 'Board may be out of date — reconnecting…',
     'kds.net.reconciled': 'Board refreshed from the server',
     'kds.net.actionFailed': 'The server refused that change. The board was refreshed.',
 } as const;
@@ -171,6 +172,7 @@ const fr: KdsDictionary = {
     'kds.net.polling': 'Interrogation',
     'kds.net.offline': 'Hors ligne — tableau figé',
     'kds.net.queued': 'Les changements partiront au retour du réseau.',
+    'kds.net.stale': 'Le tableau peut être périmé — reconnexion…',
     'kds.net.reconciled': 'Tableau actualisé depuis le serveur',
     'kds.net.actionFailed': 'Le serveur a refusé ce changement. Le tableau a été actualisé.',
 };
@@ -241,6 +243,7 @@ const ar: KdsDictionary = {
     'kds.net.polling': 'استطلاع',
     'kds.net.offline': 'غير متصل — اللوحة متجمدة',
     'kds.net.queued': 'ستُرسل التغييرات عند عودة الشبكة.',
+    'kds.net.stale': 'قد تكون اللوحة قديمة — جارٍ إعادة الاتصال…',
     'kds.net.reconciled': 'تم تحديث اللوحة من الخادم',
     'kds.net.actionFailed': 'رفض الخادم هذا التغيير. تم تحديث اللوحة.',
 };

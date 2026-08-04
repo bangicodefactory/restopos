@@ -4,6 +4,7 @@ import { KDS_CLIENT_VERSION, KitchenApi, createApiClient, errorCode, isAuthFailu
 import type { KitchenBootstrap } from './api';
 import { applyLineStateLocally, applyRecallLocally, applyStageLocally, applyTicketUpdate, effectiveStageId, nextLineState, nextStage, replayQueue, sortStages, stageById } from './logic/board';
 import type { PendingAction } from './logic/board';
+import { MAX_QUEUE, reconnectStrategy } from './logic/offline';
 import {
     DEFAULT_PREFS,
     forgetPairing,
@@ -139,6 +140,12 @@ export const useKitchenStore = createPosStore<KitchenState>((set, get) => {
     const enqueue = (action: QueuedAction): void => {
         set((state) => {
             state.queue.push(action);
+            // Bound the queue over a long dark period (BAN-450): a display offline for an hour must
+            // not accumulate unboundedly. The dropped tail is recovered by the full re-projection
+            // that runs on reconnect once the board is stale.
+            while (state.queue.length > MAX_QUEUE) {
+                state.queue.shift();
+            }
         });
         persistQueue();
         void get().flush();
@@ -437,12 +444,29 @@ export const useKitchenStore = createPosStore<KitchenState>((set, get) => {
         },
 
         setOnline(online) {
-            const wasOffline = !get().online;
-            if (!wasOffline === online) return;
+            if (get().online === online) return;
+
+            // Decide before flipping the flag: was the board stale (dark too long / queue at the cap)?
+            const strategy = reconnectStrategy(
+                { online: get().online, lastSyncAt: get().lastSyncAt, queueLength: get().queue.length },
+                Date.now(),
+            );
+
             set((state) => {
                 state.online = online;
             });
-            if (online && wasOffline) {
+
+            if (!online) return;
+
+            if (strategy === 'reproject') {
+                // Stale board: drop the local queue and adopt the pure server board rather than
+                // replay decisions the other stations already superseded while we were dark (BAN-450).
+                set((state) => {
+                    state.queue = [];
+                });
+                persistQueue();
+                void get().refresh();
+            } else {
                 void get().flush();
                 void get().refresh();
             }

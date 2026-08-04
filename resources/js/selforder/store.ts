@@ -406,6 +406,17 @@ export const useSelfOrderStore = createPosStore<SelfOrderState>((set, get) => {
             if (!catalog || !config || cart.lines.length === 0) return false;
             if (!canOrder(config)) return false;
 
+            // Submitting is online-only and there is no customer-facing outbox (BAN-450): refuse
+            // before touching the network so the cart is kept intact and the order is sent exactly
+            // once, on the first attempt after connectivity returns — not fired blindly into a drop.
+            if (get().offline) {
+                set((state) => {
+                    state.submitError = 'so.error.offline';
+                });
+
+                return false;
+            }
+
             const validated = validateCart(cart, catalog);
             if (validated.issues.length > 0) {
                 set((state) => {
