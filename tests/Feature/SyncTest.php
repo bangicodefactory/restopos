@@ -488,3 +488,94 @@ it('does not double-bump the prep snapshot on a retried prep.sent', function ():
 
     expect($afterRetry)->toBe($afterFirst);
 });
+
+/**
+ * BAN-431 (REG-073, KDS-006) — variant options chosen on a line must survive ingest: the
+ * `no_variant` attribute values land in the pivot, custom text lands in its own table, and the
+ * kitchen ticket is rebuilt from those structured options rather than `full_product_name` alone.
+ */
+it('persists attribute selections and custom values and shows them on the kitchen ticket', function (): void {
+    $this->fx->withPrepDisplay();
+    $chocolate = $this->fx->attributeOption('Chocolate', '2.00');
+    $message = $this->fx->attributeOption('Message');
+
+    $uuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($uuid, [[
+        'op' => 'create',
+        'uuid' => $lineUuid,
+        'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1',
+        'price_unit' => '20.00',
+        'discount' => '0',
+        'full_product_name' => 'Cake',
+        'attribute_line_value_ids' => [$chocolate],
+        'custom_attribute_values' => [
+            ['uuid' => (string) Str::uuid(), 'value_id' => $message, 'custom_value' => 'Happy Birthday'],
+        ],
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $lineId = (int) DB::table('pos_order_lines')->where('uuid', $lineUuid)->value('id');
+
+    // Both join tables are written, and the option's price_extra is frozen onto the pivot.
+    $pivot = DB::table('pos_order_line_attribute_value')->where('pos_order_line_id', $lineId)->get();
+    expect($pivot)->toHaveCount(1)
+        ->and((int) $pivot[0]->product_attribute_line_value_id)->toBe($chocolate)
+        ->and((float) $pivot[0]->price_extra)->toBe(2.0)
+        ->and(DB::table('pos_order_line_custom_attribute_values')
+            ->where('pos_order_line_id', $lineId)
+            ->where('product_attribute_line_value_id', $message)
+            ->where('custom_value', 'Happy Birthday')
+            ->exists())->toBeTrue();
+
+    // The kitchen ticket text carries the options.
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $displayName = (string) DB::table('prep_order_lines')->value('display_name');
+    expect($displayName)->toContain('Chocolate')->toContain('Happy Birthday');
+});
+
+it('drops an unknown attribute id rather than failing the whole order', function (): void {
+    $uuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($uuid, [[
+        'op' => 'create',
+        'uuid' => $lineUuid,
+        'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1',
+        'price_unit' => '10.00',
+        'discount' => '0',
+        'attribute_line_value_ids' => [999999], // does not exist
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $lineId = (int) DB::table('pos_order_lines')->where('uuid', $lineUuid)->value('id');
+    expect(DB::table('pos_order_line_attribute_value')->where('pos_order_line_id', $lineId)->count())->toBe(0);
+});
+
+it('replaces a line’s options when it is resent (edit)', function (): void {
+    $keep = $this->fx->attributeOption('Vanilla');
+    $swap = $this->fx->attributeOption('Chocolate');
+
+    $uuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($uuid, [[
+        'op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+        'attribute_line_value_ids' => [$keep],
+    ]])])->assertOk();
+
+    // Resend the same line naming a different option.
+    sync([$this->fx->orderCommand($uuid, [[
+        'op' => 'update', 'uuid' => $lineUuid, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'attribute_line_value_ids' => [$swap],
+    ]])])->assertOk();
+
+    $lineId = (int) DB::table('pos_order_lines')->where('uuid', $lineUuid)->value('id');
+    $ids = DB::table('pos_order_line_attribute_value')->where('pos_order_line_id', $lineId)
+        ->pluck('product_attribute_line_value_id')->map(fn ($v) => (int) $v)->all();
+
+    expect($ids)->toBe([$swap]);
+});

@@ -27,6 +27,7 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -742,6 +743,8 @@ final readonly class OrderSyncService
 
         $existing[$uuid] = (int) $line->getKey();
 
+        $this->syncLineAttributes((int) $line->getKey(), $command);
+
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
     }
 
@@ -792,7 +795,85 @@ final readonly class OrderSyncService
 
         $line->forceFill($update)->save();
 
+        // A resent line carries its options; re-sync them (replace-on-write) so an edit that
+        // adds or clears an option is reflected. A note-only update omits the keys and no-ops.
+        $this->syncLineAttributes((int) $line->getKey(), $command);
+
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
+    }
+
+    /**
+     * Persist the variant options chosen on a line (REG-073): the `no_variant` attribute values
+     * into the `pos_order_line_attribute_value` pivot (freezing each option's `price_extra`), and
+     * any custom ("Happy Birthday") text into `pos_order_line_custom_attribute_values`. Both are
+     * replace-on-write so a resent line is idempotent, and both drop ids that do not exist rather
+     * than letting the restrict-on-delete FK 500 the whole batch.
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function syncLineAttributes(int $lineId, array $command): void
+    {
+        if (array_key_exists('attribute_line_value_ids', $command)) {
+            $ids = array_values(array_unique(array_map('intval', (array) $command['attribute_line_value_ids'])));
+
+            /** @var Collection<int, string> $priceById */
+            $priceById = $this->connection->table('product_attribute_line_values')
+                ->whereIn('id', $ids === [] ? [0] : $ids)
+                ->pluck('price_extra', 'id');
+
+            $this->connection->table('pos_order_line_attribute_value')
+                ->where('pos_order_line_id', $lineId)->delete();
+
+            $rows = [];
+            foreach ($ids as $id) {
+                if (! $priceById->has($id)) {
+                    continue;
+                }
+                $rows[] = [
+                    'pos_order_line_id' => $lineId,
+                    'product_attribute_line_value_id' => $id,
+                    'price_extra' => (string) $priceById->get($id),
+                ];
+            }
+            if ($rows !== []) {
+                $this->connection->table('pos_order_line_attribute_value')->insert($rows);
+            }
+        }
+
+        if (array_key_exists('custom_attribute_values', $command)) {
+            $custom = (array) $command['custom_attribute_values'];
+
+            $valueIds = array_values(array_unique(array_map(
+                static fn ($c): int => (int) (((array) $c)['value_id'] ?? 0),
+                $custom,
+            )));
+            $known = array_flip($this->connection->table('product_attribute_line_values')
+                ->whereIn('id', $valueIds === [] ? [0] : $valueIds)->pluck('id')->all());
+
+            $this->connection->table('pos_order_line_custom_attribute_values')
+                ->where('pos_order_line_id', $lineId)->delete();
+
+            $rows = [];
+            foreach ($custom as $entry) {
+                $entry = (array) $entry;
+                $valueId = (int) ($entry['value_id'] ?? 0);
+                $text = trim((string) ($entry['custom_value'] ?? ''));
+                if ($text === '' || ! isset($known[$valueId])) {
+                    continue;
+                }
+                $rows[] = [
+                    'uuid' => (string) ($entry['uuid'] ?? Str::uuid()),
+                    'pos_order_line_id' => $lineId,
+                    'product_attribute_line_value_id' => $valueId,
+                    'custom_value' => mb_substr($text, 0, 255),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+            if ($rows !== []) {
+                $this->connection->table('pos_order_line_custom_attribute_values')->insert($rows);
+            }
+        }
     }
 
     /** @return array<string, mixed> */

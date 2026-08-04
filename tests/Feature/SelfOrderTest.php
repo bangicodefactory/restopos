@@ -242,3 +242,33 @@ it('marks self-ordered lines as already sent to the kitchen', function (): void 
 
     expect(DB::table('prep_orders')->count())->toBe(1);
 });
+
+/**
+ * BAN-431 (SLF-027) — the self-order request validates `attribute_value_ids`, so they must actually
+ * persist. submitCart maps them into the ingest line command; the join table is written and the
+ * option rides onto the kitchen ticket the cart fires on submit.
+ */
+it('persists attribute selections from a self-order cart and fires them to the kitchen', function (): void {
+    $this->fx->withPrepDisplay();
+    $chocolate = $this->fx->attributeOption('Chocolate', '1.50');
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders?tt={$this->tableToken}", [
+        'lines' => [[
+            'variant_id' => $this->fx->variant->getKey(),
+            'quantity' => 1,
+            'attribute_value_ids' => [$chocolate],
+        ]],
+    ])->assertCreated();
+
+    $orderId = (int) Order::query()->where('uuid', $response->json('order.uuid'))->value('id');
+    $lineId = (int) DB::table('pos_order_lines')->where('pos_order_id', $orderId)->value('id');
+
+    expect(DB::table('pos_order_line_attribute_value')
+        ->where('pos_order_line_id', $lineId)
+        ->where('product_attribute_line_value_id', $chocolate)
+        ->exists())->toBeTrue();
+
+    // Fired to the kitchen on submit, with the option on the ticket.
+    $displayName = (string) DB::table('prep_order_lines')->value('display_name');
+    expect($displayName)->toContain('Chocolate');
+});

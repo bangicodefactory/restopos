@@ -151,7 +151,7 @@ final readonly class SelfOrderService
             $variantId = (int) $line['variant_id'];
             $quantity = (string) $line['quantity'];
 
-            $lineCommands[] = [
+            $command = [
                 'op' => 'create',
                 'uuid' => (string) Str::uuid(),
                 'variant_id' => $variantId,
@@ -163,6 +163,14 @@ final readonly class SelfOrderService
                 'combo_parent_uuid' => $line['combo_parent_uuid'] ?? null,
                 'combo_item_id' => $line['combo_item_id'] ?? null,
             ];
+
+            // The self-order contract calls them `attribute_value_ids`; ingest (createLine) reads
+            // `attribute_line_value_ids`. Same ids, so map them through (BAN-431 / SLF-027).
+            if (isset($line['attribute_value_ids'])) {
+                $command['attribute_line_value_ids'] = array_map('intval', (array) $line['attribute_value_ids']);
+            }
+
+            $lineCommands[] = $command;
 
             if (isset($line['price_unit'])) {
                 $this->recordTamper($config, (string) $orderUuid, [

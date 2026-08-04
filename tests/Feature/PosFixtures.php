@@ -304,6 +304,40 @@ final class PosFixtures
     }
 
     /**
+     * Attach a `no_variant` attribute option to the fixture product and return the
+     * `product_attribute_line_value` id an order line references (BAN-431 tests). Each call mints
+     * its own attribute group, so options never collide on the (product, attribute) unique index.
+     */
+    public function attributeOption(string $name, string $priceExtra = '0'): int
+    {
+        $attributeId = DB::table('product_attributes')->insertGetId([
+            'company_id' => $this->company->getKey(),
+            'name' => $name.' choice',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $valueId = DB::table('product_attribute_values')->insertGetId([
+            'product_attribute_id' => $attributeId,
+            'name' => $name,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $lineId = DB::table('product_attribute_lines')->insertGetId([
+            'product_id' => $this->product->getKey(),
+            'product_attribute_id' => $attributeId,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return (int) DB::table('product_attribute_line_values')->insertGetId([
+            'product_attribute_line_id' => $lineId,
+            'product_attribute_value_id' => $valueId,
+            'product_id' => $this->product->getKey(),
+            'price_extra' => $priceExtra,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    /**
      * A ready-made sync command for one order.
      *
      * @param  list<array<string, mixed>>  $lines
