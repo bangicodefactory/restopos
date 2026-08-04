@@ -1,5 +1,11 @@
 import { Decimal } from '@domain/money/decimal';
-import { epsilonForDigits, isZeroAtPrecision, stepForDigits } from '@domain/money/precision';
+import {
+    MAX_PRECISION_DIGITS,
+    clampDigits,
+    epsilonForDigits,
+    isZeroAtPrecision,
+    stepForDigits,
+} from '@domain/money/precision';
 import { CashRoundingCalculator, fullyPaidTolerance, isFullyPaid } from '@domain/tax/rounder';
 import { describe, expect, it } from 'vitest';
 
@@ -132,5 +138,16 @@ describe('precision-aware zero (REG-177)', () => {
         expect(isZeroAtPrecision('0.01', 2)).toBe(false);
         expect(isZeroAtPrecision('0.0004', 3)).toBe(true);
         expect(isZeroAtPrecision('0.0005', 3)).toBe(false);
+    });
+
+    it('clamps a nonsense digit count instead of throwing', () => {
+        // `decimal_precisions.digits` is an unsignedTinyInteger: the replica can hand us 0…255, and
+        // a bad row must not take the register down mid-sale.
+        expect(clampDigits(255, 3)).toBe(MAX_PRECISION_DIGITS);
+        expect(clampDigits(-1, 3)).toBe(0);
+        expect(clampDigits(2.7, 3)).toBe(2);
+        expect(clampDigits(Number.NaN, 3)).toBe(3);
+        expect(() => stepForDigits(255)).not.toThrow();
+        expect(() => epsilonForDigits(255)).not.toThrow();
     });
 });

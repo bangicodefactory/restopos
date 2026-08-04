@@ -28,6 +28,8 @@ export const registerEn = {
     'reg.boot.purging': 'Configuration changed — clearing the cache…',
     'reg.boot.ready': 'Ready',
     'reg.boot.failed': 'Could not load the register data',
+    'reg.boot.upgradeBlocked':
+        'Another RestoPOS tab or window is open on an older version. Close it, then reload this page.',
     'reg.boot.retry': 'Try again',
     'reg.boot.continueOffline': 'Continue with local data',
     'reg.boot.hardReset': 'Reset this device',
@@ -340,6 +342,8 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.boot.purging': 'Configuration modifiée — purge du cache…',
     'reg.boot.ready': 'Prêt',
     'reg.boot.failed': 'Impossible de charger les données de la caisse',
+    'reg.boot.upgradeBlocked':
+        'Un autre onglet RestoPOS est ouvert sur une version antérieure. Fermez-le, puis rechargez cette page.',
     'reg.boot.retry': 'Réessayer',
     'reg.boot.continueOffline': 'Continuer avec les données locales',
     'reg.boot.hardReset': 'Réinitialiser cet appareil',

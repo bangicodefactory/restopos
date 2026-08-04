@@ -1,53 +1,41 @@
 import { Decimal } from './decimal';
-import { HALF_UP, type RoundingMode } from './rounding';
 
 /**
  * Client-side decimal precision — the `decimal_precisions` table (spec 01 §2.C, REG-177).
  *
- * Odoo keeps a `decimal.precision` row per domain (`Product Price`, `Product Unit of Measure`,
- * `Discount`, …) and every client-side rounding and zero test is expressed in terms of the
- * matching number of digits. This module is the arithmetic half of that; the register reads the
- * digits out of the replica and passes them in.
+ * Odoo keeps a `decimal.precision` row per domain and expresses every client-side rounding and
+ * zero test in terms of the matching number of digits. This module is the arithmetic half; the
+ * register reads the digits out of the replica and passes them in.
  *
- * The names are the seeded ones — they are data, not an enum, so a site that renames a precision
- * row falls back to the caller's default rather than crashing.
+ * The names are data, not an enum — a site that renames a precision row falls back to the caller's
+ * default rather than crashing. Only the ones something actually reads live here; add a constant
+ * when a call site needs it, not before.
  */
-export const PRECISION_PRODUCT_PRICE = 'Product Price';
 export const PRECISION_PRODUCT_UOM = 'Product Unit of Measure';
-export const PRECISION_DISCOUNT = 'Discount';
-export const PRECISION_PAYMENT_TERMINAL = 'Payment Terminal';
 
-/** Seed defaults, used when the replica has no row for the domain. */
-export const DEFAULT_PRICE_DIGITS = 4;
+/** Seed default for `Product Unit of Measure`, used when the replica has no row for it. */
 export const DEFAULT_QUANTITY_DIGITS = 3;
-export const DEFAULT_MONEY_DIGITS = 2;
 
-function assertDigits(digits: number): void {
-    if (!Number.isInteger(digits) || digits < 0 || digits > 12) {
-        throw new Error(`invalid decimal precision ${digits}`);
-    }
+/**
+ * `decimal_precisions.digits` is an `unsignedTinyInteger`, so the replica can hand us 0…255, and
+ * `Decimal` scales past this are a memory problem rather than a precision one. Clamp rather than
+ * throw: a nonsense precision row must not take the register down mid-sale.
+ */
+export const MAX_PRECISION_DIGITS = 12;
+
+export function clampDigits(digits: number, fallback: number): number {
+    if (!Number.isFinite(digits)) return fallback;
+    return Math.min(MAX_PRECISION_DIGITS, Math.max(0, Math.trunc(digits)));
 }
 
 /** One unit in the last place at `digits` decimals — `3 → 0.001`, `0 → 1`. */
 export function stepForDigits(digits: number): Decimal {
-    assertDigits(digits);
-    return Decimal.make(false, 1n, digits);
+    return Decimal.make(false, 1n, clampDigits(digits, DEFAULT_QUANTITY_DIGITS));
 }
 
 /** Half a unit in the last place — the widest deviation that still rounds back to the value. */
 export function epsilonForDigits(digits: number): Decimal {
-    assertDigits(digits);
-    return Decimal.make(false, 5n, digits + 1);
-}
-
-/** Round to `digits` decimal places. */
-export function roundToPrecision(
-    value: string | Decimal,
-    digits: number,
-    mode: RoundingMode = HALF_UP,
-): Decimal {
-    assertDigits(digits);
-    return Decimal.of(value).withScale(digits, mode);
+    return Decimal.make(false, 5n, clampDigits(digits, DEFAULT_QUANTITY_DIGITS) + 1);
 }
 
 /**
@@ -60,13 +48,4 @@ export function roundToPrecision(
  */
 export function isZeroAtPrecision(value: string | Decimal, digits: number): boolean {
     return Decimal.of(value).abs().lt(epsilonForDigits(digits));
-}
-
-/** `a` and `b` are indistinguishable once rounded to `digits` places. */
-export function equalsAtPrecision(
-    a: string | Decimal,
-    b: string | Decimal,
-    digits: number,
-): boolean {
-    return isZeroAtPrecision(Decimal.of(a).sub(b), digits);
 }

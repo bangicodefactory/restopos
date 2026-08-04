@@ -223,7 +223,37 @@ export class PosDb extends Dexie {
         this.version(2).stores({
             decimalPrecisions: 'id, name',
         });
+
+        // A schema bump is the one moment a second tab can hard-stop the app: IndexedDB refuses to
+        // upgrade while another connection is open on the old version, and `open()` then never
+        // settles — a boot screen that hangs forever with nothing on it. The register, the KDS and
+        // self-order all open this same `pos-{configId}` database, and a service worker happily
+        // serves a stale bundle to a tab left open on the previous deploy, so this is a routine
+        // situation and not a corner case.
+        //
+        // Both halves are needed: `versionchange` closes *this* connection when some other tab is
+        // upgrading, and `blocked` reports the reverse case so the UI can say which tab to close.
+        this.on('versionchange', () => {
+            this.close();
+            for (const listener of upgradeBlockedListeners) listener(this.configId);
+            return false;
+        });
+        this.on('blocked', () => {
+            for (const listener of upgradeBlockedListeners) listener(this.configId);
+        });
     }
+}
+
+/**
+ * Notified when an IndexedDB upgrade is blocked by another tab, or when this tab was closed to let
+ * one through. The shell subscribes to surface "close the other RestoPOS tabs and reload" — without
+ * it the only symptom is a boot that never finishes.
+ */
+const upgradeBlockedListeners = new Set<(configId: number) => void>();
+
+export function onUpgradeBlocked(listener: (configId: number) => void): () => void {
+    upgradeBlockedListeners.add(listener);
+    return () => upgradeBlockedListeners.delete(listener);
 }
 
 export function dbNameFor(configId: number): string {

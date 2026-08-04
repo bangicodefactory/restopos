@@ -457,6 +457,30 @@ describe('setQuantity', () => {
         expect(lineOf(lineUuid).quantity).toBe(2.5);
     });
 
+    it('rounds a negative quantity on its magnitude, mirroring the sale (REG-177)', async () => {
+        // Spec §3.1: there is no CEIL/FLOOR, so a refund rounds as the exact mirror of the sale.
+        // `Math.round` broke ties toward +∞ and made -1.2345 round to -1.234 while 1.2345 → 1.235.
+        const orderUuid = await createOrder();
+        const lineUuid = addLine({ orderUuid, variantId: PIZZA });
+
+        setQuantity(lineUuid, -1.2345);
+        expect(lineOf(lineUuid).quantity).toBe(-1.235);
+
+        setQuantity(lineUuid, 1.2345);
+        expect(lineOf(lineUuid).quantity).toBe(1.235);
+    });
+
+    it('mirrors the UoM step across zero', async () => {
+        const orderUuid = await createOrder();
+        const lineUuid = addLine({ orderUuid, variantId: CRATE });
+
+        setQuantity(lineUuid, -1.3);
+        expect(lineOf(lineUuid).quantity).toBe(-1.5);
+
+        setQuantity(lineUuid, -1.2);
+        expect(lineOf(lineUuid).quantity).toBe(-1);
+    });
+
     it('honours the configured Product Unit of Measure digits (REG-177)', async () => {
         install({ decimalPrecisions: new Map([['Product Unit of Measure', 1]]) });
         const orderUuid = await createOrder();

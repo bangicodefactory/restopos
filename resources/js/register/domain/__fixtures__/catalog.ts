@@ -176,6 +176,7 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         module_pos_restaurant_bill_split: true,
         iface_tax_included: 'total',
         tax_rounding_method: 'round_per_line',
+        use_cash_rounding: false,
         cash_rounding_id: null,
         pricelist_id: null,
         available_pricelist_ids: [],

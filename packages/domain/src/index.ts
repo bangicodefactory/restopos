@@ -21,17 +21,12 @@ export {
     type RoundingMode,
 } from './money/rounding';
 export {
-    DEFAULT_MONEY_DIGITS,
-    DEFAULT_PRICE_DIGITS,
     DEFAULT_QUANTITY_DIGITS,
-    PRECISION_DISCOUNT,
-    PRECISION_PAYMENT_TERMINAL,
-    PRECISION_PRODUCT_PRICE,
+    MAX_PRECISION_DIGITS,
     PRECISION_PRODUCT_UOM,
+    clampDigits,
     epsilonForDigits,
-    equalsAtPrecision,
     isZeroAtPrecision,
-    roundToPrecision,
     stepForDigits,
 } from './money/precision';
 

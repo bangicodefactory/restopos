@@ -10,7 +10,15 @@ import {
     useSessionStore,
     type PairingResponse,
 } from '@shared/auth';
-import { META, createDexieCounterStore, destroyDatabase, getDb, getMeta, requestPersistence } from '@shared/db';
+import {
+    META,
+    createDexieCounterStore,
+    destroyDatabase,
+    getDb,
+    getMeta,
+    onUpgradeBlocked,
+    requestPersistence,
+} from '@shared/db';
 import { ApiClient, ApiError, BootstrapClient, DeltaPuller, OutboxSyncer } from '@shared/sync';
 
 import { loadCatalogIndex } from './data/catalog-load';
@@ -54,6 +62,11 @@ export async function boot(): Promise<BootResult> {
     bootStore.setPhase('starting');
 
     const configId = configIdFromUrl();
+
+    // A schema upgrade held up by a stale tab makes `db.open()` hang forever, so the boot screen
+    // would otherwise spin with nothing to act on. Say what is wrong before touching the database.
+    onUpgradeBlocked(() => useBootStore.getState().setError('upgradeBlocked'));
+
     const db = getDb(configId);
     void requestPersistence();
 

@@ -33,7 +33,7 @@ import {
     type OrderSlice,
 } from '../state/order-store';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
-import { roundQuantity } from './precision';
+import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
 import { invalidateTotals, orderTotals } from './totals';
 
@@ -549,7 +549,8 @@ export function reduceQuantity(lineUuid: string, nextQuantity: number): string {
     // The original line is written back to what the kitchen already has, so the compensating
     // quantity must be measured against `sent` — not against the line's current quantity, which
     // may have grown after the send.
-    const delta = roundQuantity(nextQuantity - sent, line.uom_id);
+    // Trimmed, not snapped: `sent + delta` must land exactly on `nextQuantity` (see trimQuantity).
+    const delta = trimQuantity(nextQuantity - sent);
     setQuantity(lineUuid, sent);
     return addLine({
         orderUuid: line.order_uuid,
@@ -1349,8 +1350,8 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
         for (const part of moved) {
             const target = draft.lines[part.line.uuid];
             if (!target) continue;
-            const left = Math.round((target.quantity - part.quantity) * 1000) / 1000;
-            if (left === 0) {
+            const left = trimQuantity(target.quantity - part.quantity);
+            if (isZeroQuantity(left)) {
                 unindexLine(draft, target);
                 delete draft.lines[part.line.uuid];
             } else {

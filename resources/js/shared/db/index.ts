@@ -7,6 +7,7 @@ export {
     closeDb,
     dbNameFor,
     getDb,
+    onUpgradeBlocked,
 } from './schema';
 
 export {

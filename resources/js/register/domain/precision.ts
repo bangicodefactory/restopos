@@ -1,9 +1,9 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
 import {
-    DEFAULT_MONEY_DIGITS,
     DEFAULT_QUANTITY_DIGITS,
+    MAX_PRECISION_DIGITS,
     PRECISION_PRODUCT_UOM,
-    epsilonForDigits,
+    clampDigits,
     isZeroAtPrecision,
 } from '@domain/money/precision';
 import { HALF_UP } from '@domain/money/rounding';
@@ -25,8 +25,11 @@ import { getCatalog, precisionDigits, type CatalogIndex } from '../data/catalog'
  * milligram on a product sold by the half-kilo.
  */
 
-/** Working scale for the number ⇄ Decimal hop. Wide enough that a ratio's tail survives it. */
-const WORKING_DIGITS = 6;
+/**
+ * Working scale for the `number` ⇄ `Decimal` hop. Held at the digit ceiling rather than something
+ * smaller so the hop itself never becomes the binding constraint on a configured precision.
+ */
+const WORKING_DIGITS = MAX_PRECISION_DIGITS;
 
 /** `number` → `Decimal` without ever handing `Decimal.of` an exponential literal. */
 function toDecimal(value: number): Decimal {
@@ -35,12 +38,15 @@ function toDecimal(value: number): Decimal {
     return Decimal.of(value.toFixed(WORKING_DIGITS));
 }
 
-export function quantityDigits(catalog: CatalogIndex = getCatalog()): number {
-    return precisionDigits(catalog, PRECISION_PRODUCT_UOM, DEFAULT_QUANTITY_DIGITS);
+function quantityDigits(catalog: CatalogIndex): number {
+    return clampDigits(
+        precisionDigits(catalog, PRECISION_PRODUCT_UOM, DEFAULT_QUANTITY_DIGITS),
+        DEFAULT_QUANTITY_DIGITS,
+    );
 }
 
 /** The UoM's rounding step, or `null` when the unit is unknown or unstepped. */
-export function quantityStepOf(uomId: number | null, catalog: CatalogIndex = getCatalog()): Decimal | null {
+function quantityStepOf(uomId: number | null, catalog: CatalogIndex): Decimal | null {
     if (uomId === null) return null;
     const rounding = catalog.uoms.get(uomId)?.rounding;
     if (rounding === undefined) return null;
@@ -59,22 +65,32 @@ export function roundQuantity(
     uomId: number | null,
     catalog: CatalogIndex = getCatalog(),
 ): number {
-    const value = toDecimal(quantity);
     const step = quantityStepOf(uomId, catalog);
+    const value = toDecimal(quantity);
     const snapped = step === null ? value : value.roundToStep(step, HALF_UP);
     return Number(snapped.withScale(quantityDigits(catalog), HALF_UP).toString());
 }
 
 /**
- * The epsilon a money value is compared against instead of exact zero (REG-177).
+ * Trim a quantity to the configured digits **without** snapping to the UoM step.
  *
- * Driven by the currency's decimal places, falling back to the seeded 2.
+ * For quantities that are a difference between two already-snapped values. Snapping a difference
+ * is wrong: the compensating line in `reduceQuantity` has to satisfy `sent + delta = requested`
+ * exactly, and re-snapping `delta` breaks that identity whenever `sent` is itself off-grid — which
+ * it can be, since it comes from a prep snapshot written before this rule existed.
  */
-export function moneyEpsilon(catalog: CatalogIndex = getCatalog()): Decimal {
-    return epsilonForDigits(catalog.currency?.decimal_places ?? DEFAULT_MONEY_DIGITS);
+export function trimQuantity(quantity: number, catalog: CatalogIndex = getCatalog()): number {
+    return Number(toDecimal(quantity).withScale(quantityDigits(catalog), HALF_UP).toString());
 }
 
-/** Precision-aware "is this amount nothing?" for money. */
-export function isZeroMoney(value: string | Decimal, catalog: CatalogIndex = getCatalog()): boolean {
-    return isZeroAtPrecision(value, catalog.currency?.decimal_places ?? DEFAULT_MONEY_DIGITS);
+/**
+ * Is this quantity nothing? (REG-177)
+ *
+ * Guards the "the line has been reduced to nothing, drop it" decisions. `=== 0` is an exact float
+ * test, and a quantity that arrived through a ratio multiplication can land on 1e-16 instead of 0 —
+ * which leaves a ghost line on the order carrying a quantity too small to render.
+ */
+export function isZeroQuantity(quantity: number, catalog: CatalogIndex = getCatalog()): boolean {
+    if (!Number.isFinite(quantity)) return true;
+    return isZeroAtPrecision(toDecimal(quantity), quantityDigits(catalog));
 }

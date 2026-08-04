@@ -1,12 +1,11 @@
 import { Decimal } from '@domain/money/decimal';
-import { isFullyPaid } from '@domain/tax/rounder';
 import type { CashRounding } from '@domain/tax/types';
 import type { PaymentStatus } from '@domain/enums';
 import type { PaymentMethodRow, PaymentRow } from '@domain/types';
 import { asUuid } from '@domain/types';
 import { describe, expect, it } from 'vitest';
 
-import { cashRounded, hasCashTender } from './PaymentScreen';
+import { cashRounded, hasCashTender, prefillAmount, settlesOrder } from './PaymentScreen';
 
 /**
  * REG-176 / REG-202 — the payment screen's half of the cash-rounding fix.
@@ -62,11 +61,9 @@ function payment(methodId: number, amount: string, status: PaymentStatus = 'done
 const HALF_UP_5C: CashRounding = { rounding: '0.05', method: 'half_up' };
 const UP_5C: CashRounding = { rounding: '0.05', method: 'up' };
 
-/** Exactly what `PaymentScreen` computes for the validate button and the guard. */
-function settles(due: string, payments: readonly PaymentRow[], rounding: CashRounding | null): boolean {
-    const tolerated = rounding !== null && hasCashTender(payments, METHODS);
-    return isFullyPaid(due, tolerated ? rounding.rounding : null, tolerated ? rounding.method : undefined);
-}
+/** The screen's own predicate, not a re-implementation of it. */
+const settles = (due: string, payments: readonly PaymentRow[], rounding: CashRounding | null): boolean =>
+    settlesOrder(due, payments, METHODS, rounding);
 
 describe('cashRounded — the payment line pre-fill (REG-202)', () => {
     it('snaps the remaining due to the rounding step', () => {
@@ -88,14 +85,17 @@ describe('cashRounded — the payment line pre-fill (REG-202)', () => {
     });
 
     it('is applied to a cash line and withheld from a card line', () => {
-        // What the screen passes: the config's rounding for a cash method, `null` for anything else.
-        const prefill = (method: PaymentMethodRow): string =>
-            cashRounded(Decimal.of('17.52'), method.is_cash_count ? HALF_UP_5C : null)
-                .withScale(2)
-                .toString();
+        expect(prefillAmount('17.52', CASH, HALF_UP_5C)).toBe('17.50');
+        expect(prefillAmount('17.52', CARD, HALF_UP_5C)).toBe('17.52');
+    });
 
-        expect(prefill(CASH)).toBe('17.50');
-        expect(prefill(CARD)).toBe('17.52');
+    it('pre-fills nothing when the order is already settled or overpaid', () => {
+        expect(prefillAmount('0.00', CASH, HALF_UP_5C)).toBe('0');
+        expect(prefillAmount('-2.50', CASH, HALF_UP_5C)).toBe('0');
+    });
+
+    it('pre-fills the raw due for an unknown method rather than guessing', () => {
+        expect(prefillAmount('17.52', undefined, HALF_UP_5C)).toBe('17.52');
     });
 });
 
@@ -112,6 +112,12 @@ describe('hasCashTender', () => {
 
     it('is false on an order with no payments at all', () => {
         expect(hasCashTender([], METHODS)).toBe(false);
+    });
+
+    it('ignores a change line — money leaving the drawer is not a tender', () => {
+        const change: PaymentRow = { ...payment(CASH.id, '-2.50'), is_change: true };
+        expect(hasCashTender([change], METHODS)).toBe(false);
+        expect(hasCashTender([change, payment(CARD.id, '20.00')], METHODS)).toBe(false);
     });
 });
 

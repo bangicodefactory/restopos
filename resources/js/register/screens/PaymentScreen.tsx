@@ -4,7 +4,7 @@ import type { CashRounding } from '@domain/tax/types';
 import type { PaymentMethodRow, PaymentRow } from '@domain/types';
 import { Button, NumPad, cn } from '@shared/ui';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
@@ -71,38 +71,17 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const hasCash = methods.some((method) => method.is_cash_count);
     const cashRounding = catalog.cashRounding;
 
-    /**
-     * REG-202 — a new line pre-fills the remaining due, cash-rounded for a cash method.
-     *
-     * Pre-filling the raw due on a cash line hands the cashier an amount the drawer cannot make,
-     * so they tender something else and the line no longer matches what was taken. A card can be
-     * charged the exact figure, so a card line pre-fills with the due untouched.
-     */
     const prefillFor = useCallback(
-        (methodId: number): string => {
-            const due = Decimal.of(totals.due);
-            if (due.signum() <= 0) return '0';
-            const method = catalog.paymentMethods.find((candidate) => candidate.id === methodId);
-            return cashRounded(due, method?.is_cash_count === true ? cashRounding : null)
-                .withScale(2)
-                .toString();
-        },
+        (methodId: number): string =>
+            prefillAmount(
+                totals.due,
+                catalog.paymentMethods.find((candidate) => candidate.id === methodId),
+                cashRounding,
+            ),
         [cashRounding, catalog.paymentMethods, totals.due],
     );
 
-    /**
-     * REG-176 — the ±rounding tolerance is a *cash* concession: it exists because the drawer has no
-     * coin smaller than the step. A card can be charged the exact amount, so a settlement with no
-     * cash in it stays on the strict `due <= 0` test and cannot be closed a few cents short.
-     */
-    const paidInFull = useMemo(() => {
-        const tolerated = cashRounding !== null && hasCashTender(payments, catalog.paymentMethods);
-        return isFullyPaid(
-            totals.due,
-            tolerated ? cashRounding.rounding : null,
-            tolerated ? cashRounding.method : undefined,
-        );
-    }, [cashRounding, catalog.paymentMethods, payments, totals.due]);
+    const paidInFull = settlesOrder(totals.due, payments, catalog.paymentMethods, cashRounding);
 
     // REG-201 — a single configured method needs no tap.
     useEffect(() => {
@@ -397,17 +376,64 @@ export function cashRounded(due: Decimal, cashRounding: CashRounding | null): De
     return new CashRoundingCalculator(cashRounding).apply(due).roundedTotal;
 }
 
-/** Whether any live payment line on the order was tendered with a cash method (REG-176). */
+/**
+ * Whether any live payment line on the order was tendered with a cash method (REG-176).
+ *
+ * Same exclusions as `settledPayments` in `totals.ts`, and for the same reason: a change line is
+ * money going back out of the drawer, and a failed or cancelled line was never taken at all.
+ * Neither is a tender, so neither earns the rounding concession.
+ */
 export function hasCashTender(
     payments: readonly PaymentRow[],
     methods: readonly PaymentMethodRow[],
 ): boolean {
     return payments.some(
         (payment) =>
+            !payment.is_change &&
             payment.payment_status !== 'failed' &&
             payment.payment_status !== 'cancelled' &&
             methods.find((method) => method.id === payment.payment_method_id)?.is_cash_count === true,
     );
+}
+
+/**
+ * The validate decision (REG-176) — exported so the tests exercise *this*, not a copy of it.
+ *
+ * The tolerance is a cash concession: it exists because the drawer has no coin smaller than the
+ * step. A card can be charged the exact amount, so a settlement with no cash in it stays on the
+ * strict `due <= 0` test and cannot be closed a few cents short.
+ */
+export function settlesOrder(
+    due: string,
+    payments: readonly PaymentRow[],
+    methods: readonly PaymentMethodRow[],
+    cashRounding: CashRounding | null,
+): boolean {
+    const tolerated = cashRounding !== null && hasCashTender(payments, methods);
+    return isFullyPaid(
+        due,
+        tolerated ? cashRounding.rounding : null,
+        tolerated ? cashRounding.method : undefined,
+    );
+}
+
+/**
+ * What a new payment line pre-fills with (REG-202) — exported for the same reason.
+ *
+ * Pre-filling the raw due on a cash line hands the cashier an amount the drawer cannot make, so
+ * they tender something else and the line no longer matches what was taken. A card can be charged
+ * the exact figure, so a card line pre-fills with the due untouched.
+ */
+export function prefillAmount(
+    due: string,
+    method: PaymentMethodRow | undefined,
+    cashRounding: CashRounding | null,
+): string {
+    const remaining = Decimal.of(due);
+    if (remaining.signum() <= 0) return '0';
+    return cashRounded(remaining, method?.is_cash_count === true ? cashRounding : null)
+        .withScale(2)
+        .toString();
 }
 
 /**
