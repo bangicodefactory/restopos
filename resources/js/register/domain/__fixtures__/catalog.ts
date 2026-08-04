@@ -176,6 +176,7 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         module_pos_restaurant_bill_split: true,
         iface_tax_included: 'total',
         tax_rounding_method: 'round_per_line',
+        use_cash_rounding: false,
         cash_rounding_id: null,
         pricelist_id: null,
         available_pricelist_ids: [],
@@ -287,6 +288,8 @@ export type CatalogParts = {
     categories?: readonly PosCategoryRow[];
     taxes?: readonly TaxRow[];
     uoms?: readonly UomRow[];
+    /** `decimal_precisions` by name → digits (REG-177). */
+    decimalPrecisions?: ReadonlyMap<string, number>;
     pricelists?: readonly Pricelist[];
     fiscalPositions?: ReadonlyMap<number, FiscalPosition>;
     cashRounding?: CashRounding | null;
@@ -367,6 +370,7 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
         presets: parts.presets ?? [],
         employees: parts.employees ?? [],
         uoms: new Map(uoms.map((u) => [u.id, u])),
+        decimalPrecisions: parts.decimalPrecisions ?? new Map<string, number>(),
         nomenclature: parts.nomenclature ?? null,
         fallbackNomenclature: parts.fallbackNomenclature ?? null,
     }) as CatalogIndex;

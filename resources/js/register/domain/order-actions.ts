@@ -33,6 +33,7 @@ import {
     type OrderSlice,
 } from '../state/order-store';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
+import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
 import { invalidateTotals, orderTotals } from './totals';
 
@@ -506,7 +507,8 @@ export function setQuantity(lineUuid: string, quantity: number): void {
     const state = snapshot();
     const line = state.lines[lineUuid];
     if (!line) return;
-    const rounded = Math.round(quantity * 1000) / 1000;
+    // REG-177 — the line's unit of measure decides what quantities exist, not a hardcoded 3 dp.
+    const rounded = roundQuantity(quantity, line.uom_id);
 
     mutate((draft) => {
         const target = draft.lines[lineUuid];
@@ -518,7 +520,7 @@ export function setQuantity(lineUuid: string, quantity: number): void {
         for (const childUuid of draft.childLines[lineUuid] ?? []) {
             const child = draft.lines[childUuid];
             if (!child) continue;
-            child.quantity = ratio === 0 ? 0 : Math.round(child.quantity * ratio * 1000) / 1000;
+            child.quantity = ratio === 0 ? 0 : roundQuantity(child.quantity * ratio, child.uom_id);
             child.rev += 1;
         }
         touch(draft, target.order_uuid);
@@ -547,7 +549,8 @@ export function reduceQuantity(lineUuid: string, nextQuantity: number): string {
     // The original line is written back to what the kitchen already has, so the compensating
     // quantity must be measured against `sent` — not against the line's current quantity, which
     // may have grown after the send.
-    const delta = Math.round((nextQuantity - sent) * 1000) / 1000;
+    // Trimmed, not snapped: `sent + delta` must land exactly on `nextQuantity` (see trimQuantity).
+    const delta = trimQuantity(nextQuantity - sent);
     setQuantity(lineUuid, sent);
     return addLine({
         orderUuid: line.order_uuid,
@@ -1347,8 +1350,8 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
         for (const part of moved) {
             const target = draft.lines[part.line.uuid];
             if (!target) continue;
-            const left = Math.round((target.quantity - part.quantity) * 1000) / 1000;
-            if (left === 0) {
+            const left = trimQuantity(target.quantity - part.quantity);
+            if (isZeroQuantity(left)) {
                 unindexLine(draft, target);
                 delete draft.lines[part.line.uuid];
             } else {

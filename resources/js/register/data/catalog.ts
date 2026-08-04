@@ -96,6 +96,8 @@ export type CatalogIndex = {
     readonly tablesById: ReadonlyMap<number, RestaurantTableRow>;
     readonly employees: readonly EmployeeRow[];
     readonly uoms: ReadonlyMap<number, UomRow>;
+    /** `decimal_precisions` keyed by name → digits (REG-177). */
+    readonly decimalPrecisions: ReadonlyMap<string, number>;
     readonly nomenclature: Nomenclature | null;
     readonly fallbackNomenclature: Nomenclature | null;
 };
@@ -153,6 +155,7 @@ export function emptyCatalog(): CatalogIndex {
         tablesById: none,
         employees: [],
         uoms: none,
+        decimalPrecisions: new Map<string, number>(),
         nomenclature: null,
         fallbackNomenclature: null,
     }) as CatalogIndex;
@@ -179,6 +182,14 @@ export function subscribeCatalog(listener: () => void): () => void {
 // ─────────────────────────────────────────────────────────────────────────────
 // Lookup helpers — used everywhere, so they live next to the index
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Digits configured for a `decimal.precision` domain, or `fallback` when the site has no row for
+ * it (REG-177). The names are the seeded ones exported from `@domain/money/precision`.
+ */
+export function precisionDigits(catalog: CatalogIndex, name: string, fallback: number): number {
+    return catalog.decimalPrecisions.get(name) ?? fallback;
+}
 
 export function variantOf(catalog: CatalogIndex, variantId: number): ProductVariantRow | null {
     return catalog.variantsById.get(variantId) ?? null;

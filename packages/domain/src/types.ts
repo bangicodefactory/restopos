@@ -516,6 +516,8 @@ export type PosConfigRow = {
 
     iface_tax_included: TaxDisplay;
     tax_rounding_method: TaxRoundingMethod;
+    /** The master switch the server gates on; a `cash_rounding_id` alone does nothing without it. */
+    use_cash_rounding: boolean;
     cash_rounding_id: number | null;
     pricelist_id: number | null;
     available_pricelist_ids: number[];

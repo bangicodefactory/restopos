@@ -112,6 +112,7 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         configs,
         companies,
         currencies,
+        decimalPrecisions,
         uoms,
         taxes,
         fiscalPositions,
@@ -143,6 +144,7 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         db.configs.toArray(),
         db.companies.toArray(),
         db.currencies.toArray(),
+        db.decimalPrecisions.toArray(),
         db.uoms.toArray(),
         db.taxes.toArray(),
         db.fiscalPositions.toArray(),
@@ -245,7 +247,13 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         });
     }
 
-    const roundingRow = cashRoundings.find((r) => r.id === config?.cash_rounding_id) ?? null;
+    // `use_cash_rounding` is the master switch — `OrderCalculator::cashRounding()` gates on it, so a
+    // client that only checked `cash_rounding_id` would round totals (and grant a payment tolerance)
+    // the server does not.
+    const roundingRow =
+        config?.use_cash_rounding === true
+            ? (cashRoundings.find((r) => r.id === config.cash_rounding_id) ?? null)
+            : null;
     const cashRounding: CashRounding | null = roundingRow
         ? {
               rounding: roundingRow.rounding,
@@ -327,6 +335,7 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         // config and omits `active`; treat absent as active rather than filtering everyone out.
         employees: employees.filter((e) => e.active !== false),
         uoms: new Map(uoms.map((u) => [u.id, u])),
+        decimalPrecisions: new Map(decimalPrecisions.map((p) => [p.name, p.digits])),
         nomenclature: primaryNomenclature ? buildNomenclature(primaryNomenclature, barcodeRules) : null,
         fallbackNomenclature: fallbackRow ? buildNomenclature(fallbackRow, barcodeRules) : null,
     };

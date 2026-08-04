@@ -23,6 +23,8 @@ use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
 use App\Models\Restaurant\OrderCourse;
 use App\Services\Kitchen\PreparationService;
+use App\Support\Money\Decimal;
+use App\Support\Tax\CashRounding;
 use App\Support\Tax\Dto\OrderResult;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -1127,15 +1129,25 @@ final readonly class OrderSyncService
         $payments = $this->paymentTotals($order);
         $netPaid = bcsub($payments['paid'], $payments['change'], 4);
 
+        // The register closes a cash-rounded order once the shortfall is inside the rounding
+        // tolerance (REG-176). The books have to agree: absorb that shortfall into the rounding
+        // write-off here, or the order the cashier settled shows a residual `amount_due` forever.
+        ['due' => $amountDue, 'rounding' => $amountRounding] = $this->absorbRoundingShortfall(
+            $config,
+            $order,
+            bcsub($totals->roundedTotal, $netPaid, 4),
+            $totals->roundingDelta,
+        );
+
         $order->forceFill([
             'amount_untaxed' => $totals->totalExcluded,
             'amount_tax' => $totals->totalTax,
             'amount_total' => $totals->roundedTotal,
-            'amount_rounding' => $totals->roundingDelta,
+            'amount_rounding' => $amountRounding,
             'amount_discount' => $discountTotal,
             'amount_paid' => $payments['paid'],
             'amount_change' => $payments['change'],
-            'amount_due' => bcsub($totals->roundedTotal, $netPaid, 4),
+            'amount_due' => $amountDue,
             'total_cost' => $costTotal,
             'margin' => bcsub($totals->totalExcluded, $costTotal, 4),
             'margin_percent' => bccomp($totals->totalExcluded, '0', 4) === 0
@@ -1148,6 +1160,63 @@ final readonly class OrderSyncService
         ])->save();
 
         return $result;
+    }
+
+    /**
+     * Write off a cash-rounding shortfall the register was entitled to accept (REG-176).
+     *
+     * The tolerance is a *cash* concession — it exists because the drawer cannot make change below
+     * the smallest coin — so it is granted on the same three conditions the register uses:
+     * rounding is configured, the order carries a live cash tender, and the shortfall does not
+     * exceed {@see CashRounding::fullyPaidTolerance()}. A card-only order keeps its residual and
+     * shows as underpaid, which is correct: a terminal can always be charged the exact amount.
+     *
+     * The absorbed amount joins the rounding delta rather than vanishing, so
+     * `amount_rounding` stays the single answer to "how much did rounding cost us on this order?"
+     * and the session totals still reconcile.
+     *
+     * @param  string  $rawDue  roundedTotal − netPaid, positive when short
+     * @return array{due: string, rounding: string}
+     */
+    private function absorbRoundingShortfall(
+        PosConfig $config,
+        Order $order,
+        string $rawDue,
+        string $roundingDelta,
+    ): array {
+        $unchanged = ['due' => $rawDue, 'rounding' => $roundingDelta];
+
+        if (bccomp($rawDue, '0', 4) <= 0) {
+            return $unchanged;
+        }
+
+        $rounding = $this->calculator->cashRounding($config);
+
+        if ($rounding === null) {
+            return $unchanged;
+        }
+
+        $hasCashTender = OrderPayment::query()
+            ->where('pos_order_id', $order->getKey())
+            ->where('is_change', false)
+            ->whereNotIn('payment_status', [PaymentStatus::Failed->value, PaymentStatus::Cancelled->value])
+            ->cash()
+            ->exists();
+
+        if (! $hasCashTender) {
+            return $unchanged;
+        }
+
+        if (! CashRounding::isFullyPaid(Decimal::of($rawDue), $rounding->rounding, $rounding->method)) {
+            return $unchanged;
+        }
+
+        return [
+            'due' => '0.0000',
+            // The effective total became roundedTotal − rawDue, so the adjustment against the raw
+            // total grows by exactly the shortfall we just forgave.
+            'rounding' => bcsub($roundingDelta, $rawDue, 4),
+        ];
     }
 
     /** @return array{paid: string, change: string} */

@@ -51,7 +51,13 @@ export function BootScreen(): JSX.Element {
             ) : (
                 <>
                     <p className="text-lg font-semibold text-danger">{t('reg.boot.failed')}</p>
-                    <p className="text-slate-600">{error === 'offline' ? t('status.offline') : error}</p>
+                    <p className="text-slate-600">
+                        {error === 'offline'
+                            ? t('status.offline')
+                            : error === 'upgradeBlocked'
+                              ? t('reg.boot.upgradeBlocked')
+                              : error}
+                    </p>
 
                     <Button
                         size="xl"

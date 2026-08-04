@@ -13,6 +13,7 @@ import type {
     CourseRow,
     CurrencyRow,
     CustomerRow,
+    DecimalPrecisionRow,
     EmployeeRow,
     FiscalPositionRow,
     FiscalPositionTaxRow,
@@ -78,6 +79,7 @@ import Dexie, { type Table } from 'dexie';
 export class PosDb extends Dexie {
     // ── static (server-owned, keyed by id) ───────────────────────────────────
     settings!: Table<SettingRow, number>;
+    decimalPrecisions!: Table<DecimalPrecisionRow, number>;
     currencies!: Table<CurrencyRow, number>;
     companies!: Table<CompanyRow, number>;
     countries!: Table<CountryRow, number>;
@@ -214,7 +216,44 @@ export class PosDb extends Dexie {
             auditLog: 'uuid, at, syncedAt',
             blobs: 'key',
         });
+
+        // v2 — `decimal_precisions` (REG-177). The server has always sent it; the client used to
+        // drop it on the floor, which is why quantity precision was hardcoded. Dexie carries the
+        // v1 stores forward, so this version declares only the new one.
+        this.version(2).stores({
+            decimalPrecisions: 'id, name',
+        });
+
+        // A schema bump is the one moment a second tab can hard-stop the app: IndexedDB refuses to
+        // upgrade while another connection is open on the old version, and `open()` then never
+        // settles — a boot screen that hangs forever with nothing on it. The register, the KDS and
+        // self-order all open this same `pos-{configId}` database, and a service worker happily
+        // serves a stale bundle to a tab left open on the previous deploy, so this is a routine
+        // situation and not a corner case.
+        //
+        // Both halves are needed: `versionchange` closes *this* connection when some other tab is
+        // upgrading, and `blocked` reports the reverse case so the UI can say which tab to close.
+        this.on('versionchange', () => {
+            this.close();
+            for (const listener of upgradeBlockedListeners) listener(this.configId);
+            return false;
+        });
+        this.on('blocked', () => {
+            for (const listener of upgradeBlockedListeners) listener(this.configId);
+        });
     }
+}
+
+/**
+ * Notified when an IndexedDB upgrade is blocked by another tab, or when this tab was closed to let
+ * one through. The shell subscribes to surface "close the other RestoPOS tabs and reload" — without
+ * it the only symptom is a boot that never finishes.
+ */
+const upgradeBlockedListeners = new Set<(configId: number) => void>();
+
+export function onUpgradeBlocked(listener: (configId: number) => void): () => void {
+    upgradeBlockedListeners.add(listener);
+    return () => upgradeBlockedListeners.delete(listener);
 }
 
 export function dbNameFor(configId: number): string {
@@ -224,6 +263,7 @@ export function dbNameFor(configId: number): string {
 /** Entity name (as sent by the bootstrap payload) → Dexie table. Order = spec 01 §5.2. */
 export const ENTITY_TABLES: Record<string, keyof PosDb> = {
     settings: 'settings',
+    decimal_precisions: 'decimalPrecisions',
     currencies: 'currencies',
     companies: 'companies',
     countries: 'countries',
@@ -286,6 +326,7 @@ export const UUID_KEYED_ENTITIES = new Set([
 /** Dependency order for applying a bootstrap/delta payload (spec 01 §5.2). */
 export const LOAD_ORDER: readonly string[] = [
     'settings',
+    'decimal_precisions',
     'currencies',
     'companies',
     'countries',
