@@ -6,7 +6,8 @@ import { useMemo, useState } from 'react';
 
 import { useT } from '../i18n';
 import { currentDelta } from '../domain/kitchen-send';
-import { createOrder, setTable, transferOrder } from '../domain/order-actions';
+import { createOrder, setTable } from '../domain/order-actions';
+import { TableActionError, transferOrder } from '../domain/table-transfer';
 import { orderTotals } from '../domain/totals';
 import { useCatalog, useMoney } from '../hooks/use-register';
 import { draftOrders, orderOnTable, useOrderStore } from '../state/order-store';
@@ -36,6 +37,7 @@ export function FloorScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => vo
     const can = useCan();
 
     const [floorId, setFloorId] = useState<number | null>(catalog.floors[0]?.id ?? null);
+    const [transferError, setTransferError] = useState<string | null>(null);
 
     const tables = useMemo(
         () => catalog.tables.filter((table) => table.active && table.floor_id === floorId),
@@ -63,9 +65,20 @@ export function FloorScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => vo
                 startTransfer(null);
                 return;
             }
-            const result = transferOrder(transferUuid, table.id);
             startTransfer(null);
-            onOpenOrder(result.orderUuid);
+            setTransferError(null);
+            try {
+                // Server-authoritative (BAN-437): the merge record, prep-snapshot move and
+                // unique-index resolution all happen on the server, then we rebuild locally.
+                const result = await transferOrder(transferUuid, table.id);
+                onOpenOrder(result.orderUuid);
+            } catch (error) {
+                setTransferError(
+                    error instanceof TableActionError && error.code === 'offline'
+                        ? t('reg.floor.transferOffline')
+                        : t('reg.floor.transferFailed'),
+                );
+            }
             return;
         }
 
@@ -134,6 +147,15 @@ export function FloorScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => vo
                     {t('reg.floor.transferPrompt')} —{' '}
                     <button type="button" className="underline" onClick={() => startTransfer(null)}>
                         {t('common.cancel')}
+                    </button>
+                </p>
+            ) : null}
+
+            {transferError !== null ? (
+                <p className="bg-danger-soft px-3 py-2 font-semibold text-danger-fg">
+                    {transferError} —{' '}
+                    <button type="button" className="underline" onClick={() => setTransferError(null)}>
+                        {t('common.close')}
                     </button>
                 </p>
             ) : null}

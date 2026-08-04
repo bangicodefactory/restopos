@@ -349,6 +349,29 @@ export async function syncNow(): Promise<void> {
     useSyncStore.getState().noteSync();
 }
 
+/**
+ * Force the in-memory order slice to match the server after a server-authoritative table op
+ * (transfer / merge / unmerge — BAN-437). The register applies those on the server, which moves
+ * lines between orders and tombstones the merged source; the local store cannot reconstruct that
+ * itself. So: flush any pending local writes, pull the authoritative order deltas (moves + the
+ * tombstone for the merged-away order) into IndexedDB, then rebuild the order slice from the
+ * replica. The rebuild is a clean replace rather than an additive hydrate — otherwise the merged
+ * source lingers and moved lines keep a stale index entry. Unsynced local orders survive because
+ * `flushNow` has already written them to the same replica.
+ */
+export async function reloadAllOrders(): Promise<void> {
+    const runtime = tryRuntime();
+    if (!runtime) return;
+
+    await runtime.persistence.flushNow();
+    await runtime.delta.pull({ drain: true });
+
+    const payload = await loadOrdersFromDb(runtime.db);
+    useOrderStore.getState().resetAll();
+    hydrateOrders(payload);
+    useSyncStore.getState().noteSync();
+}
+
 export function runtimeOrThrow(): ReturnType<typeof getRuntime> {
     return getRuntime();
 }
