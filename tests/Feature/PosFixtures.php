@@ -308,8 +308,10 @@ final class PosFixtures
      * `product_attribute_line_value` id an order line references (BAN-431 tests). Each call mints
      * its own attribute group, so options never collide on the (product, attribute) unique index.
      */
-    public function attributeOption(string $name, string $priceExtra = '0'): int
+    public function attributeOption(string $name, string $priceExtra = '0', ?int $productId = null): int
     {
+        $productId ??= $this->product->getKey();
+
         $attributeId = DB::table('product_attributes')->insertGetId([
             'company_id' => $this->company->getKey(),
             'name' => $name.' choice',
@@ -323,7 +325,7 @@ final class PosFixtures
         ]);
 
         $lineId = DB::table('product_attribute_lines')->insertGetId([
-            'product_id' => $this->product->getKey(),
+            'product_id' => $productId,
             'product_attribute_id' => $attributeId,
             'created_at' => now(), 'updated_at' => now(),
         ]);
@@ -331,7 +333,7 @@ final class PosFixtures
         return (int) DB::table('product_attribute_line_values')->insertGetId([
             'product_attribute_line_id' => $lineId,
             'product_attribute_value_id' => $valueId,
-            'product_id' => $this->product->getKey(),
+            'product_id' => $productId,
             'price_extra' => $priceExtra,
             'created_at' => now(), 'updated_at' => now(),
         ]);

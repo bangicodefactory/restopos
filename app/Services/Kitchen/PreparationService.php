@@ -406,6 +406,11 @@ final readonly class PreparationService
         // (KDS-006): the chosen no-variant attribute values and any custom text ("Happy Birthday")
         // are appended so the line reads "Cake (Chocolate, Happy Birthday)". The composed name is
         // what writeSnapshot stores, so this stays diff-stable across sends.
+        //
+        // The options ride onto the *initial* fire (a `New` change carries this name). Note the
+        // delta keys on quantity and note only, so changing an option on an already-sent line does
+        // not re-fire — Odoo cancels-and-readds there; we do not. Options are picked in the variant
+        // dialog before the line is sent, so this edge only bites a post-send re-pick.
         $labels = $this->optionLabels(array_map(static fn (array $l): int => (int) $l['line_id'], $out));
 
         foreach ($out as &$line) {

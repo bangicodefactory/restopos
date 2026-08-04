@@ -743,7 +743,7 @@ final readonly class OrderSyncService
 
         $existing[$uuid] = (int) $line->getKey();
 
-        $this->syncLineAttributes((int) $line->getKey(), $command);
+        $this->syncLineAttributes((int) $line->getKey(), (int) $variant['product_id'], $command);
 
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
     }
@@ -797,7 +797,7 @@ final readonly class OrderSyncService
 
         // A resent line carries its options; re-sync them (replace-on-write) so an edit that
         // adds or clears an option is reflected. A note-only update omits the keys and no-ops.
-        $this->syncLineAttributes((int) $line->getKey(), $command);
+        $this->syncLineAttributes((int) $line->getKey(), (int) $line->product_id, $command);
 
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
     }
@@ -806,18 +806,23 @@ final readonly class OrderSyncService
      * Persist the variant options chosen on a line (REG-073): the `no_variant` attribute values
      * into the `pos_order_line_attribute_value` pivot (freezing each option's `price_extra`), and
      * any custom ("Happy Birthday") text into `pos_order_line_custom_attribute_values`. Both are
-     * replace-on-write so a resent line is idempotent, and both drop ids that do not exist rather
-     * than letting the restrict-on-delete FK 500 the whole batch.
+     * replace-on-write so a resent line is idempotent.
+     *
+     * Ids are validated against the *line's own product* — an option that belongs to another
+     * product (or another tenant's catalogue) is dropped rather than persisted, which both keeps the
+     * restrict-on-delete FK from 500-ing the batch and stops a crafted id leaking a foreign option
+     * name onto this ticket.
      *
      * @param  array<string, mixed>  $command
      */
-    private function syncLineAttributes(int $lineId, array $command): void
+    private function syncLineAttributes(int $lineId, int $productId, array $command): void
     {
         if (array_key_exists('attribute_line_value_ids', $command)) {
             $ids = array_values(array_unique(array_map('intval', (array) $command['attribute_line_value_ids'])));
 
             /** @var Collection<int, string> $priceById */
             $priceById = $this->connection->table('product_attribute_line_values')
+                ->where('product_id', $productId)
                 ->whereIn('id', $ids === [] ? [0] : $ids)
                 ->pluck('price_extra', 'id');
 
@@ -848,6 +853,7 @@ final readonly class OrderSyncService
                 $custom,
             )));
             $known = array_flip($this->connection->table('product_attribute_line_values')
+                ->where('product_id', $productId)
                 ->whereIn('id', $valueIds === [] ? [0] : $valueIds)->pluck('id')->all());
 
             $this->connection->table('pos_order_line_custom_attribute_values')

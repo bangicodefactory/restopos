@@ -536,6 +536,24 @@ it('persists attribute selections and custom values and shows them on the kitche
     expect($displayName)->toContain('Chocolate')->toContain('Happy Birthday');
 });
 
+it('drops an attribute id that belongs to another product', function (): void {
+    // An option defined on the *drink* product, sent on a line for the pizza variant. It exists,
+    // so the FK would accept it, but it is not this product's option — it must not be persisted.
+    $foreign = $this->fx->attributeOption('Sirop', '0', $this->fx->drink->getKey());
+
+    $uuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($uuid, [[
+        'op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+        'attribute_line_value_ids' => [$foreign],
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $lineId = (int) DB::table('pos_order_lines')->where('uuid', $lineUuid)->value('id');
+    expect(DB::table('pos_order_line_attribute_value')->where('pos_order_line_id', $lineId)->count())->toBe(0);
+});
+
 it('drops an unknown attribute id rather than failing the whole order', function (): void {
     $uuid = (string) Str::uuid();
     $lineUuid = (string) Str::uuid();
