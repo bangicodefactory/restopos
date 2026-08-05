@@ -41,6 +41,9 @@ final class CartController extends Controller
                 tableStandNumber: $request->validated('table_stand_number'),
                 presetId: $request->validated('preset_id') === null ? null : (int) $request->validated('preset_id'),
                 clientOrderUuid: $request->validated('order_uuid'),
+                // Proof that this caller created the order it is naming (BAN-496). Same
+                // `X-Order-Token` header the status and payment endpoints already take.
+                clientOrderToken: $this->orderToken($request),
             );
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'cart_rejected', 'message' => $e->getMessage()]], 422);
@@ -52,5 +55,13 @@ final class CartController extends Controller
             'access_token' => $result['access_token'],
             'warnings' => $result['warnings'],
         ], 201);
+    }
+
+    /** Matches `OrderStatusController` / `PaymentController`: header first, body as a fallback. */
+    private function orderToken(SubmitCartRequest $request): ?string
+    {
+        $token = (string) ($request->header('X-Order-Token') ?? $request->input('order_token', '') ?? '');
+
+        return $token === '' ? null : $token;
     }
 }

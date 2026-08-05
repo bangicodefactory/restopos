@@ -126,6 +126,7 @@ final readonly class SelfOrderService
         ?string $tableStandNumber = null,
         ?int $presetId = null,
         ?string $clientOrderUuid = null,
+        ?string $clientOrderToken = null,
     ): array {
         $config = $context->config;
 
@@ -139,7 +140,7 @@ final readonly class SelfOrderService
 
         $target = $this->targetOrder($context);
         $appending = $target !== null;
-        $orderUuid = $target?->uuid ?? ($clientOrderUuid ?? (string) Str::uuid());
+        $orderUuid = $target?->uuid ?? $this->resolveCartOrderUuid($context, $clientOrderUuid, $clientOrderToken);
         $accessToken = $target?->access_token ?? (string) Str::uuid();
 
         $session = $this->sessions->resolveForIngest($config, null, (string) $orderUuid)['session'];
@@ -446,6 +447,53 @@ final readonly class SelfOrderService
      * Append-to-table-order semantics: table service + `pay_after = meal` means
      * the cart joins the tab (SLF-110).
      */
+    /**
+     * Decide which uuid a cart submission may write to (BAN-496).
+     *
+     * `order_uuid` exists so a phone on a flaky connection can retry a submit without creating the
+     * order twice. It was honoured unconditionally, which made it an order-takeover primitive: name
+     * any draft order's uuid and the upsert below lands in *that* order, then this method's caller
+     * hands back its `access_token` — enough to read the order, add lines to it and cancel it.
+     * Learning one uuid was the whole attack.
+     *
+     * So a uuid naming an order that already exists is honoured only against the matching access
+     * token, which only the caller who created it was ever given.
+     *
+     * The existence check is deliberately **unscoped** by config. Scoping it would be the more
+     * natural-looking query and would reopen the hole: `OrderSyncService` resolves the uuid
+     * globally, so an order belonging to another venue would pass a config-scoped check here and
+     * still be hit by the upsert. Look the order up the way the thing being guarded looks it up.
+     * (Scoping the sync lookup itself is BAN-492; this guard must hold with or without it.)
+     */
+    private function resolveCartOrderUuid(
+        SelfOrderContext $context,
+        ?string $clientOrderUuid,
+        ?string $clientOrderToken,
+    ): string {
+        if ($clientOrderUuid === null) {
+            return (string) Str::uuid();
+        }
+
+        /** @var Order|null $existing */
+        $existing = Order::query()->where('uuid', $clientOrderUuid)->first();
+
+        if ($existing === null) {
+            return $clientOrderUuid; // Fresh uuid, or the retry of a submit that never landed.
+        }
+
+        $ownsIt = $clientOrderToken !== null
+            && $clientOrderToken !== ''
+            && hash_equals((string) $existing->access_token, $clientOrderToken)
+            && (int) $existing->pos_config_id === (int) $context->config->getKey();
+
+        if (! $ownsIt) {
+            // Same message either way: whether that uuid exists is not the caller's business.
+            throw new DomainException('That order cannot be added to.');
+        }
+
+        return $clientOrderUuid;
+    }
+
     private function targetOrder(SelfOrderContext $context): ?Order
     {
         $config = $context->config;

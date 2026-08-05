@@ -232,6 +232,7 @@ describe('per-record results', () => {
                 id: 501,
                 name: 'SALLE/0042',
                 sequence_number: 42,
+                access_token: 'server-minted-token',
                 state: 'paid',
                 amount_untaxed: '10.00',
                 amount_tax: '2.00',

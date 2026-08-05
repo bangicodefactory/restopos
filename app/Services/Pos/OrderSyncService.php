@@ -513,7 +513,12 @@ final readonly class OrderSyncService
             'receipt_number' => $reference !== '' ? $reference : null,
             'tracking_number' => $attributes['tracking_number'] ?? null,
             'ticket_code' => $attributes['ticket_code'] ?? $this->sequences->receiptToken(),
-            'access_token' => (string) ($attributes['access_token'] ?? Str::uuid()),
+            // Server-minted, never the client's (BAN-496). This token is the whole authority over an
+            // order for an anonymous caller — it names the public broadcast channel
+            // `pos.order.{token}` and is the credential the status and payment endpoints check — so
+            // a client that could choose it could pre-register a token, or set a victim's. The ack
+            // carries the real one back; `updateOrder`'s allow-list keeps it unwritable thereafter.
+            'access_token' => (string) Str::uuid(),
             'source' => (string) ($attributes['source'] ?? OrderSource::Pos->value),
             'state' => (string) ($attributes['state'] ?? OrderState::Draft->value),
             'ordered_at' => $attributes['ordered_at'] ?? now(),
