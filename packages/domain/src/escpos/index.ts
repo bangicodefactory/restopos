@@ -36,3 +36,4 @@ export {
 
 export { PRINTER_PROFILES, resolveProfile } from './profiles';
 export type { PrinterProfile, PrinterProfileId } from './profiles';
+export { rasterFromRgba } from './raster';

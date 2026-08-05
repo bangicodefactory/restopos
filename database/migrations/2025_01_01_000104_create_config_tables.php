@@ -314,6 +314,11 @@ return new class extends Migration
             $table->string('epos_printer_ip', 128)->nullable();
             $table->boolean('big_scrollbars')->default(false);
             $table->foreignId('customer_display_bg_media_id')->nullable()->constrained('media_files')->nullOnDelete();
+            // The receipt's brand mark. The client has always read this — `receipt.ts` builds its
+            // blob key as `logo:{receipt_logo_media_id}` and `build.ts` emits the image node — but
+            // the column was never added, so `config.receipt_logo_media_id` was permanently
+            // undefined and every receipt printed without a logo (BAN-480).
+            $table->foreignId('receipt_logo_media_id')->nullable()->constrained('media_files')->nullOnDelete();
 
             // Barcode
             $table->foreignId('fallback_barcode_nomenclature_id')->nullable()->constrained('barcode_nomenclatures')->nullOnDelete();

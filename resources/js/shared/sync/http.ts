@@ -41,6 +41,14 @@ export type RequestOptions = {
     /** Idempotency key for a push attempt-group (spec 03 §3.6.3). */
     idempotencyKey?: string;
     timeoutMs?: number;
+    /**
+     * How to read the body. `json` is the default and what every sync endpoint speaks.
+     *
+     * `blob` exists for media (BAN-480): the bytes are behind a device-authenticated route, and an
+     * `<img src>` cannot carry a bearer token — so the client fetches them here, where the token
+     * lives, and renders from an object URL.
+     */
+    responseType?: 'json' | 'blob';
 };
 
 export type ApiResponse<T> = {
@@ -128,7 +136,11 @@ export class ApiClient {
             return { data: null, status: 204, etag, notModified: false };
         }
 
-        return { data: (await response.json()) as T, status: response.status, etag, notModified: false };
+        const data = options.responseType === 'blob'
+            ? ((await response.blob()) as T)
+            : ((await response.json()) as T);
+
+        return { data, status: response.status, etag, notModified: false };
     }
 
     private buildUrl(path: string, query?: RequestOptions['query']): string {

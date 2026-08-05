@@ -1,8 +1,11 @@
 import type { ProductRow } from '@domain/types';
 import { normalizeSearch } from '@shared/db';
+import { useMediaUrl } from '@shared/media';
 import { VirtualGrid, cn } from '@shared/ui';
 import type { JSX } from 'react';
 import { useMemo } from 'react';
+
+import { tryRuntime } from '../data/runtime';
 
 import { baseListPrice, categoryDescendants, type CatalogIndex } from '../data/catalog';
 import { useT } from '../i18n';
@@ -117,6 +120,11 @@ function ProductCard({
 }): JSX.Element {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    // The bytes come from IndexedDB, not from an `<img src>` pointing at the route: the media route
+    // is device-authenticated and an `<img>` cannot carry a bearer token (BAN-480).
+    const runtime = tryRuntime();
+    const image = useMediaUrl(runtime?.db ?? null, runtime?.api ?? null, product.image_media_id);
+
     return (
         <button
             type="button"
@@ -142,8 +150,21 @@ function ProductCard({
                 COLORS[product.color % COLORS.length],
             )}
         >
-            <span className="line-clamp-3 text-sm font-semibold leading-tight text-slate-900">{product.name}</span>
-            <span className="text-base font-bold text-slate-700">{price}</span>
+            {image !== null ? (
+                <img
+                    src={image}
+                    alt=""
+                    aria-hidden
+                    // Decorative: the product name is right there in text, so a screen reader
+                    // announcing the picture as well would just say everything twice.
+                    className="absolute inset-0 h-full w-full rounded-pos object-cover opacity-25"
+                    loading="lazy"
+                />
+            ) : null}
+            <span className="relative line-clamp-3 text-sm font-semibold leading-tight text-slate-900">
+                {product.name}
+            </span>
+            <span className="relative text-base font-bold text-slate-700">{price}</span>
             {quantity > 0 ? (
                 <span className="absolute right-1 top-1 min-w-6 rounded-full bg-brand-600 px-1.5 text-center text-xs font-bold text-white">
                     {quantity}
