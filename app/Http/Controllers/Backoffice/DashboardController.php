@@ -8,7 +8,9 @@ use App\Enums\OrderState;
 use App\Enums\SessionState;
 use App\Http\Controllers\Controller;
 use App\Models\Pos\PosConfig;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,6 +25,29 @@ use Inertia\Response;
 final class DashboardController extends Controller
 {
     public function __construct(private readonly ConnectionInterface $connection) {}
+
+    /** Today's takeable orders for the acting company — the basis of both headline figures. */
+    private function paidToday(string $today): Builder
+    {
+        $query = $this->connection->table('pos_orders')
+            ->whereDate('ordered_at', $today)
+            ->whereIn('state', [OrderState::Paid->value, OrderState::Done->value]);
+
+        ActingCompany::scope($query);
+
+        return $query;
+    }
+
+    /** Sessions still open for the acting company. */
+    private function openSessions(): Builder
+    {
+        $query = $this->connection->table('pos_sessions')
+            ->where('state', '!=', SessionState::Closed->value);
+
+        ActingCompany::scope($query);
+
+        return $query;
+    }
 
     public function __invoke(Request $request): Response
     {
@@ -53,23 +78,17 @@ final class DashboardController extends Controller
                 ];
             })->values()->all(),
 
+            // These are query-builder calls, so `CompanyScope` never sees them — every one has to
+            // say `ActingCompany::scope` itself. Unscoped, this panel put one tenant's daily
+            // takings on every other tenant's home page (XCT-101).
             'today' => Inertia::defer(fn (): array => [
-                'order_count' => $this->connection->table('pos_orders')
-                    ->whereDate('ordered_at', $today)
-                    ->whereIn('state', [OrderState::Paid->value, OrderState::Done->value])
-                    ->count(),
-                'revenue' => (string) ($this->connection->table('pos_orders')
-                    ->whereDate('ordered_at', $today)
-                    ->whereIn('state', [OrderState::Paid->value, OrderState::Done->value])
-                    ->sum('amount_total') ?? '0'),
-                'open_sessions' => $this->connection->table('pos_sessions')
-                    ->where('state', '!=', SessionState::Closed->value)
-                    ->count(),
+                'order_count' => $this->paidToday($today)->count(),
+                'revenue' => (string) ($this->paidToday($today)->sum('amount_total') ?? '0'),
+                'open_sessions' => $this->openSessions()->count(),
             ]),
 
-            'rescueSessions' => Inertia::defer(fn (): array => $this->connection->table('pos_sessions')
+            'rescueSessions' => Inertia::defer(fn (): array => $this->openSessions()
                 ->where('is_rescue', true)
-                ->where('state', '!=', SessionState::Closed->value)
                 ->orderByDesc('id')
                 ->get(['id', 'uuid', 'name', 'pos_config_id', 'opened_at', 'opening_notes', 'order_count'])
                 ->map(static fn (object $s): array => (array) $s)
