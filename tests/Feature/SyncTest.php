@@ -10,6 +10,7 @@ use App\Models\Identity\Customer;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
+use App\Models\Pos\Payment;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -799,4 +800,83 @@ it('does not link a combo child to a parent line on another order', function ():
 
     // The line is created, but unparented — it never reaches across to the other order.
     expect(DB::table('pos_order_lines')->where('uuid', $childUuid)->value('combo_parent_line_id'))->toBeNull();
+});
+
+/**
+ * BAN-492 — the child-uuid reach-across, found while reviewing the order-level guard.
+ *
+ * `applyPaymentCommands` wrote through `updateOrCreate(['uuid' => $uuid], …)`, matching globally.
+ * The order-level guard never sees this: the order being written is legitimately the caller's, and
+ * the foreign row is reached by *payment* uuid.
+ */
+it('refuses to adopt a payment row belonging to another order', function (): void {
+    $victimFx = PosFixtures::make()->withSession();
+
+    $victimOrderUuid = (string) Str::uuid();
+    $paymentUuid = (string) Str::uuid();
+
+    $this->withHeaders($victimFx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$victimFx->orderCommand($victimOrderUuid, [], ['state' => OrderState::Paid->value], [[
+            'op' => 'create', 'uuid' => $paymentUuid,
+            'payment_method_id' => $victimFx->cash->getKey(), 'amount' => '24.20',
+        ]])],
+    ])->assertOk();
+
+    $victim = Order::query()->where('uuid', $victimOrderUuid)->firstOrFail();
+
+    // My own order — legitimately mine — whose payment command reuses the victim's payment uuid.
+    $mineUuid = (string) Str::uuid();
+    $response = $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($mineUuid, [], [], [[
+            'op' => 'create', 'uuid' => $paymentUuid,
+            'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '0.01',
+        ]])],
+    ]);
+
+    $response->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(collect($response->json('results.0.payments'))->pluck('code')->all())
+        ->toContain('payment_not_writable');
+
+    // The victim's payment is untouched: same order, same amount, still settling that order.
+    $payment = Payment::query()->where('uuid', $paymentUuid)->firstOrFail();
+    $mine = Order::query()->where('uuid', $mineUuid)->firstOrFail();
+
+    expect((int) $payment->pos_order_id)->toBe((int) $victim->getKey())
+        ->and((float) $payment->amount)->toBe(24.20)
+        ->and((float) $victim->fresh()->amount_paid)->toBe(24.20)
+        // …and my order gained nothing.
+        ->and(Payment::query()->where('pos_order_id', $mine->getKey())->count())->toBe(0);
+});
+
+it('refuses to adopt a course row belonging to another order', function (): void {
+    $firstUuid = (string) Str::uuid();
+    $courseUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [[
+            ...$this->fx->orderCommand($firstUuid),
+            'courses' => [['op' => 'create', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Starters']],
+        ]],
+    ])->assertOk();
+
+    $first = Order::query()->where('uuid', $firstUuid)->firstOrFail();
+
+    $secondUuid = (string) Str::uuid();
+    $response = $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [[
+            ...$this->fx->orderCommand($secondUuid),
+            'courses' => [['op' => 'create', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Stolen']],
+        ]],
+    ]);
+
+    $response->assertOk();
+
+    expect(collect($response->json('results.0.courses'))->pluck('code')->all())
+        ->toContain('course_not_writable');
+
+    expect((int) DB::table('restaurant_order_courses')->where('uuid', $courseUuid)->value('pos_order_id'))
+        ->toBe((int) $first->getKey())
+        ->and((string) DB::table('restaurant_order_courses')->where('uuid', $courseUuid)->value('name'))
+        ->toBe('Starters');
 });

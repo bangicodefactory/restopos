@@ -959,6 +959,14 @@ final readonly class OrderSyncService
                 continue;
             }
 
+            // A course uuid that already belongs to another order is never this order's to write
+            // (BAN-492) — see belongsToAnotherOrder.
+            if (! isset($existing[$uuid]) && $this->belongsToAnotherOrder('restaurant_order_courses', $uuid, $order)) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'course_not_writable'];
+
+                continue;
+            }
+
             $op = (string) ($command['op'] ?? 'create');
 
             if ($op === 'delete') {
@@ -1015,6 +1023,15 @@ final readonly class OrderSyncService
             $uuid = (string) ($command['uuid'] ?? '');
 
             if ($uuid === '') {
+                continue;
+            }
+
+            // A payment uuid that already belongs to another order is never this order's to write
+            // (BAN-492). This is the money one: without it, the row is re-parented here and its
+            // amount overwritten, leaving a settled order elsewhere unpaid.
+            if (! isset($existing[$uuid]) && $this->belongsToAnotherOrder('pos_payments', $uuid, $order)) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'payment_not_writable'];
+
                 continue;
             }
 
@@ -1516,6 +1533,28 @@ final readonly class OrderSyncService
     }
 
     /** @return array<string, mixed> */
+    /**
+     * Does this child uuid already belong to a *different* order? (BAN-492)
+     *
+     * `applyPaymentCommands` and `applyCourseCommands` both write through
+     * `updateOrCreate(['uuid' => $uuid], ['pos_order_id' => $order->id, …])`, which matches on the
+     * uuid **globally**. A command naming a payment or course uuid from someone else's order
+     * therefore re-parented that row onto this one — and, for a payment, overwrote its amount and
+     * method on the way. The victim's order kept a stale `amount_paid` until its next recompute,
+     * at which point a settled order reads as unpaid. Across tenants, on a legitimately-owned
+     * order, so the order-level guard above never sees it.
+     *
+     * Checked and rejected rather than scoped into the match: `uuid` is unique on both tables, so a
+     * scoped `updateOrCreate` would fall through to an insert and die on the index — one bad child
+     * command failing the whole order with an opaque `ingest_failed`.
+     */
+    private function belongsToAnotherOrder(string $table, string $uuid, Order $order): bool
+    {
+        $ownerId = $this->connection->table($table)->where('uuid', $uuid)->value('pos_order_id');
+
+        return $ownerId !== null && (int) $ownerId !== (int) $order->getKey();
+    }
+
     /**
      * May this config write to this order? (BAN-492)
      *
