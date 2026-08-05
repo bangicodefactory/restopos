@@ -129,6 +129,13 @@ return new class extends Migration
             $table->index(['pos_session_id', 'state'], 'pos_orders_session_state_index');
             $table->index(['restaurant_table_id', 'state'], 'pos_orders_table_state_index');
             $table->index(['company_id', 'updated_at'], 'pos_orders_delta_index');
+
+            // The number the counter calls out has to be unique *within the service*, or two
+            // customers answer to it (SLF-043). Picking the lowest free number is not enough on its
+            // own: two kiosks submitting at once both read the same free number, and kiosks are
+            // exactly the concurrent case. This is what actually makes it true; the picker retries
+            // when it loses.
+            $table->unique(['pos_session_id', 'tracking_number'], 'pos_orders_session_tracking_unique');
         });
 
         $this->applyChecks('pos_orders', [

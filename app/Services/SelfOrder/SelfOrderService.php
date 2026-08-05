@@ -19,10 +19,12 @@ use App\Models\Pos\Order;
 use App\Models\Pos\Payment as OrderPayment;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
+use App\Models\Pos\PosSession;
 use App\Services\Kitchen\PreparationService;
 use App\Services\Payment\Dto\PaymentIntent;
 use App\Services\Payment\PaymentProvider;
 use App\Services\Pos\BootstrapService;
+use App\Services\Pos\ComboCartPricer;
 use App\Services\Pos\OrderSyncService;
 use App\Services\Pos\PricingService;
 use App\Services\Pos\SessionService;
@@ -51,6 +53,7 @@ final readonly class SelfOrderService
         private BootstrapService $bootstrap,
         private OrderSyncService $sync,
         private PricingService $pricing,
+        private ComboCartPricer $comboPricer,
         private SessionService $sessions,
         private PreparationService $preparation,
         private PaymentProvider $payments,
@@ -145,22 +148,44 @@ final readonly class SelfOrderService
         $session = $this->sessions->resolveForIngest($config, null, (string) $orderUuid)['session'];
         $pricelistId = $this->pricing->resolvePricelistId($config, null, $presetId, null);
 
+        // Server-resolved prices for the whole cart at once (SLF-030). Per-line pricing cannot see
+        // a combo: it returns each child's own list price, which reverses the meal-deal discount.
+        $prices = $this->comboPricer->priceCart($config, $pricelistId, $lines, $this->roundingStep($config));
+
+        // The cart's line uuids never reach the database. `pos_order_lines.uuid` is globally unique,
+        // so honouring a client-chosen one would hand an anonymous caller a primary key: a collision
+        // with any line anywhere fails the whole order on the index, and the value arrives
+        // unvalidated. The cart's uuids are only an *internal* language for saying "this component
+        // belongs to that meal", so they are translated to server-minted ones here and
+        // `combo_parent_uuid` is rewritten through the same map — which is what makes combo children
+        // resolve to their parent at ingest instead of being stored as loose lines (SLF-030).
+        $serverUuid = [];
+
+        foreach ($lines as $line) {
+            $cartUuid = (string) ($line['uuid'] ?? '');
+            if ($cartUuid !== '') {
+                $serverUuid[$cartUuid] = (string) Str::uuid();
+            }
+        }
+
         $lineCommands = [];
 
         foreach ($lines as $line) {
             $variantId = (int) $line['variant_id'];
             $quantity = (string) $line['quantity'];
+            $cartUuid = (string) ($line['uuid'] ?? '');
+            $parentCartUuid = (string) ($line['combo_parent_uuid'] ?? '');
 
             $command = [
                 'op' => 'create',
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $serverUuid[$cartUuid] ?? (string) Str::uuid(),
                 'variant_id' => $variantId,
                 'qty' => $quantity,
                 // Server-resolved price. The cart's own number is never used.
-                'price_unit' => $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
+                'price_unit' => $prices[$cartUuid] ?? $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
                 'discount' => '0',
                 'customer_note' => $line['customer_note'] ?? null,
-                'combo_parent_uuid' => $line['combo_parent_uuid'] ?? null,
+                'combo_parent_uuid' => $serverUuid[$parentCartUuid] ?? null,
                 'combo_item_id' => $line['combo_item_id'] ?? null,
             ];
 
@@ -182,7 +207,11 @@ final readonly class SelfOrderService
 
         $source = $config->self_ordering_mode->value === 'kiosk' ? OrderSource::Kiosk : OrderSource::Mobile;
 
-        $result = $this->sync->sync($config, null, [
+        // One retry on a lost tracking-number race. Two kiosks can pick the same free number between
+        // the read and the insert; the unique index turns that into a rejection rather than a
+        // duplicate, and re-picking costs one round trip. Refusing the sale over a display number
+        // would be a far worse trade.
+        $result = $this->withTrackingRetry(fn (): array => $this->sync->sync($config, null, [
             'orders' => [[
                 'uuid' => (string) $orderUuid,
                 'op' => 'upsert',
@@ -195,16 +224,17 @@ final readonly class SelfOrderService
                     // one would read as though the caller still chooses it — the exact confusion
                     // this fix removes. The real token is read back off the order below.
                     'pricelist_id' => $pricelistId,
+                    'fiscal_position_id' => $this->fiscalPositionFor($config, $presetId),
                     'preset_id' => $presetId,
                     'table_id' => $this->tableIdFor($context),
                     'general_customer_note' => $customerNote,
                     'customer_email' => $customerEmail,
                     'customer_phone' => $customerPhone,
-                    'tracking_number' => $target?->tracking_number ?? $this->trackingNumber($source),
+                    'tracking_number' => $target?->tracking_number ?? $this->trackingNumber($source, $session),
                 ], static fn ($v): bool => $v !== null),
                 'lines' => $lineCommands,
             ]],
-        ]);
+        ]));
 
         /** @var array<string, mixed> $first */
         $first = $result['results'][0] ?? [];
@@ -566,9 +596,104 @@ final readonly class SelfOrderService
         ];
     }
 
-    private function trackingNumber(OrderSource $source): string
+    /**
+     * A per-session order number the counter can call out (SLF-043).
+     *
+     * Was `random_int(1, 999)` with no uniqueness check: by the birthday bound two customers in one
+     * service share a number after about 37 orders, at which point the counter calls the wrong
+     * person. Now the lowest free number in the session, so the first collision is at 999 orders
+     * rather than 37 — and it still reads like a ticket number rather than a database id.
+     */
+    private function trackingNumber(OrderSource $source, PosSession $session): string
     {
-        return $source->trackingPrefix().str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+        $prefix = $source->trackingPrefix();
+
+        $taken = $this->connection->table('pos_orders')
+            ->where('pos_session_id', $session->getKey())
+            ->whereNotNull('tracking_number')
+            ->pluck('tracking_number')
+            ->all();
+
+        $used = [];
+
+        foreach ($taken as $number) {
+            $number = (string) $number;
+            // A prefix strip, not `ltrim`: ltrim takes a *character list*, so it would eat repeated
+            // leading characters and misbehave the day a prefix becomes more than one letter.
+            //
+            // Keyed on the bare number, so kiosk `K001` also reserves mobile `S001`. That is
+            // deliberate — the counter calls "001", and two customers hearing their own number is
+            // the whole failure being fixed.
+            $used[$prefix !== '' && str_starts_with($number, $prefix) ? substr($number, \strlen($prefix)) : $number] = true;
+        }
+
+        for ($n = 1; $n <= 999; $n++) {
+            $candidate = str_pad((string) $n, 3, '0', STR_PAD_LEFT);
+
+            if (! isset($used[$candidate])) {
+                return $prefix.$candidate;
+            }
+        }
+
+        // 999 live orders in one session is not a service, it is a data problem — but a duplicate
+        // number is still better than refusing the sale.
+        return $prefix.str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * The fiscal position to apply (SLF-038).
+     *
+     * A preset is how "takeaway" is expressed, and takeaway is frequently a different VAT rate — so
+     * the preset's fiscal position must win over the config's default when one is set. The
+     * self-order path never sent one at all, so a kiosk takeaway order was taxed as if eaten in.
+     */
+    private function fiscalPositionFor(PosConfig $config, ?int $presetId): ?int
+    {
+        if ($presetId !== null) {
+            $fromPreset = $this->connection->table('pos_presets')
+                ->where('id', $presetId)
+                ->value('fiscal_position_id');
+
+            if ($fromPreset !== null) {
+                return (int) $fromPreset;
+            }
+        }
+
+        return $config->default_fiscal_position_id === null ? null : (int) $config->default_fiscal_position_id;
+    }
+
+    /**
+     * Run the ingest, retrying once if it lost a tracking-number race (SLF-043).
+     *
+     * The number is chosen before the insert, so two concurrent kiosks can choose the same one. The
+     * unique index on `(pos_session_id, tracking_number)` makes that a rejection instead of two
+     * customers answering to "001"; this turns the rejection into a second attempt with a freshly
+     * picked number, which is what the customer would want to happen.
+     *
+     * @param  callable(): array<string, mixed>  $ingest
+     * @return array<string, mixed>
+     */
+    private function withTrackingRetry(callable $ingest): array
+    {
+        $result = $ingest();
+
+        $failed = (string) ($result['results'][0]['error']['message'] ?? '');
+
+        if ($failed !== '' && str_contains($failed, 'pos_orders_session_tracking_unique')) {
+            return $ingest();
+        }
+
+        return $result;
+    }
+
+    /** The currency's rounding step, for the combo split (spec 04 §11.2.3). */
+    private function roundingStep(PosConfig $config): string
+    {
+        $places = (int) ($this->connection->table('currencies')
+            ->where('id', $config->currency_id)
+            ->value('decimal_places') ?? 2);
+
+        return $places <= 0 ? '1' : '0.'.str_repeat('0', $places - 1).'1';
     }
 
     /** @param array<string, mixed> $detail */

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Support\Pricing\ComboPriceDistributor;
+use App\Support\Pricing\Dto\ComboComponent;
 use App\Support\Pricing\Dto\PricelistContext;
 use App\Support\Pricing\PricelistResolver;
 use App\Support\Tax\Dto\OrderInput;
@@ -124,13 +126,37 @@ foreach ($fixtures as $file => $fixture) {
     });
 }
 
-/**
+/*
  * §13 step 2 — combo price distribution.
  *
- * The TypeScript half asserts `expected.combo` through `ComboPriceDistributor`.
- * There is no PHP counterpart in `app/Support/Pricing` yet, so those fixture
- * expectations are currently unverified on this side. This placeholder keeps
- * the gap visible in the test report instead of silently absent.
+ * This was a `->skip()` placeholder: the TypeScript half asserted `expected.combo` and PHP had no
+ * distributor at all, so the combo half of every fixture went unverified on this side — which is
+ * how the server came to silently reverse a combo discount (BAN-470). The corpus and the
+ * expectations were already here; only the implementation was missing.
  */
-test('combo price distribution has no PHP counterpart yet')
-    ->skip('App\Support\Pricing\ComboPriceDistributor does not exist; combo fixtures are TS-only for now.');
+foreach ($fixtures as $file => $fixture) {
+    if (! isset($fixture['combo']) || ! is_array($fixture['combo'])) {
+        continue;
+    }
+
+    test("{$file}: distributes the combo price", function () use ($fixture, $assertDecimal): void {
+        $components = array_map(
+            static fn (array $component): ComboComponent => ComboComponent::fromArray($component),
+            $fixture['combo']['components'],
+        );
+
+        $prices = (new ComboPriceDistributor)->distribute(
+            (string) $fixture['combo']['parentPrice'],
+            $components,
+            (string) ($fixture['combo']['precision'] ?? '0.01'),
+        );
+
+        $expected = $fixture['expected']['combo'];
+
+        expect($prices)->toHaveCount(count($expected));
+
+        foreach ($expected as $entry) {
+            $assertDecimal($prices[$entry['id']] ?? null, $entry['priceUnit'], "combo[{$entry['id']}].priceUnit");
+        }
+    });
+}
