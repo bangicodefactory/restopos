@@ -429,8 +429,14 @@ it('charges a combo at the meal price, not the base plus every child in full', f
     $orderUuid = $response->json('order.uuid');
     $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
 
-    $parent = OrderLine::query()->where('uuid', $parentUuid)->firstOrFail();
-    $child = OrderLine::query()->where('uuid', $childUuid)->firstOrFail();
+    // Found by structure, not by the cart's uuid: those are an internal language for expressing
+    // "this component belongs to that meal" and are translated to server-minted uuids at ingest.
+    $lines = OrderLine::query()->where('pos_order_id', $order->getKey())->orderBy('id')->get();
+
+    $parent = $lines->firstWhere('combo_parent_line_id', null);
+    $child = $lines->first(fn ($line): bool => $line->combo_parent_line_id !== null);
+
+    expect($parent)->not->toBeNull()->and($child)->not->toBeNull();
 
     // All of the money rides on the children; a parent that also carried a price would charge the
     // meal twice, which is precisely the overcharge.
@@ -486,4 +492,57 @@ it('takes the fiscal position from the preset rather than the config default', f
     $order = Order::query()->where('uuid', $response->json('order.uuid'))->firstOrFail();
 
     expect((int) $order->fiscal_position_id)->toBe($position);
+});
+
+/**
+ * SLF-030 — the quota surcharge, which is the fiddliest part of the split and was untested.
+ *
+ * A choice group has a `qty_free`. Picks beyond it are charged that group's base price on top of
+ * the meal, or a customer taking two drinks from a "pick 1" group pays for one.
+ */
+it('charges for picks beyond a choice group free quota', function (): void {
+    $drinks = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 2,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $drinkItem = DB::table('combo_items')->insertGetId([
+        'combo_id' => $drinks,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $parent = (string) Str::uuid();
+
+    $lines = [
+        ['uuid' => $parent, 'variant_id' => $this->fx->variant->getKey(), 'quantity' => 1],
+    ];
+
+    // Two picks from a group whose quota is one.
+    foreach ([1, 2] as $_) {
+        $lines[] = [
+            'uuid' => (string) Str::uuid(),
+            'variant_id' => $this->fx->drinkVariant->getKey(),
+            'quantity' => 1,
+            'combo_parent_uuid' => $parent,
+            'combo_item_id' => $drinkItem,
+        ];
+    }
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", ['lines' => $lines])->assertCreated();
+    $order = Order::query()->where('uuid', $response->json('order.uuid'))->firstOrFail();
+
+    $children = OrderLine::query()
+        ->where('pos_order_id', $order->getKey())
+        ->whereNotNull('combo_parent_line_id')
+        ->get();
+
+    expect($children)->toHaveCount(2);
+
+    // Meal 10.00 + one beyond-quota drink at its group base price 4.00 = 14.00, spread across the
+    // two components. Without the surcharge the second drink would ride along free.
+    $childTotal = $children->sum(fn ($line): float => (float) $line->price_unit);
+
+    expect(round($childTotal, 2))->toBe(14.0)
+        ->and((float) $order->amount_total)->toBe(16.94); // 14.00 + 21 %
 });

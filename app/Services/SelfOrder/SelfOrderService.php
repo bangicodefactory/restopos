@@ -152,26 +152,40 @@ final readonly class SelfOrderService
         // a combo: it returns each child's own list price, which reverses the meal-deal discount.
         $prices = $this->comboPricer->priceCart($config, $pricelistId, $lines, $this->roundingStep($config));
 
+        // The cart's line uuids never reach the database. `pos_order_lines.uuid` is globally unique,
+        // so honouring a client-chosen one would hand an anonymous caller a primary key: a collision
+        // with any line anywhere fails the whole order on the index, and the value arrives
+        // unvalidated. The cart's uuids are only an *internal* language for saying "this component
+        // belongs to that meal", so they are translated to server-minted ones here and
+        // `combo_parent_uuid` is rewritten through the same map — which is what makes combo children
+        // resolve to their parent at ingest instead of being stored as loose lines (SLF-030).
+        $serverUuid = [];
+
+        foreach ($lines as $line) {
+            $cartUuid = (string) ($line['uuid'] ?? '');
+            if ($cartUuid !== '') {
+                $serverUuid[$cartUuid] = (string) Str::uuid();
+            }
+        }
+
         $lineCommands = [];
 
         foreach ($lines as $line) {
             $variantId = (int) $line['variant_id'];
             $quantity = (string) $line['quantity'];
-            // The cart's own line uuid, not a fresh one. `combo_parent_uuid` points at it, so
-            // minting a new uuid here orphaned every combo child at ingest — the components were
-            // stored as unrelated top-level lines (SLF-030).
-            $lineUuid = (string) ($line['uuid'] ?? Str::uuid());
+            $cartUuid = (string) ($line['uuid'] ?? '');
+            $parentCartUuid = (string) ($line['combo_parent_uuid'] ?? '');
 
             $command = [
                 'op' => 'create',
-                'uuid' => $lineUuid,
+                'uuid' => $serverUuid[$cartUuid] ?? (string) Str::uuid(),
                 'variant_id' => $variantId,
                 'qty' => $quantity,
                 // Server-resolved price. The cart's own number is never used.
-                'price_unit' => $prices[$lineUuid] ?? $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
+                'price_unit' => $prices[$cartUuid] ?? $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
                 'discount' => '0',
                 'customer_note' => $line['customer_note'] ?? null,
-                'combo_parent_uuid' => $line['combo_parent_uuid'] ?? null,
+                'combo_parent_uuid' => $serverUuid[$parentCartUuid] ?? null,
                 'combo_item_id' => $line['combo_item_id'] ?? null,
             ];
 
@@ -193,7 +207,11 @@ final readonly class SelfOrderService
 
         $source = $config->self_ordering_mode->value === 'kiosk' ? OrderSource::Kiosk : OrderSource::Mobile;
 
-        $result = $this->sync->sync($config, null, [
+        // One retry on a lost tracking-number race. Two kiosks can pick the same free number between
+        // the read and the insert; the unique index turns that into a rejection rather than a
+        // duplicate, and re-picking costs one round trip. Refusing the sale over a display number
+        // would be a far worse trade.
+        $result = $this->withTrackingRetry(fn (): array => $this->sync->sync($config, null, [
             'orders' => [[
                 'uuid' => (string) $orderUuid,
                 'op' => 'upsert',
@@ -216,7 +234,7 @@ final readonly class SelfOrderService
                 ], static fn ($v): bool => $v !== null),
                 'lines' => $lineCommands,
             ]],
-        ]);
+        ]));
 
         /** @var array<string, mixed> $first */
         $first = $result['results'][0] ?? [];
@@ -599,7 +617,14 @@ final readonly class SelfOrderService
         $used = [];
 
         foreach ($taken as $number) {
-            $used[ltrim((string) $number, $prefix)] = true;
+            $number = (string) $number;
+            // A prefix strip, not `ltrim`: ltrim takes a *character list*, so it would eat repeated
+            // leading characters and misbehave the day a prefix becomes more than one letter.
+            //
+            // Keyed on the bare number, so kiosk `K001` also reserves mobile `S001`. That is
+            // deliberate — the counter calls "001", and two customers hearing their own number is
+            // the whole failure being fixed.
+            $used[$prefix !== '' && str_starts_with($number, $prefix) ? substr($number, \strlen($prefix)) : $number] = true;
         }
 
         for ($n = 1; $n <= 999; $n++) {
@@ -635,6 +660,30 @@ final readonly class SelfOrderService
         }
 
         return $config->default_fiscal_position_id === null ? null : (int) $config->default_fiscal_position_id;
+    }
+
+    /**
+     * Run the ingest, retrying once if it lost a tracking-number race (SLF-043).
+     *
+     * The number is chosen before the insert, so two concurrent kiosks can choose the same one. The
+     * unique index on `(pos_session_id, tracking_number)` makes that a rejection instead of two
+     * customers answering to "001"; this turns the rejection into a second attempt with a freshly
+     * picked number, which is what the customer would want to happen.
+     *
+     * @param  callable(): array<string, mixed>  $ingest
+     * @return array<string, mixed>
+     */
+    private function withTrackingRetry(callable $ingest): array
+    {
+        $result = $ingest();
+
+        $failed = (string) ($result['results'][0]['error']['message'] ?? '');
+
+        if ($failed !== '' && str_contains($failed, 'pos_orders_session_tracking_unique')) {
+            return $ingest();
+        }
+
+        return $result;
     }
 
     /** The currency's rounding step, for the combo split (spec 04 §11.2.3). */
