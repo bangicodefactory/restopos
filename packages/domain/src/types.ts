@@ -838,6 +838,16 @@ export type OrderRow = {
      * cannot drift out of step with it.
      */
     orderScreen: string | null;
+    /**
+     * The server's `updated_at` for the copy this row was built from, or null for an order this
+     * till created and the server has not acknowledged.
+     *
+     * The ticket screen's cache diff compares the index's `updated_at` against this to decide
+     * whether a body is worth fetching (REG-293). `updatedAtLocal` cannot answer that: it is a
+     * local clock reading, and comparing it to a server timestamp across two tills with a few
+     * seconds of drift would re-fetch everything, or nothing.
+     */
+    serverUpdatedAt: Iso | null;
 };
 
 export type OrderLineRow = {

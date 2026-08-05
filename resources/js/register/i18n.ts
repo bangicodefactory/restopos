@@ -236,7 +236,6 @@ export const registerEn = {
 
     // ── tickets / orders list ────────────────────────────────────────────────
     'reg.tickets.title': 'Orders',
-    'reg.tickets.search': 'Reference, table, customer',
     'reg.tickets.all': 'All',
     'reg.tickets.draft': 'Open',
     'reg.tickets.paid': 'Paid',
@@ -255,6 +254,13 @@ export const registerEn = {
     'reg.tickets.noTips': 'No order awaiting a tip',
     'reg.tickets.detail': 'Detail',
     'reg.tickets.delete': 'Delete',
+    'reg.tickets.search': 'Reference, invoice, customer, card',
+    'reg.tickets.loadMore': 'Load more',
+    'reg.tickets.pageSize': 'Rows per page',
+    'reg.tickets.loading': 'Searching…',
+    'reg.tickets.offline': 'Offline — showing orders held on this till only',
+    'reg.tickets.serverCount': '{n} on the server',
+    'reg.tickets.deleteBlockedPaid': 'Cannot delete: this order has a completed electronic payment',
 
     // ── restaurant ───────────────────────────────────────────────────────────
     'reg.floor.title': 'Floor plan',
@@ -547,7 +553,6 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.receipt.backToOrder': 'Retour à la commande',
 
     'reg.tickets.title': 'Commandes',
-    'reg.tickets.search': 'Référence, table, client',
     'reg.tickets.all': 'Toutes',
     'reg.tickets.draft': 'En cours',
     'reg.tickets.paid': 'Payées',
@@ -566,6 +571,13 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.tickets.noTips': 'Aucune commande en attente de pourboire',
     'reg.tickets.detail': 'Détail',
     'reg.tickets.delete': 'Supprimer',
+    'reg.tickets.search': 'Référence, facture, client, carte',
+    'reg.tickets.loadMore': 'Charger plus',
+    'reg.tickets.pageSize': 'Lignes par page',
+    'reg.tickets.loading': 'Recherche…',
+    'reg.tickets.offline': 'Hors ligne — commandes de cette caisse uniquement',
+    'reg.tickets.serverCount': '{n} sur le serveur',
+    'reg.tickets.deleteBlockedPaid': 'Suppression impossible : paiement électronique abouti',
 
     'reg.floor.title': 'Plan de salle',
     'reg.floor.noFloors': 'Aucune salle configurée.',

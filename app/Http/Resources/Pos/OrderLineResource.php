@@ -47,6 +47,14 @@ final class OrderLineResource extends JsonResource
             'refunded_order_line_id' => $line->refunded_order_line_id,
             'refunded_quantity' => (string) $line->refunded_quantity,
             'skip_preparation' => (bool) $line->skip_preparation,
+            'discount_notice' => $line->discount_notice,
+            'is_edited' => (bool) $line->is_edited,
+            // The chosen variant attributes, which live in a pivot rather than on the row. A
+            // ticket-screen refund copies these onto the refund line, so an order hydrated without
+            // them would refund a "Large, oat milk" coffee at the plain price (REG-293, BAN-465).
+            'attribute_line_value_ids' => $line->relationLoaded('attributeValues')
+                ? $line->attributeValues->pluck('id')->map(static fn (mixed $id): int => (int) $id)->values()->all()
+                : [],
         ];
     }
 }

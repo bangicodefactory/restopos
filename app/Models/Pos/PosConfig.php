@@ -230,6 +230,27 @@ class PosConfig extends Model
         return $this->belongsToMany(self::class, 'pos_config_trusted_config', 'pos_config_id', 'trusted_config_id');
     }
 
+    /**
+     * The configs whose orders this one may read: itself plus its trusted peers.
+     *
+     * A till is not an island. Two registers on the same counter serve one floor, so "look up the
+     * order I took ten minutes ago" fails from the second till if the query is pinned to one config
+     * — which is exactly what the ticket-screen lookup used to do (REG-293).
+     *
+     * `Order::posLoadScope`, `DeltaService::orderDelta` and `OrderSyncService::isWritableBy` each
+     * build this same set inline; they are correct as they stand, so they are left alone here rather
+     * than refactored under a bug fix.
+     *
+     * @return list<int>
+     */
+    public function visibleConfigIds(): array
+    {
+        return [
+            (int) $this->getKey(),
+            ...$this->trustedConfigs()->pluck('pos_configs.id')->map(static fn (mixed $id): int => (int) $id)->all(),
+        ];
+    }
+
     /** @return BelongsToMany<Floor, $this> */
     public function floors(): BelongsToMany
     {
