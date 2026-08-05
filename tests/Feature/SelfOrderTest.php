@@ -8,6 +8,7 @@ use App\Enums\SelfOrderPayAfter;
 use App\Enums\SelfOrderServiceMode;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
+use App\Models\Pos\PosConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -310,24 +311,49 @@ it('refuses a cart naming an order the caller does not own', function (): void {
 });
 
 it('refuses a cart naming an order from another venue even with its token', function (): void {
-    // A token leak must not become a cross-venue write.
-    $other = PosFixtures::make(['self_ordering_mode' => SelfOrderMode::Mobile->value])->withSession();
+    // A leaked token must not become a cross-venue write.
+    //
+    // The second venue is another config in the *same company*, sharing this fixture's catalogue
+    // and taxes. That is deliberate: built from a separate PosFixtures, the foreign order carries a
+    // tax id this config's catalogue does not know, so ingest rejects it for that reason and the
+    // test passes whether or not the config check exists — proving nothing. Here the only thing
+    // that can reject the submission is the guard, and the assertion on its message says so.
+    $sibling = PosConfig::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Terrace',
+        'access_token' => PosConfig::newAccessToken(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'is_restaurant' => true,
+        'limited_product_count' => 100,
+        'limited_customer_count' => 20,
+    ]);
 
-    $foreignUuid = (string) Str::uuid();
-    $this->withHeaders($other->headers())->postJson('/api/pos/sync', [
-        'orders' => [$other->orderCommand($foreignUuid)],
-    ])->assertOk();
+    $foreign = Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $sibling->getKey(),
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'pos_session_id' => $this->fx->session->getKey(),
+        'access_token' => (string) Str::uuid(),
+        'state' => OrderState::Draft->value,
+        'ordered_at' => now(),
+    ]);
 
-    $foreign = Order::query()->where('uuid', $foreignUuid)->firstOrFail();
-
-    $this->postJson("/api/self-order/{$this->token}/orders", [
-        'order_uuid' => $foreignUuid,
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'order_uuid' => (string) $foreign->uuid,
         'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
-    ], ['X-Order-Token' => (string) $foreign->access_token])
-        ->assertStatus(422)
-        ->assertJsonPath('error.code', 'cart_rejected');
+    ], ['X-Order-Token' => (string) $foreign->access_token]);
 
-    expect(OrderLine::query()->where('pos_order_id', $foreign->getKey())->count())->toBe(1);
+    $response->assertStatus(422)->assertJsonPath('error.code', 'cart_rejected');
+
+    // The guard's own message — not an ingest failure that happens to look like a rejection.
+    expect($response->json('error.message'))->toContain('cannot be added to');
+
+    // And the foreign order is untouched: still its venue's, still empty.
+    $foreign->refresh();
+    expect((int) $foreign->pos_config_id)->toBe($sibling->getKey())
+        ->and(OrderLine::query()->where('pos_order_id', $foreign->getKey())->count())->toBe(0);
 });
 
 it('lets the caller add to its own order with the matching token', function (): void {

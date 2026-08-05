@@ -141,7 +141,6 @@ final readonly class SelfOrderService
         $target = $this->targetOrder($context);
         $appending = $target !== null;
         $orderUuid = $target?->uuid ?? $this->resolveCartOrderUuid($context, $clientOrderUuid, $clientOrderToken);
-        $accessToken = $target?->access_token ?? (string) Str::uuid();
 
         $session = $this->sessions->resolveForIngest($config, null, (string) $orderUuid)['session'];
         $pricelistId = $this->pricing->resolvePricelistId($config, null, $presetId, null);
@@ -191,7 +190,10 @@ final readonly class SelfOrderService
                     'session_id' => $session->getKey(),
                     'state' => OrderState::Draft->value,
                     'source' => $source->value,
-                    'access_token' => (string) $accessToken,
+                    // No `access_token` here on purpose: the server mints it at creation and
+                    // ignores any client value (BAN-496), and `updateOrder` never writes it. Sending
+                    // one would read as though the caller still chooses it — the exact confusion
+                    // this fix removes. The real token is read back off the order below.
                     'pricelist_id' => $pricelistId,
                     'preset_id' => $presetId,
                     'table_id' => $this->tableIdFor($context),
@@ -487,7 +489,12 @@ final readonly class SelfOrderService
             && (int) $existing->pos_config_id === (int) $context->config->getKey();
 
         if (! $ownsIt) {
-            // Same message either way: whether that uuid exists is not the caller's business.
+            // The message says nothing about why. The *response* still does: an unknown uuid is
+            // created and returns 201, a known one without its token returns 422, so a caller can
+            // confirm whether a uuid names a live order. That is unavoidable while `order_uuid`
+            // doubles as the retry key, and it is bounded — v4 uuids are not guessable and the
+            // route is behind `throttle:self-order`. It turns an *observed* uuid (a receipt, a KDS
+            // screen) into confirmation, and nothing more: no token, no contents, no write.
             throw new DomainException('That order cannot be added to.');
         }
 
