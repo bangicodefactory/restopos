@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Enums\DeviceType;
 use App\Enums\PrepStageType;
 use App\Enums\SessionState;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
 use App\Models\Catalog\ProductVariant;
@@ -366,5 +367,18 @@ final class PosFixtures
             ]] : $lines,
             'payments' => $payments,
         ];
+    }
+
+    /**
+     * The asset version the Inertia middleware will compare against.
+     *
+     * Inertia answers 409 when the version does not match, telling the client to hard reload.
+     * Computed from the middleware rather than hardcoded, so a test behaves the same on a checkout
+     * with built assets and one without — omitting it passes only while `public/build` does not
+     * exist, which is a trap that fires first in CI.
+     */
+    public static function inertiaVersion(): string
+    {
+        return (string) app(HandleInertiaRequests::class)->version(request());
     }
 }

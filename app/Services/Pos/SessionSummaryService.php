@@ -17,6 +17,17 @@ use Illuminate\Database\ConnectionInterface;
  * silently rewrite a period that has already been exported. Everything is
  * aggregated in SQL — this runs once per session close, on possibly thousands
  * of lines, and pulling them into PHP would be pointless.
+ *
+ * **Computation and persistence are separate** (BOF-160). The `*Rows()` methods aggregate; `freeze`
+ * persists what they return. That split is what makes an X-report possible: a service still in
+ * progress has no frozen rows, so the report runs the same aggregation over its live orders.
+ *
+ * The alternative — a second aggregation written for the X-report — would be two pieces of SQL that
+ * are *supposed* to agree about what a day's takings are. They would diverge the first time one of
+ * them learned about refund signs or deleted lines and the other did not, and the divergence would
+ * surface as a manager's mid-shift figure not matching the Z-report an hour later. Here they cannot
+ * diverge: the acceptance criterion "an X-report figure matches the totals computed at close for the
+ * same orders" holds by construction rather than by test.
  */
 final readonly class SessionSummaryService
 {
@@ -60,9 +71,27 @@ final readonly class SessionSummaryService
      */
     public function expectedPaymentTotals(PosSession $session): array
     {
+        return $this->paymentTotalRows([(int) $session->getKey()]);
+    }
+
+    /**
+     * The same per-method aggregation across any set of sessions (BOF-160).
+     *
+     * Grouped by method but **not** by session: the report wants one row per method for the whole
+     * period, and the closing popup passes a single session, so one grouping serves both.
+     *
+     * @param  list<int>  $sessionIds
+     * @return list<array{payment_method_id: int, name: string, is_cash_count: bool, ledger_code: string|null, expected_amount: string, payment_count: int, refund_amount: string, change_amount: string}>
+     */
+    public function paymentTotalRows(array $sessionIds): array
+    {
+        if ($sessionIds === []) {
+            return [];
+        }
+
         $rows = $this->connection->table('pos_payments')
             ->join('payment_methods', 'payment_methods.id', '=', 'pos_payments.payment_method_id')
-            ->where('pos_payments.pos_session_id', $session->getKey())
+            ->whereIn('pos_payments.pos_session_id', $sessionIds)
             ->whereNull('pos_payments.deleted_at')
             ->groupBy('pos_payments.payment_method_id', 'payment_methods.name', 'payment_methods.is_cash_count', 'payment_methods.ledger_code')
             ->selectRaw('pos_payments.payment_method_id as payment_method_id')
@@ -132,10 +161,21 @@ final readonly class SessionSummaryService
         return $rows;
     }
 
-    /** @return list<array<string, mixed>> */
-    private function writeSalesSummaries(PosSession $session): array
+    /**
+     * Sales aggregation over live order rows, for any set of sessions (BOF-160).
+     *
+     * The same rows `session_sales_summaries` is frozen from, which is the point: a still-open
+     * session has no frozen rows, so the report runs this instead and gets a figure that will not
+     * move when the session closes.
+     *
+     * @param  list<int>  $sessionIds
+     * @return list<array<string, mixed>>
+     */
+    public function salesSummaryRows(array $sessionIds): array
     {
-        $this->connection->table('session_sales_summaries')->where('pos_session_id', $session->getKey())->delete();
+        if ($sessionIds === []) {
+            return [];
+        }
 
         // The revenue account comes from the product's *accounting* category, not the POS browsing
         // tree: a product sits in several POS categories and only the first is frozen on the line,
@@ -144,17 +184,19 @@ final readonly class SessionSummaryService
             ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
             ->leftJoin('products', 'products.id', '=', 'pos_order_lines.product_id')
             ->leftJoin('product_categories', 'product_categories.id', '=', 'products.product_category_id')
-            ->where('pos_orders.pos_session_id', $session->getKey())
+            ->whereIn('pos_orders.pos_session_id', $sessionIds)
             ->whereIn('pos_orders.state', [OrderState::Paid->value, OrderState::Done->value])
             ->whereNull('pos_orders.deleted_at')
             ->whereNull('pos_order_lines.deleted_at')
             ->groupBy(
+                'pos_orders.pos_session_id',
                 'pos_order_lines.pos_category_id',
                 'pos_order_lines.product_id',
                 'pos_order_lines.tax_signature',
                 'pos_orders.is_refund',
                 'product_categories.ledger_code',
             )
+            ->selectRaw('pos_orders.pos_session_id as pos_session_id')
             ->selectRaw('pos_order_lines.pos_category_id as pos_category_id')
             ->selectRaw('pos_order_lines.product_id as product_id')
             ->selectRaw('pos_order_lines.tax_signature as tax_signature')
@@ -168,12 +210,11 @@ final readonly class SessionSummaryService
             ->selectRaw('sum(pos_order_lines.total_cost) as cost_amount')
             ->get();
 
-        $now = now();
         $out = [];
 
         foreach ($rows as $row) {
-            $record = [
-                'pos_session_id' => $session->getKey(),
+            $out[] = [
+                'pos_session_id' => (int) $row->pos_session_id,
                 'pos_category_id' => $row->pos_category_id === null ? null : (int) $row->pos_category_id,
                 'product_id' => $row->product_id === null ? null : (int) $row->product_id,
                 'tax_signature' => (string) $row->tax_signature,
@@ -185,9 +226,22 @@ final readonly class SessionSummaryService
                 'total_amount' => $this->scale((string) ($row->total_amount ?? '0')),
                 'cost_amount' => $this->scale((string) ($row->cost_amount ?? '0')),
                 'ledger_code' => $row->ledger_code === null ? null : (string) $row->ledger_code,
-                'created_at' => $now,
-                'updated_at' => $now,
             ];
+        }
+
+        return $out;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function writeSalesSummaries(PosSession $session): array
+    {
+        $this->connection->table('session_sales_summaries')->where('pos_session_id', $session->getKey())->delete();
+
+        $now = now();
+        $out = [];
+
+        foreach ($this->salesSummaryRows([(int) $session->getKey()]) as $row) {
+            $record = [...$row, 'created_at' => $now, 'updated_at' => $now];
 
             $this->connection->table('session_sales_summaries')->insert($record);
             $out[] = $record;
@@ -203,26 +257,38 @@ final readonly class SessionSummaryService
      *
      * @return list<array<string, mixed>>
      */
-    private function writeTaxSummaries(PosSession $session): array
+    /**
+     * Tax aggregation over live order rows, for any set of sessions (BOF-160).
+     *
+     * Read out of each line's frozen `tax_details` JSON, not out of a re-run of the engine: the
+     * numbers on the receipt and the numbers in the ledger must be the same numbers.
+     *
+     * @param  list<int>  $sessionIds
+     * @return list<array<string, mixed>>
+     */
+    public function taxSummaryRows(array $sessionIds): array
     {
-        $this->connection->table('session_tax_summaries')->where('pos_session_id', $session->getKey())->delete();
+        if ($sessionIds === []) {
+            return [];
+        }
 
         $lines = $this->connection->table('pos_order_lines')
             ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
-            ->where('pos_orders.pos_session_id', $session->getKey())
+            ->whereIn('pos_orders.pos_session_id', $sessionIds)
             ->whereIn('pos_orders.state', [OrderState::Paid->value, OrderState::Done->value])
             ->whereNull('pos_orders.deleted_at')
             ->whereNull('pos_order_lines.deleted_at')
-            ->select(['pos_order_lines.tax_details', 'pos_orders.is_refund'])
+            ->select(['pos_orders.pos_session_id', 'pos_order_lines.tax_details', 'pos_orders.is_refund'])
             ->get();
 
-        /** @var array<string, array{tax_id: int, is_refund: bool, base: string, amount: string}> $buckets */
+        /** @var array<string, array{pos_session_id: int, tax_id: int, is_refund: bool, base: string, amount: string}> $buckets */
         $buckets = [];
 
         foreach ($lines as $line) {
             /** @var list<array{taxId?: int, tax_id?: int, base?: string, amount?: string}> $details */
             $details = json_decode((string) ($line->tax_details ?? '[]'), true) ?: [];
             $isRefund = (bool) $line->is_refund;
+            $sessionId = (int) $line->pos_session_id;
 
             foreach ($details as $detail) {
                 $taxId = (int) ($detail['taxId'] ?? $detail['tax_id'] ?? 0);
@@ -231,8 +297,14 @@ final readonly class SessionSummaryService
                     continue;
                 }
 
-                $key = $taxId.':'.($isRefund ? '1' : '0');
-                $buckets[$key] ??= ['tax_id' => $taxId, 'is_refund' => $isRefund, 'base' => '0', 'amount' => '0'];
+                $key = $sessionId.':'.$taxId.':'.($isRefund ? '1' : '0');
+                $buckets[$key] ??= [
+                    'pos_session_id' => $sessionId,
+                    'tax_id' => $taxId,
+                    'is_refund' => $isRefund,
+                    'base' => '0',
+                    'amount' => '0',
+                ];
                 $buckets[$key]['base'] = bcadd($buckets[$key]['base'], (string) ($detail['base'] ?? '0'), 4);
                 $buckets[$key]['amount'] = bcadd($buckets[$key]['amount'], (string) ($detail['amount'] ?? '0'), 4);
             }
@@ -243,11 +315,10 @@ final readonly class SessionSummaryService
         }
 
         $taxMeta = $this->connection->table('taxes')
-            ->whereIn('id', array_column($buckets, 'tax_id'))
+            ->whereIn('id', array_values(array_unique(array_column($buckets, 'tax_id'))))
             ->get()
             ->keyBy('id');
 
-        $now = now();
         $out = [];
 
         foreach ($buckets as $bucket) {
@@ -257,17 +328,30 @@ final readonly class SessionSummaryService
                 continue;
             }
 
-            $record = [
-                'pos_session_id' => $session->getKey(),
+            $out[] = [
+                'pos_session_id' => $bucket['pos_session_id'],
                 'tax_id' => $bucket['tax_id'],
                 'tax_group_id' => (int) $meta->tax_group_id,
                 'is_refund' => $bucket['is_refund'],
                 'base_amount' => $bucket['base'],
                 'tax_amount' => $bucket['amount'],
                 'tax_rate' => (string) $meta->amount,
-                'created_at' => $now,
-                'updated_at' => $now,
             ];
+        }
+
+        return $out;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function writeTaxSummaries(PosSession $session): array
+    {
+        $this->connection->table('session_tax_summaries')->where('pos_session_id', $session->getKey())->delete();
+
+        $now = now();
+        $out = [];
+
+        foreach ($this->taxSummaryRows([(int) $session->getKey()]) as $row) {
+            $record = [...$row, 'created_at' => $now, 'updated_at' => $now];
 
             $this->connection->table('session_tax_summaries')->insert($record);
             $out[] = $record;

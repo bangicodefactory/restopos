@@ -31,3 +31,8 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# E2E: the back-office session captured by tests/e2e/backoffice.setup.ts
+/storage/e2e
+/storage/logs/playwright
+/storage/logs/playwright-report

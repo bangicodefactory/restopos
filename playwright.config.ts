@@ -34,6 +34,13 @@ export default defineConfig({
     },
 
     projects: [
+        // One back-office login for the whole run: `/login` is rate limited, and a spec that cannot
+        // mint a pairing code skips itself, so per-spec logins make the suite quietly shrink.
+        {
+            name: 'setup',
+            testMatch: /.*\.setup\.ts$/,
+            use: { ...devices['Desktop Chrome'] },
+        },
         {
             name: 'register',
             use: {
@@ -41,8 +48,11 @@ export default defineConfig({
                 viewport: { width: 1280, height: 800 },
                 hasTouch: true,
                 isMobile: false,
+                // The admin session, so each spec can mint its own pairing code without logging in.
+                storageState: './storage/e2e/admin-state.json',
             },
             testMatch: /register\/.*\.spec\.ts$/,
+            dependencies: ['setup'],
         },
         {
             name: 'kitchen',

@@ -156,6 +156,10 @@ function inertiaProps(TestCase $test, string $url, string $component, string $on
 {
     $response = $test->withHeaders([
         'X-Inertia' => 'true',
+        // Inertia answers 409 when the asset version does not match, telling the client to hard
+        // reload. Sending the current one keeps these tests working whether or not the frontend
+        // has been built — without it they pass only on a checkout with no manifest.
+        'X-Inertia-Version' => PosFixtures::inertiaVersion(),
         'X-Inertia-Partial-Component' => $component,
         'X-Inertia-Partial-Data' => $only,
     ])->get($url);
