@@ -1,5 +1,8 @@
 import { createPosStore } from '@shared/store';
 
+import { recordOrderScreen } from '../domain/order-actions';
+import { useOrderStore } from './order-store';
+
 /**
  * Transient UI state — one store per concern (spec 03 §3.4.2).
  *
@@ -32,7 +35,9 @@ export type DialogKind =
     | 'approval'
     | 'closeSession'
     | 'refund'
-    | 'transfer';
+    | 'transfer'
+    /** "Send these to the kitchen first?" — asked on Pay when the delta is non-empty (RST-143). */
+    | 'sendBeforePay';
 
 export type DialogState = { kind: DialogKind; payload?: Record<string, unknown> } | null;
 
@@ -83,11 +88,21 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
     receiptOrderUuid: null,
     lastScanAt: 0,
 
-    setScreen: (screen) =>
+    setScreen: (screen) => {
         set((state) => {
             state.screen = screen;
             state.buffer = '';
-        }),
+        });
+
+        // REG-125 — remember where this order was, so re-selecting it (or reloading mid-payment)
+        // comes back here. Only the screens an order can meaningfully be *on*: 'floor' and
+        // 'tickets' are register-wide views, not a place an order sits.
+        const orderUuid = useOrderStore.getState().selectedOrderUuid;
+
+        if (orderUuid !== null && (screen === 'products' || screen === 'payment' || screen === 'receipt')) {
+            recordOrderScreen(orderUuid, screen);
+        }
+    },
 
     setPane: (pane) =>
         set((state) => {

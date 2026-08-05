@@ -85,6 +85,8 @@ export function OrderPanel({
 
     const unsent = order ? currentDelta(order.uuid).nbrOfChanges : 0;
 
+    const payNeedsPrompt = needsKitchenPromptBeforePay({ restaurant, unsent });
+
     return (
         <section className={cn('flex min-h-0 flex-col bg-white', className)} aria-label={t('reg.nav.order')}>
             <header className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
@@ -267,7 +269,7 @@ export function OrderPanel({
                         size="xl"
                         variant="success"
                         disabled={lines.length === 0}
-                        onClick={onPay}
+                        onClick={() => (payNeedsPrompt ? openDialog('sendBeforePay', {}) : onPay())}
                         className={restaurant ? '' : 'col-span-2'}
                     >
                         {t('reg.order.pay')} · {money(totals.roundedTotal)}
@@ -374,4 +376,27 @@ function LineRow({
             </div>
         </li>
     );
+}
+
+/**
+ * RST-143 — should Pay ask before skipping the kitchen?
+ *
+ * Paying went straight to the payment screen, so a table could settle for food the kitchen was
+ * never told about: the delta stays unsent, the order is marked paid, and nothing is cooked. The
+ * count was already on screen next to Send; it just never gated anything.
+ *
+ * Only in restaurant mode — a counter sale has no kitchen step to skip.
+ *
+ * Exported as a plain predicate so it is testable without rendering: the repo has no
+ * component-testing library, and the house pattern (`quickAmountsFor`, `settlesOrder`,
+ * `aggregateState`) is to keep the decision out of the JSX and unit-test it directly.
+ */
+export function needsKitchenPromptBeforePay({
+    restaurant,
+    unsent,
+}: {
+    restaurant: boolean;
+    unsent: number;
+}): boolean {
+    return restaurant && unsent > 0;
 }

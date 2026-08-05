@@ -299,7 +299,12 @@ export function App(): JSX.Element {
                 ) : null}
             </main>
 
-            <DialogHost />
+            <DialogHost
+                onSend={() => void onSend()}
+                onPay={() => {
+                    if (selectedOrderUuid !== null) setScreen('payment');
+                }}
+            />
         </div>
     );
 }

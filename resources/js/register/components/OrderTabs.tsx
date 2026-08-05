@@ -24,7 +24,6 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
     const orders = useOrderStore((state) => state.orders);
     const selected = useOrderStore((state) => state.selectedOrderUuid);
     const selectOrder = useOrderStore((state) => state.selectOrder);
-    const orderScreen = useOrderStore((state) => state.orderScreen);
     const setScreen = useUiStore((state) => state.setScreen);
     const openDialog = useUiStore((state) => state.openDialog);
     const isRestaurant = useCatalog().config?.is_restaurant === true;
@@ -49,7 +48,7 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
                         onDoubleClick={() => openDialog('orderName', { orderUuid: order.uuid })}
                         onClick={() => {
                             selectOrder(order.uuid);
-                            const screen = orderScreen[order.uuid];
+                            const screen = order.orderScreen;
                             if (screen === 'payment' || screen === 'receipt' || screen === 'products') {
                                 setScreen(screen);
                             }

@@ -832,6 +832,12 @@ export type OrderRow = {
     /** Bumped on every mutation. The memo key for every derived value (spec 03 §3.4.4). */
     rev: number;
     baseline: OrderBaseline | null;
+    /**
+     * The screen this order was last on, restored when it is re-selected or after a reload
+     * (REG-125). Lives on the row rather than in a parallel map so it persists with the order and
+     * cannot drift out of step with it.
+     */
+    orderScreen: string | null;
 };
 
 export type OrderLineRow = {

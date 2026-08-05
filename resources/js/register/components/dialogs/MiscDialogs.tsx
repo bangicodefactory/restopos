@@ -246,3 +246,64 @@ function Info({ label, value }: { label: string; value: string }): JSX.Element {
         </div>
     );
 }
+
+/**
+ * RST-143 — "these items have not gone to the kitchen; send them first?"
+ *
+ * Odoo asks the same question, and for the same reason: paying is the last moment anyone looks at
+ * the order, so an unsent delta at this point is food that will never be cooked. The cashier gets
+ * three honest choices — send then pay, pay anyway (a paid-for takeaway the kitchen already has on
+ * paper), or go back.
+ *
+ * The prompt is a *question*, not a block: refusing to let a table pay because of a routing detail
+ * is worse than the mistake it prevents.
+ */
+export function SendBeforePayDialog({
+    onSend,
+    onPay,
+}: {
+    onSend: () => void;
+    onPay: () => void;
+}): JSX.Element | null {
+    const t = useT();
+    const dialog = useUiStore((state) => state.dialog);
+    const close = useUiStore((state) => state.closeDialog);
+    const orderUuid = useSelectedOrderUuid();
+
+    if (dialog?.kind !== 'sendBeforePay' || orderUuid === null) return null;
+
+    return (
+        <Dialog
+            open
+            onClose={close}
+            title={t('reg.order.sendBeforePayTitle')}
+            footer={
+                <>
+                    <Button variant="ghost" onClick={close}>
+                        {t('common.back')}
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        onClick={() => {
+                            close();
+                            onPay();
+                        }}
+                    >
+                        {t('reg.order.payAnyway')}
+                    </Button>
+                    <Button
+                        onClick={() => {
+                            close();
+                            onSend();
+                            onPay();
+                        }}
+                    >
+                        {t('reg.order.sendThenPay')}
+                    </Button>
+                </>
+            }
+        >
+            <p className="text-slate-700">{t('reg.order.sendBeforePayBody')}</p>
+        </Dialog>
+    );
+}

@@ -154,6 +154,11 @@ export const registerEn = {
     'reg.order.split': 'Split',
     'reg.order.transfer': 'Transfer',
     'reg.order.sendToKitchen': 'Send',
+    'reg.order.sendBeforePayTitle': 'Send to the kitchen first?',
+    'reg.order.sendBeforePayBody':
+        'This order has items the kitchen has not been told about. Paying now settles the order without them being cooked.',
+    'reg.order.sendThenPay': 'Send, then pay',
+    'reg.order.payAnyway': 'Pay anyway',
     'reg.order.unsentChanges': '{count} change(s) not sent',
     'reg.order.sentOk': 'Sent to the kitchen',
     'reg.order.sentOutdated': 'Order updated on another till — nothing was printed.',
@@ -464,6 +469,11 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.order.split': 'Diviser',
     'reg.order.transfer': 'Transférer',
     'reg.order.sendToKitchen': 'Envoyer',
+    'reg.order.sendBeforePayTitle': 'Envoyer en cuisine d’abord ?',
+    'reg.order.sendBeforePayBody':
+        'Cette commande contient des articles que la cuisine n’a pas reçus. Encaisser maintenant clôt la commande sans qu’ils soient préparés.',
+    'reg.order.sendThenPay': 'Envoyer puis encaisser',
+    'reg.order.payAnyway': 'Encaisser quand même',
     'reg.order.unsentChanges': '{count} modification(s) non envoyée(s)',
     'reg.order.sentOk': 'Envoyé en cuisine',
     'reg.order.sentOutdated': 'Commande modifiée sur une autre caisse — rien n’a été imprimé.',
