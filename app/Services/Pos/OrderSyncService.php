@@ -329,9 +329,18 @@ final readonly class OrderSyncService
     {
         $orderUuid = (string) ($payload['order_uuid'] ?? '');
 
+        // Same visibility rule as the order path (BAN-492), not a narrower one. Scoping this to
+        // `pos_config_id` alone meant a waiter who picked up a trusted peer's order on this till
+        // could add to it but not fire it to the kitchen — the two paths disagreeing about whose
+        // order this is. A non-writable order reports as unknown rather than as forbidden: whose
+        // it really is stays none of the caller's business.
         $order = $orderUuid === ''
             ? null
-            : Order::query()->where('pos_config_id', $config->getKey())->where('uuid', $orderUuid)->first();
+            : Order::query()->where('uuid', $orderUuid)->first();
+
+        if ($order !== null && ! $this->isWritableBy($config, $order)) {
+            $order = null;
+        }
 
         if ($order === null) {
             // Orders are ingested before this command runs, so one in the same batch is already
@@ -401,6 +410,25 @@ final readonly class OrderSyncService
         //     is what actually makes this idempotent.
         /** @var Order|null $order */
         $order = Order::query()->where('uuid', $uuid)->lockForUpdate()->first();
+
+        // …and check the caller may write to what it found (BAN-492, spec §0.5). Without this, any
+        // paired device could mutate any draft order in the database — in any venue, any tenant —
+        // by pushing a uuid it had merely observed: add lines, attach payments, move the table,
+        // cancel it. The read paths already scope; this one did not.
+        //
+        // Looked up globally and *then* authorised, rather than scoping the query: a scoped lookup
+        // returns null for someone else's order, which falls through to the create branch and dies
+        // on the unique index — an `ingest_failed` that says nothing. The caller gets a defined
+        // answer instead, and the attempt is recorded.
+        if ($order !== null && ! $this->isWritableBy($config, $order)) {
+            $this->recordConflict($config, $device, SyncConflictType::UuidCollision, SyncResolution::Rejected, $uuid, [
+                'order_config' => (int) $order->pos_config_id,
+                'device_config' => (int) $config->getKey(),
+            ]);
+
+            return $this->rejected($uuid, 'order_not_writable', 'That order belongs to another register.');
+        }
+
         $isNew = $order === null;
         $previousState = $order === null ? null : $this->stateValue($order->state);
 
@@ -748,7 +776,7 @@ final readonly class OrderSyncService
             'unit_cost' => (string) $variant['standard_price'],
             'customer_note' => $command['customer_note'] ?? null,
             'internal_note' => $this->normaliseNote($command['note'] ?? $command['internal_note'] ?? null),
-            'combo_parent_line_id' => $this->lineIdFor($command['combo_parent_uuid'] ?? null, $existing),
+            'combo_parent_line_id' => $this->lineIdFor($command['combo_parent_uuid'] ?? null, $existing, $order),
             'combo_id' => $command['combo_id'] ?? null,
             'combo_item_id' => $command['combo_item_id'] ?? null,
             'restaurant_course_id' => $this->courseIdFor($order, $command['course_uuid'] ?? null),
@@ -931,6 +959,14 @@ final readonly class OrderSyncService
                 continue;
             }
 
+            // A course uuid that already belongs to another order is never this order's to write
+            // (BAN-492) — see belongsToAnotherOrder.
+            if (! isset($existing[$uuid]) && $this->belongsToAnotherOrder('restaurant_order_courses', $uuid, $order)) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'course_not_writable'];
+
+                continue;
+            }
+
             $op = (string) ($command['op'] ?? 'create');
 
             if ($op === 'delete') {
@@ -987,6 +1023,15 @@ final readonly class OrderSyncService
             $uuid = (string) ($command['uuid'] ?? '');
 
             if ($uuid === '') {
+                continue;
+            }
+
+            // A payment uuid that already belongs to another order is never this order's to write
+            // (BAN-492). This is the money one: without it, the row is re-parented here and its
+            // amount overwritten, leaving a settled order elsewhere unpaid.
+            if (! isset($existing[$uuid]) && $this->belongsToAnotherOrder('pos_payments', $uuid, $order)) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'payment_not_writable'];
+
                 continue;
             }
 
@@ -1488,6 +1533,57 @@ final readonly class OrderSyncService
     }
 
     /** @return array<string, mixed> */
+    /**
+     * Does this child uuid already belong to a *different* order? (BAN-492)
+     *
+     * `applyPaymentCommands` and `applyCourseCommands` both write through
+     * `updateOrCreate(['uuid' => $uuid], ['pos_order_id' => $order->id, …])`, which matches on the
+     * uuid **globally**. A command naming a payment or course uuid from someone else's order
+     * therefore re-parented that row onto this one — and, for a payment, overwrote its amount and
+     * method on the way. The victim's order kept a stale `amount_paid` until its next recompute,
+     * at which point a settled order reads as unpaid. Across tenants, on a legitimately-owned
+     * order, so the order-level guard above never sees it.
+     *
+     * Checked and rejected rather than scoped into the match: `uuid` is unique on both tables, so a
+     * scoped `updateOrCreate` would fall through to an insert and die on the index — one bad child
+     * command failing the whole order with an opaque `ingest_failed`.
+     */
+    private function belongsToAnotherOrder(string $table, string $uuid, Order $order): bool
+    {
+        $ownerId = $this->connection->table($table)->where('uuid', $uuid)->value('pos_order_id');
+
+        return $ownerId !== null && (int) $ownerId !== (int) $order->getKey();
+    }
+
+    /**
+     * May this config write to this order? (BAN-492)
+     *
+     * The set is the config's **own** orders plus those of its trusted peers — not the config
+     * alone. Trusted configs exist precisely to "share open orders" (`PosConfig::trustedConfigs`),
+     * and both the bootstrap (`Order::posLoadScope`) and the delta ship a peer's drafts to this
+     * register, so a till holding one will sync its changes back. Scoping to `pos_config_id` alone
+     * would have looked like the obvious one-line fix and broken multi-till service.
+     *
+     * `company_id` is checked too. A trusted pairing across tenants would be a configuration
+     * mistake rather than an intention, and this is the boundary that must not depend on someone
+     * having configured the pivot correctly.
+     */
+    private function isWritableBy(PosConfig $config, Order $order): bool
+    {
+        if ((int) $order->company_id !== (int) $config->company_id) {
+            return false;
+        }
+
+        if ((int) $order->pos_config_id === (int) $config->getKey()) {
+            return true;
+        }
+
+        // Property access, not `->trustedConfigs()`: Eloquent caches the loaded relation on the
+        // model, so a batch of N orders costs one query rather than N.
+        return $config->trustedConfigs
+            ->contains(static fn (PosConfig $peer): bool => (int) $peer->getKey() === (int) $order->pos_config_id);
+    }
+
     private function rejected(string $uuid, string $code, string $message): array
     {
         return [
@@ -1556,23 +1652,39 @@ final readonly class OrderSyncService
         ];
     }
 
-    /** @param array<string, int> $existing */
-    private function lineIdFor(mixed $uuid, array $existing): ?int
+    /**
+     * Resolve a sibling line's id — the combo parent of the line being written.
+     *
+     * Scoped to the order under edit (BAN-492). The fallback lookup used to search every line in
+     * the database, so a crafted `combo_parent_uuid` could point a line at a parent on someone
+     * else's order. Narrower than the order hole — it writes one FK on a line the caller does own —
+     * but the same reach-across, in the same file.
+     *
+     * The fallback is still needed: `$existing` starts as the lines already on the order and grows
+     * as this batch creates more, but a parent created in an *earlier* request is in neither, and
+     * `createLine` receives `$existing` by reference precisely so within-batch parents resolve.
+     *
+     * @param  array<string, int>  $existing
+     */
+    private function lineIdFor(mixed $uuid, array $existing, ?Order $order = null): ?int
     {
         if (! is_string($uuid) || $uuid === '') {
             return null;
         }
 
-        return $existing[$uuid] ?? $this->lineIdByUuid($uuid);
+        return $existing[$uuid] ?? $this->lineIdByUuid($uuid, $order);
     }
 
-    private function lineIdByUuid(mixed $uuid): ?int
+    private function lineIdByUuid(mixed $uuid, ?Order $order = null): ?int
     {
-        if (! is_string($uuid) || $uuid === '') {
+        if (! is_string($uuid) || $uuid === '' || $order === null) {
             return null;
         }
 
-        $id = OrderLine::query()->where('uuid', $uuid)->value('id');
+        $id = OrderLine::query()
+            ->where('uuid', $uuid)
+            ->where('pos_order_id', $order->getKey())
+            ->value('id');
 
         return $id === null ? null : (int) $id;
     }
