@@ -9,8 +9,10 @@ use App\Models\Pos\PosConfig;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
 
@@ -119,6 +121,198 @@ it('refuses to root a category under another company parent', function (): void 
 
     $this->actingAs(User::factory()->create(['is_super_admin' => true]));
     expect(PosCategory::query()->where('name', 'Stolen')->exists())->toBeFalse();
+});
+
+/**
+ * The query builder is a second query surface that no Eloquent scope can reach, and the back office
+ * uses it for exactly the figures that matter — the dashboard totals and the sales reports. These
+ * were still cross-tenant after the global scope landed: with one paid order belonging to beta, an
+ * alpha user's dashboard read `revenue: 999`.
+ */
+function betaOrder(object $beta, string $amount = '999.0000'): void
+{
+    DB::table('pos_orders')->insert([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $beta->company->getKey(),
+        'pos_config_id' => $beta->config->getKey(),
+        'pos_session_id' => $beta->session->getKey(),
+        'name' => 'B/0001',
+        'access_token' => (string) Str::uuid(),
+        'currency_id' => $beta->config->currency_id,
+        'tracking_number' => 1,
+        'state' => 'paid',
+        'ordered_at' => now(),
+        'amount_total' => $amount,
+        'amount_paid' => $amount,
+        'amount_tax' => '0.0000',
+        'amount_untaxed' => $amount,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+}
+
+/** @return array<string, mixed> */
+function inertiaProps(TestCase $test, string $url, string $component, string $only): array
+{
+    $response = $test->withHeaders([
+        'X-Inertia' => 'true',
+        'X-Inertia-Partial-Component' => $component,
+        'X-Inertia-Partial-Data' => $only,
+    ])->get($url);
+
+    return (array) (json_decode((string) $response->getContent(), true)['props'] ?? []);
+}
+
+it('keeps another company trade out of the dashboard totals', function (): void {
+    betaOrder($this->beta);
+
+    $this->actingAs($this->alphaUser);
+    $props = inertiaProps($this, '/', 'Dashboard/Index', 'today,rescueSessions');
+
+    expect($props['today']['revenue'])->toBe('0')
+        ->and($props['today']['order_count'])->toBe(0)
+        ->and($props['today']['open_sessions'])->toBe(1);
+
+    // The order is real and does count — for the company that took it.
+    $this->actingAs(User::factory()->create(['company_id' => $this->beta->company->getKey()]));
+    $betaProps = inertiaProps($this, '/', 'Dashboard/Index', 'today');
+
+    expect($betaProps['today']['revenue'])->toBe('999')
+        ->and($betaProps['today']['order_count'])->toBe(1);
+});
+
+it('keeps another company sales out of the sales report', function (): void {
+    // `session_sales_summaries` carries no `company_id` of its own — it hangs off a session — so
+    // the only thing isolating this report is the session id list it is keyed by. Driving the real
+    // endpoint is what proves the controller asks for that scoping, rather than proving the helper
+    // works when called directly.
+    DB::table('session_sales_summaries')->insert([
+        'pos_session_id' => $this->beta->session->getKey(),
+        'pos_category_id' => null,
+        'product_id' => null,
+        'tax_signature' => '',
+        'is_refund' => false,
+        'quantity' => '1.0000',
+        'base_amount' => '999.0000',
+        'discount_amount' => '0.0000',
+        'tax_amount' => '0.0000',
+        'total_amount' => '999.0000',
+        'cost_amount' => '0.0000',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $url = '/reports/sales-details?from=2000-01-01&to=2100-01-01';
+
+    $this->actingAs($this->alphaUser);
+    expect(inertiaProps($this, $url, 'Reports/SalesDetails', 'byProduct')['byProduct'])->toBe([]);
+
+    // …and beta does see its own trade, so the emptiness above is isolation, not a broken query.
+    $this->actingAs(User::factory()->create(['company_id' => $this->beta->company->getKey()]));
+    expect(inertiaProps($this, $url, 'Reports/SalesDetails', 'byProduct')['byProduct'])->toHaveCount(1);
+});
+
+it('404s on another company config id in a report filter', function (): void {
+    $this->actingAs($this->alphaUser);
+
+    // `nullable|integer` is not a tenancy check — this used to return the named competitor's trade.
+    $this->get('/reports/sales-details?config_id='.$this->beta->config->getKey())->assertNotFound();
+    $this->get('/reports/order-analytics?config_id='.$this->beta->config->getKey())->assertNotFound();
+    $this->get('/reports/sales-details?config_id='.$this->alpha->config->getKey())->assertOk();
+});
+
+it('404s on another company session id in the Z-report', function (): void {
+    $this->actingAs($this->alphaUser);
+
+    $this->get('/reports/session?session_id='.$this->beta->session->getKey())->assertNotFound();
+    $this->get('/reports/session?session_id='.$this->alpha->session->getKey())->assertOk();
+});
+
+it('keeps another company print jobs out of the queue', function (): void {
+    DB::table('preparation_print_jobs')->insert([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->beta->company->getKey(),
+        'pos_config_id' => $this->beta->config->getKey(),
+        'job_type' => 'test',
+        'payload' => '{}',
+        'copies' => 1,
+        'state' => 'queued',
+        'queued_at' => now(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $this->actingAs($this->alphaUser);
+
+    expect(inertiaProps($this, '/printers', 'Printers/Index', 'queue')['queue'])->toBe([]);
+});
+
+/**
+ * The second guard, for the surface the first one cannot see.
+ *
+ * `CompanyScope` isolates models. Nothing isolates `$connection->table(...)`, and the review of this
+ * change found four leaks there after the model scope was already in place — including the dashboard
+ * revenue figure. So every raw query against a company-owned table has to say how it is scoped.
+ *
+ * Granularity is per method, not per statement: a method is satisfied if it scopes a query or stamps
+ * a `company_id` anywhere in its body. That will not catch a method that scopes one query and
+ * forgets a second one beside it. It is a tripwire for the common case — someone adds a raw
+ * aggregate to a controller — not a proof.
+ */
+it('scopes every raw back-office query against a company-owned table', function (): void {
+    /**
+     * Methods that reach a company-owned table without scoping it themselves, because they have
+     * already resolved a scoped parent and every query below keys off its id. Scoping again would
+     * be harmless but misleading — it would imply the id could have come from anywhere.
+     */
+    $keyedOffAScopedParent = [
+        // `$session` is `PosSession::findOrFail`, which 404s outside the acting company.
+        'ReportController::sessionReport',
+        // `$session` is route-model bound, and binding resolves through the global scope.
+        'SessionController::show',
+    ];
+
+    $companyOwned = collect(['pos_orders', 'pos_sessions', 'preparation_print_jobs', 'cash_movements'])
+        ->filter(static fn (string $t): bool => Schema::hasColumn($t, 'company_id'))
+        ->all();
+
+    expect($companyOwned)->not->toBeEmpty('the table list is stale — none of these carry company_id');
+
+    $unscoped = [];
+
+    foreach (File::allFiles(app_path('Http/Controllers/Backoffice')) as $file) {
+        $controller = $file->getFilenameWithoutExtension();
+        $source = (string) file_get_contents($file->getRealPath());
+
+        // Split on method declarations; `[0]` is the file preamble and holds no method body.
+        $chunks = preg_split('/\n    (?:public|private|protected)[^\n]*function (\w+)/', $source, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        for ($i = 1; $i < count($chunks); $i += 2) {
+            $method = $chunks[$i];
+            $body = $chunks[$i + 1] ?? '';
+
+            $touches = collect($companyOwned)
+                ->filter(static fn (string $t): bool => str_contains($body, "table('".$t."')"))
+                ->all();
+
+            if ($touches === []) {
+                continue;
+            }
+
+            $scoped = str_contains($body, 'ActingCompany::scope') || str_contains($body, "'company_id' =>");
+
+            if (! $scoped && ! in_array($controller.'::'.$method, $keyedOffAScopedParent, true)) {
+                $unscoped[] = $controller.'::'.$method.' ('.implode(', ', $touches).')';
+            }
+        }
+    }
+
+    expect($unscoped)->toBe(
+        [],
+        "These back-office methods query a company-owned table through the query builder, where the\n"
+            ."global scope cannot reach them, without scoping it or stamping a company_id:\n  "
+            .implode("\n  ", $unscoped),
+    );
 });
 
 /**

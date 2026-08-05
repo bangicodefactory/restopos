@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Models\Scopes;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
-use Illuminate\Support\Facades\Auth;
 
 /**
  * Tenant isolation for every company-owned model (XCT-101, spec §0.6).
@@ -35,29 +35,18 @@ use Illuminate\Support\Facades\Auth;
  *
  * Route-model binding gets the important consequence for free: another tenant's record simply is
  * not found, so `findOrFail` 404s instead of handing it over.
+ *
+ * What this cannot reach is the query builder, and the back office uses it for the dashboard totals,
+ * the reports and the print queue. Those call {@see ActingCompany} directly — which is where the
+ * decision below actually lives, so the two surfaces cannot drift apart.
+ *
+ * Named, not anonymous, so `withoutGlobalScope(CompanyScope::class)` reads as intent at the rare
+ * call site that genuinely needs to cross the boundary.
  */
 final class CompanyScope implements Scope
 {
-    /** Escape hatch name, so `withoutGlobalScope(CompanyScope::class)` reads as intent at call sites. */
     public function apply(Builder $builder, Model $model): void
     {
-        $user = Auth::guard('web')->user();
-
-        if ($user === null || $user->is_super_admin === true) {
-            return;
-        }
-
-        $companyId = $user->company_id;
-
-        if ($companyId === null) {
-            // A back-office account belonging to no company sees nothing rather than everything.
-            // The alternative — treating "no company" as "all companies" — is how an
-            // under-configured account becomes a data breach.
-            $builder->whereRaw('1 = 0');
-
-            return;
-        }
-
-        $builder->where($model->getTable().'.company_id', $companyId);
+        ActingCompany::scope($builder, $model->getTable().'.company_id');
     }
 }

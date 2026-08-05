@@ -8,7 +8,9 @@ use App\Enums\PrintJobState;
 use App\Enums\PrintJobType;
 use App\Http\Controllers\Controller;
 use App\Models\Catalog\PosCategory;
+use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosPrinter;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -47,11 +49,18 @@ final class PrinterController extends Controller
                 ];
             })->values()->all(),
             'categories' => PosCategory::query()->orderBy('sequence')->get(['id', 'name', 'parent_id'])->all(),
-            'queue' => Inertia::defer(fn (): array => $this->connection->table('preparation_print_jobs')
-                ->whereIn('state', [PrintJobState::Queued->value, PrintJobState::Failed->value])
-                ->orderByDesc('queued_at')->limit(100)
-                ->get(['id', 'uuid', 'pos_printer_id', 'job_type', 'state', 'attempts', 'last_error', 'queued_at'])
-                ->map(static fn ($r): array => (array) $r)->all()),
+            // A query-builder call, so the global scope never sees it: unscoped, this listed every
+            // tenant's print jobs and their error text (XCT-101).
+            'queue' => Inertia::defer(function (): array {
+                $queue = $this->connection->table('preparation_print_jobs')
+                    ->whereIn('state', [PrintJobState::Queued->value, PrintJobState::Failed->value]);
+
+                ActingCompany::scope($queue);
+
+                return $queue->orderByDesc('queued_at')->limit(100)
+                    ->get(['id', 'uuid', 'pos_printer_id', 'job_type', 'state', 'attempts', 'last_error', 'queued_at'])
+                    ->map(static fn ($r): array => (array) $r)->all();
+            }),
         ]);
     }
 
@@ -71,9 +80,16 @@ final class PrinterController extends Controller
         ]);
 
         if (array_key_exists('category_ids', $data)) {
+            // The ids arrive from the browser and land in a pivot with no company of its own, so
+            // they are filtered through the scoped model rather than trusted — otherwise a printer
+            // could be routed by another tenant's category (XCT-101).
+            $categoryIds = PosCategory::query()
+                ->whereIn('id', array_map(intval(...), (array) $data['category_ids']))
+                ->pluck('id');
+
             $this->connection->table('pos_category_pos_printer')->where('pos_printer_id', $printer->getKey())->delete();
 
-            foreach ((array) $data['category_ids'] as $categoryId) {
+            foreach ($categoryIds as $categoryId) {
                 $this->connection->table('pos_category_pos_printer')->insert([
                     'pos_printer_id' => $printer->getKey(),
                     'pos_category_id' => (int) $categoryId,
@@ -91,12 +107,17 @@ final class PrinterController extends Controller
     /** Queue a test ticket; the printer agent picks it up on its next poll. */
     public function test(Request $request, PosPrinter $printer): RedirectResponse
     {
-        $request->validate(['pos_config_id' => ['required', 'integer', 'exists:pos_configs,id']]);
+        $request->validate(['pos_config_id' => ['required', 'integer']]);
+
+        // `exists:pos_configs,id` runs unscoped and would accept another company's register, filing
+        // this job against a config its own company does not own. Resolve it through the scoped
+        // model instead, which 404s on a foreign id (XCT-101).
+        $config = PosConfig::query()->findOrFail($request->integer('pos_config_id'));
 
         $this->connection->table('preparation_print_jobs')->insert([
             'uuid' => (string) Str::uuid(),
             'company_id' => (int) $printer->company_id,
-            'pos_config_id' => $request->integer('pos_config_id'),
+            'pos_config_id' => $config->getKey(),
             'pos_printer_id' => $printer->getKey(),
             'job_type' => PrintJobType::Test->value,
             'payload' => json_encode([

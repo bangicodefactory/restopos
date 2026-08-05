@@ -6,6 +6,9 @@ namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\OrderState;
 use App\Http\Controllers\Controller;
+use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosSession;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -23,6 +26,22 @@ final class ReportController extends Controller
 {
     public function __construct(private readonly ConnectionInterface $connection) {}
 
+    /**
+     * Validate a `config_id` filter against the acting company, or 404.
+     *
+     * `nullable|integer` is not a tenancy check. Without this a user could name another company's
+     * register and get that register's trade back, filtered to exactly the competitor they asked
+     * for. The lookup goes through the scoped model, so a foreign id simply does not resolve.
+     */
+    private function tenantConfigId(mixed $configId): ?int
+    {
+        if ($configId === null || $configId === '') {
+            return null;
+        }
+
+        return (int) PosConfig::query()->findOrFail((int) $configId)->getKey();
+    }
+
     /** X/Z report equivalent: sales by category, product and tax for a period. */
     public function salesDetails(Request $request): Response
     {
@@ -35,15 +54,21 @@ final class ReportController extends Controller
         $from = (string) ($data['from'] ?? now()->startOfMonth()->toDateString());
         $to = (string) ($data['to'] ?? now()->toDateString());
 
-        $sessionIds = $this->connection->table('pos_sessions')
+        $configId = $this->tenantConfigId($data['config_id'] ?? null);
+
+        // Every figure below is keyed off this list, and `session_sales_summaries` and friends carry
+        // no `company_id` of their own — so scoping the sessions is what isolates the whole report.
+        // Unscoped, this aggregated every tenant's trade into one page (XCT-101).
+        $sessions = $this->connection->table('pos_sessions')
             ->whereBetween('business_date', [$from, $to])
-            ->when($data['config_id'] ?? null, fn ($q, $c) => $q->where('pos_config_id', (int) $c))
-            ->pluck('id')
-            ->map(static fn (mixed $v): int => (int) $v)
-            ->all();
+            ->when($configId, fn ($q, $c) => $q->where('pos_config_id', $c));
+
+        ActingCompany::scope($sessions);
+
+        $sessionIds = $sessions->pluck('id')->map(static fn (mixed $v): int => (int) $v)->all();
 
         return Inertia::render('Reports/SalesDetails', [
-            'filters' => ['from' => $from, 'to' => $to, 'config_id' => $data['config_id'] ?? null],
+            'filters' => ['from' => $from, 'to' => $to, 'config_id' => $configId],
             'byProduct' => $sessionIds === [] ? [] : $this->connection->table('session_sales_summaries')
                 ->leftJoin('products', 'products.id', '=', 'session_sales_summaries.product_id')
                 ->whereIn('pos_session_id', $sessionIds)
@@ -93,10 +118,14 @@ final class ReportController extends Controller
     {
         $request->validate(['session_id' => ['required', 'integer']]);
 
-        $sessionId = $request->integer('session_id');
+        // `session_id` is whatever the caller typed. Resolving it through the scoped model rather
+        // than the raw table is what stops one manager reading another company's Z-report by
+        // guessing an id — `findOrFail` 404s because the row is not in their scope at all.
+        $session = PosSession::query()->findOrFail($request->integer('session_id'));
+        $sessionId = $session->getKey();
 
         return Inertia::render('Reports/SessionReport', [
-            'session' => (array) ($this->connection->table('pos_sessions')->where('id', $sessionId)->first() ?? []),
+            'session' => $session->attributesToArray(),
             'paymentTotals' => $this->connection->table('session_payment_totals')->where('pos_session_id', $sessionId)
                 ->get()->map(static fn ($r): array => (array) $r)->all(),
             'salesSummaries' => $this->connection->table('session_sales_summaries')->where('pos_session_id', $sessionId)
@@ -120,11 +149,15 @@ final class ReportController extends Controller
         $from = (string) ($data['from'] ?? now()->subDays(30)->toDateString());
         $to = (string) ($data['to'] ?? now()->toDateString());
 
+        $configId = $this->tenantConfigId($data['config_id'] ?? null);
+
         $base = $this->connection->table('pos_orders')
             ->whereBetween('ordered_at', [$from.' 00:00:00', $to.' 23:59:59'])
             ->whereIn('state', [OrderState::Paid->value, OrderState::Done->value])
             ->whereNull('deleted_at')
-            ->when($data['config_id'] ?? null, fn ($q, $c) => $q->where('pos_config_id', (int) $c));
+            ->when($configId, fn ($q, $c) => $q->where('pos_config_id', $c));
+
+        ActingCompany::scope($base);
 
         $totals = (clone $base)
             ->selectRaw('count(*) as order_count')
@@ -134,7 +167,7 @@ final class ReportController extends Controller
             ->first();
 
         return Inertia::render('Reports/OrderAnalytics', [
-            'filters' => ['from' => $from, 'to' => $to, 'config_id' => $data['config_id'] ?? null],
+            'filters' => ['from' => $from, 'to' => $to, 'config_id' => $configId],
             'totals' => (array) ($totals ?? []),
             'bySource' => (clone $base)->groupBy('source')
                 ->selectRaw('source')->selectRaw('count(*) as order_count')->selectRaw('coalesce(sum(amount_total), 0) as revenue')

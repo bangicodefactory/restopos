@@ -97,9 +97,16 @@ final class PrepDisplayController extends Controller
 
         $this->connection->transaction(function () use ($prepDisplay, &$data, $stages): void {
             if (array_key_exists('category_ids', $data)) {
+                // Filtered through the scoped model, not trusted: the pivot has no company of its
+                // own, so an id from the browser is the only thing standing between this display
+                // and another tenant's categories (XCT-101).
+                $categoryIds = PosCategory::query()
+                    ->whereIn('id', array_map(intval(...), (array) $data['category_ids']))
+                    ->pluck('id');
+
                 $this->connection->table('pos_category_prep_display')->where('prep_display_id', $prepDisplay->getKey())->delete();
 
-                foreach ((array) $data['category_ids'] as $categoryId) {
+                foreach ($categoryIds as $categoryId) {
                     $this->connection->table('pos_category_prep_display')->insert([
                         'prep_display_id' => $prepDisplay->getKey(),
                         'pos_category_id' => (int) $categoryId,
