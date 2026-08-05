@@ -110,32 +110,20 @@ function routePatterns(?string $prefix): array
 }
 
 /**
- * The distinct first segments of a route set — used to tell an API call from a `Map.get()`.
- *
- * @param  list<array{segments: list<string>, methods: list<string>}>  $patterns
- * @return list<string>
- */
-function topLevelSegments(array $patterns): array
-{
-    $tops = [];
-
-    foreach ($patterns as $pattern) {
-        if ($pattern['segments'] !== [] && $pattern['segments'][0] !== '*') {
-            $tops[$pattern['segments'][0]] = true;
-        }
-    }
-
-    return array_keys($tops);
-}
-
-/**
  * Normalise a client path literal to prefix-relative segments (`${…}` → `*`), or null if it is not
- * a route path at all.
+ * a concrete request path.
  *
- * @param  list<string>  $tops
+ * Note what this deliberately does *not* do: judge whether the path looks plausible. Callers
+ * establish that a literal is a request path by *where it was found* — passed to an `ApiClient`
+ * method, written as an absolute `/api/…`, or returned by a back-office URL builder — never by
+ * inspecting the string. An earlier version filtered on "does the first segment match a route
+ * prefix we already know", which meant a typo in that very segment (`poss/bootstrap`) made the
+ * path invisible instead of failing. The commonest typo silently disabled the check written to
+ * catch it.
+ *
  * @return list<string>|null
  */
-function normaliseClientPath(string $raw, array $tops, ?string $prefix): ?array
+function normaliseClientPath(string $raw, ?string $prefix): ?array
 {
     // A literal `*` marks a glob or documentation pattern (a service-worker route, a doc comment
     // like `/api/kitchen/*`), never a concrete request path — the `${…}` → `*` normalisation below
@@ -158,15 +146,10 @@ function normaliseClientPath(string $raw, array $tops, ?string $prefix): ?array
         return null;
     }
 
-    $segments = array_map(
+    return array_map(
         static fn (string $seg): string => str_contains($seg, '*') ? '*' : $seg,
         explode('/', $path),
     );
-
-    // Only treat it as a route path if its first segment is a real route prefix; this keeps
-    // `map.get('some-key')` / `db.table.get(id)` out while still catching a wrong path under a
-    // valid prefix (e.g. `pos/ping`, `pos/*/bootstrap`).
-    return in_array($segments[0], $tops, true) ? $segments : null;
 }
 
 /**
@@ -220,10 +203,15 @@ function resolveClientPath(array $client, ?string $method, array $patterns): arr
 /**
  * Distinct client API references, keyed by `METHOD /path`.
  *
- * @param  list<string>  $tops
- * @return array<string, array{segments: list<string>, method: string, path: string, file: string}>
+ * A literal counts as a request path because of **who it was passed to**, not because of how it
+ * looks: the receiver must be an `ApiClient` (`api.`, `this.client.`, `runtime.api.`). That is what
+ * keeps `catalog.productsById.get(id)`, `db.orders.get(uuid)` and `router.get(url)` out — all of
+ * which are `.get()` calls on something that is not an HTTP client — while leaving *every* literal
+ * an ApiClient receives subject to the contract, however mistyped.
+ *
+ * @return array<string, array{segments: list<string>, method: ?string, path: string, file: string}>
  */
-function clientApiReferences(array $tops): array
+function clientApiReferences(): array
 {
     $files = Finder::create()
         ->files()
@@ -232,10 +220,10 @@ function clientApiReferences(array $tops): array
         ->notName(['*.test.ts', '*.test.tsx', '*.d.ts'])
         ->exclude(['__fixtures__', '__mocks__']);
 
-    // `.get('…')` / `.post('…')` — verb is the method name, path the first string argument.
-    $verbCall = '/\.(get|post)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
-    // `.request('METHOD', '…')` — verb is the first argument, path the second.
-    $request = '/\.request(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*[\'"`]([A-Z]+)[\'"`]\s*,\s*([\'"`])([^\'"`]+)\2/';
+    // `api.get('…')` / `this.client.post('…')` — verb is the method name, path the first argument.
+    $verbCall = '/\b(?:api|client)\.(get|post)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
+    // `api.request('METHOD', '…')` — verb is the first argument, path the second.
+    $request = '/\b(?:api|client|this)\.request(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*[\'"`]([A-Z]+)[\'"`]\s*,\s*([\'"`])([^\'"`]+)\2/';
     // Absolute `'/api/…'` literals (e.g. the reachability probe's `fetch`). Single/double quotes
     // only — NOT backticks: JSDoc inline code-spans use backticks (`/api/kitchen/*`) and are
     // documentation, not calls; real absolute request paths are plain quoted string literals.
@@ -264,7 +252,7 @@ function clientApiReferences(array $tops): array
         }
 
         foreach ($found as [$method, $raw]) {
-            $segments = normaliseClientPath($raw, $tops, 'api');
+            $segments = normaliseClientPath($raw, 'api');
 
             if ($segments === null) {
                 continue;
@@ -285,27 +273,32 @@ function clientApiReferences(array $tops): array
  */
 function backofficeRouteBuilders(): array
 {
-    $source = file_get_contents(base_path('resources/js/backoffice/lib/routes.ts'));
+    $source = (string) file_get_contents(base_path('resources/js/backoffice/lib/routes.ts'));
 
     // `name: (args): string => '/path'` or `` => `/path/${id}` ``
-    preg_match_all('/=>\s*([\'"`])(\/[^\'"`]*)\1/', (string) $source, $matches, PREG_SET_ORDER);
+    //
+    // Returned with duplicates intact. Several builders legitimately share a path and differ only
+    // by the verb the caller uses — `index`/`store` are both `/categories`, `update`/`destroy` both
+    // `/categories/${id}` — so deduping here would under-count against the declarations in the file
+    // and make the anti-rot check below cry wolf.
+    preg_match_all('/=>\s*([\'"`])(\/[^\'"`]*)\1/', $source, $matches);
 
-    $out = [];
+    return $matches[2];
+}
 
-    foreach ($matches as $match) {
-        $out[$match[2]] = $match[2];
-    }
+/** How many URL builders `routes.ts` declares, however they are written. */
+function backofficeBuilderCount(): int
+{
+    $source = (string) file_get_contents(base_path('resources/js/backoffice/lib/routes.ts'));
 
-    return $out;
+    return preg_match_all('/^\s+[A-Za-z]+:\s*\(/m', $source);
 }
 
 it('every api path referenced by the client resolves to a route in routes/api.php', function (): void {
     $patterns = routePatterns('api');
-    $tops = topLevelSegments($patterns);
+    expect($patterns)->not->toBeEmpty('No `api/*` routes were registered — is routes/api.php loaded?');
 
-    expect($tops)->not->toBeEmpty('No `api/*` routes were registered — is routes/api.php loaded?');
-
-    $refs = clientApiReferences($tops);
+    $refs = clientApiReferences();
 
     // Sanity: the scanner must actually find the core client endpoints, or the regex has rotted.
     expect(array_keys($refs))->toContain('GET pos/bootstrap', 'GET pos/delta');
@@ -329,7 +322,7 @@ it('every api call uses a method its route accepts', function (): void {
     // A path that exists is not a contract: `POST`ing to a `GET`-only route 405s just as fatally as
     // a 404, and the register classifies both as retryable rather than as a bug.
     $patterns = routePatterns('api');
-    $refs = clientApiReferences(topLevelSegments($patterns));
+    $refs = clientApiReferences();
 
     $mismatched = [];
 
@@ -359,9 +352,12 @@ it('the scanner knows every verb the ApiClient exposes', function (): void {
     // quietly stops guarding. Fail here instead, pointing at the regex that needs widening.
     $source = (string) file_get_contents(base_path('resources/js/shared/sync/http.ts'));
 
-    preg_match_all('/^\s{4}(?:async\s+)?([a-z][A-Za-z0-9]*)</m', $source, $matches);
+    // The generic parameter is optional. An earlier version required a `<` before the paren, so a
+    // non-generic `delete(path: string)` slipped past — the guard against the scanner going blind
+    // had gone blind in the same way.
+    preg_match_all('/^\s{4}(?:async\s+)?([a-z][A-Za-z0-9]*)\s*(?:<[^>]*>)?\s*\(/m', $source, $matches);
 
-    $known = ['get', 'post', 'request'];
+    $known = ['get', 'post', 'request', 'constructor'];
     $unknown = array_values(array_diff(array_unique($matches[1]), $known));
 
     expect($unknown)->toBe(
@@ -378,28 +374,27 @@ it('every back-office URL builder resolves to a route in routes/web.php', functi
     //
     // Path-only: the verb lives at the `router.patch(...)` call site, not in the builder.
     $patterns = routePatterns(null);
-    $tops = topLevelSegments($patterns);
 
     $builders = backofficeRouteBuilders();
 
-    expect($builders)->not->toBeEmpty('No URL builders found — has routes.ts moved or changed shape?');
+    // Anti-rot, matching the api scanner's: a regex that has stopped matching passes silently, and
+    // "not empty" is satisfied by one surviving builder while the other fifty go unchecked. Pin the
+    // count against the declarations in the file, and name two paths that must be found.
+    expect(count($builders))->toBe(
+        backofficeBuilderCount(),
+        'The routes.ts scanner matched '.count($builders).' of '.backofficeBuilderCount()
+            .' declared builders — has the file changed shape?',
+    );
+
+    expect($builders)->toContain('/login', '/pos-configs');
 
     $unresolved = [];
 
-    foreach ($builders as $literal) {
-        $segments = normaliseClientPath($literal, $tops, null);
+    foreach (array_unique($builders) as $literal) {
+        $segments = normaliseClientPath($literal, null);
 
         if ($segments === null) {
-            // Root (`/`) or a prefix no web route declares — check the bare form before giving up.
-            $bare = trim(preg_replace('/\$\{[^}]*\}/', '*', $literal) ?? '', '/');
-
-            if ($bare === '' && $patterns !== []) {
-                continue; // `/` — the dashboard.
-            }
-
-            $unresolved[] = "  {$literal}";
-
-            continue;
+            continue; // `/` — the dashboard, which has no segments to match.
         }
 
         if (resolveClientPath($segments, null, $patterns)['status'] !== 'ok') {
