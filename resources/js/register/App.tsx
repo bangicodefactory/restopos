@@ -145,16 +145,23 @@ export function App(): JSX.Element {
         }),
     [catalog.company?.name, catalog.currencyFormat]);
 
-    const onSend = useCallback(async () => {
-        if (selectedOrderUuid === null) return;
+    /**
+     * Returns whether the kitchen actually has it now — `sent`, or `nothing` because there was
+     * nothing left to send. A refusal (`outdated`, another device fired it first) and a failure are
+     * both false, so a caller chaining onto this does not proceed as if the food were on its way
+     * (RST-143).
+     */
+    const onSend = useCallback(async (): Promise<boolean> => {
+        if (selectedOrderUuid === null) return false;
         const outcome = await sendToKitchen(selectedOrderUuid);
         if (outcome.status === 'outdated') {
             toast.show({ tone: 'warn', title: t('reg.order.sentOutdated') });
-            return;
+            return false;
         }
         if (outcome.status === 'sent') {
             toast.show({ tone: 'success', title: t('reg.order.sentOk') });
         }
+        return outcome.status === 'sent' || outcome.status === 'nothing';
     }, [selectedOrderUuid, t, toast]);
 
     const onFireCourse = useCallback(
@@ -300,7 +307,7 @@ export function App(): JSX.Element {
             </main>
 
             <DialogHost
-                onSend={() => void onSend()}
+                onSend={onSend}
                 onPay={() => {
                     if (selectedOrderUuid !== null) setScreen('payment');
                 }}

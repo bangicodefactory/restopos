@@ -23,7 +23,13 @@ import { SyncDrawer } from './SyncDrawer';
  * dialog is adding a component here — no registry, no prop threading, and no chance of two dialogs
  * fighting over the top layer (the native `<dialog>` element handles that).
  */
-export function DialogHost({ onSend, onPay }: { onSend: () => void; onPay: () => void }): JSX.Element {
+export function DialogHost({
+    onSend,
+    onPay,
+}: {
+    onSend: () => Promise<boolean>;
+    onPay: () => void;
+}): JSX.Element {
     return (
         <>
             <VariantDialog />

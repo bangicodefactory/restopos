@@ -262,7 +262,7 @@ export function SendBeforePayDialog({
     onSend,
     onPay,
 }: {
-    onSend: () => void;
+    onSend: () => Promise<boolean>;
     onPay: () => void;
 }): JSX.Element | null {
     const t = useT();
@@ -292,10 +292,15 @@ export function SendBeforePayDialog({
                         {t('reg.order.payAnyway')}
                     </Button>
                     <Button
-                        onClick={() => {
+                        onClick={async () => {
                             close();
-                            onSend();
-                            onPay();
+
+                            // Await it, and only move on if the kitchen really has it. A send can be
+                            // *refused* — `outdated` means another device fired this order first —
+                            // and navigating anyway would drop the cashier on the payment screen
+                            // with the delta still unsent: the exact state this prompt exists to
+                            // prevent, now with a false belief that it was handled.
+                            if (await onSend()) onPay();
                         }}
                     >
                         {t('reg.order.sendThenPay')}
