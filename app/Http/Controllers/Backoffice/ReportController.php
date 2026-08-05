@@ -8,6 +8,7 @@ use App\Enums\OrderState;
 use App\Http\Controllers\Controller;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
+use App\Services\Pos\SessionSummaryService;
 use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\Request;
@@ -24,7 +25,13 @@ use Inertia\Response;
  */
 final class ReportController extends Controller
 {
-    public function __construct(private readonly ConnectionInterface $connection) {}
+    /** @var array<string, array<int, string>> display-name lookups, memoised per request */
+    private array $names = [];
+
+    public function __construct(
+        private readonly ConnectionInterface $connection,
+        private readonly SessionSummaryService $summaries,
+    ) {}
 
     /**
      * Validate a `config_id` filter against the acting company, or 404.
@@ -67,50 +74,242 @@ final class ReportController extends Controller
 
         $sessionIds = $sessions->pluck('id')->map(static fn (mixed $v): int => (int) $v)->all();
 
+        [$frozenIds, $liveIds] = $this->splitBySummaryState($sessionIds);
+
+        // Sales rows for the whole period: frozen where they exist, computed live where they do not
+        // (BOF-160). Concatenated rather than summed here — the panels below each group them their
+        // own way, and grouping twice would be the only way to get the arithmetic wrong.
+        $sales = [
+            ...$this->frozenSales($frozenIds),
+            ...$this->summaries->salesSummaryRows($liveIds),
+        ];
+
+        $taxes = [
+            ...$this->frozenTaxes($frozenIds),
+            ...$this->summaries->taxSummaryRows($liveIds),
+        ];
+
+        $this->loadNames('products', $sales, 'product_id');
+        $this->loadNames('pos_categories', $sales, 'pos_category_id');
+        $this->loadNames('taxes', $taxes, 'tax_id');
+
         return Inertia::render('Reports/SalesDetails', [
             'filters' => ['from' => $from, 'to' => $to, 'config_id' => $configId],
-            'byProduct' => $sessionIds === [] ? [] : $this->connection->table('session_sales_summaries')
-                ->leftJoin('products', 'products.id', '=', 'session_sales_summaries.product_id')
-                ->whereIn('pos_session_id', $sessionIds)
-                ->groupBy('session_sales_summaries.product_id', 'products.name')
-                ->selectRaw('session_sales_summaries.product_id as product_id')
-                ->selectRaw('products.name as product_name')
-                ->selectRaw('sum(quantity) as quantity')
-                ->selectRaw('sum(base_amount) as base_amount')
-                ->selectRaw('sum(tax_amount) as tax_amount')
-                ->selectRaw('sum(total_amount) as total_amount')
-                ->selectRaw('sum(cost_amount) as cost_amount')
-                ->orderByDesc('total_amount')
-                ->get()->map(static fn ($r): array => (array) $r)->all(),
-            'byCategory' => $sessionIds === [] ? [] : $this->connection->table('session_sales_summaries')
-                ->leftJoin('pos_categories', 'pos_categories.id', '=', 'session_sales_summaries.pos_category_id')
-                ->whereIn('pos_session_id', $sessionIds)
-                ->groupBy('session_sales_summaries.pos_category_id', 'pos_categories.name')
-                ->selectRaw('session_sales_summaries.pos_category_id as pos_category_id')
-                ->selectRaw('pos_categories.name as category_name')
-                ->selectRaw('sum(quantity) as quantity')
-                ->selectRaw('sum(total_amount) as total_amount')
-                ->orderByDesc('total_amount')
-                ->get()->map(static fn ($r): array => (array) $r)->all(),
-            'byTax' => $sessionIds === [] ? [] : $this->connection->table('session_tax_summaries')
-                ->join('taxes', 'taxes.id', '=', 'session_tax_summaries.tax_id')
-                ->whereIn('pos_session_id', $sessionIds)
-                ->groupBy('session_tax_summaries.tax_id', 'taxes.name')
-                ->selectRaw('session_tax_summaries.tax_id as tax_id')
-                ->selectRaw('taxes.name as tax_name')
-                ->selectRaw('sum(base_amount) as base_amount')
-                ->selectRaw('sum(tax_amount) as tax_amount')
-                ->get()->map(static fn ($r): array => (array) $r)->all(),
-            'byPaymentMethod' => $sessionIds === [] ? [] : $this->connection->table('session_payment_totals')
-                ->join('payment_methods', 'payment_methods.id', '=', 'session_payment_totals.payment_method_id')
-                ->whereIn('pos_session_id', $sessionIds)
-                ->groupBy('session_payment_totals.payment_method_id', 'payment_methods.name')
-                ->selectRaw('session_payment_totals.payment_method_id as payment_method_id')
-                ->selectRaw('payment_methods.name as method_name')
-                ->selectRaw('sum(expected_amount) as expected_amount')
-                ->selectRaw('sum(difference_amount) as difference_amount')
-                ->get()->map(static fn ($r): array => (array) $r)->all(),
+            'openSessionCount' => count($liveIds),
+            'byProduct' => $this->group(
+                $sales,
+                static fn (array $row): string => (string) ($row['product_id'] ?? ''),
+                ['quantity', 'base_amount', 'tax_amount', 'total_amount', 'cost_amount'],
+                fn (array $row): array => [
+                    'product_id' => $row['product_id'],
+                    'product_name' => $this->nameOf('products', $row['product_id']),
+                ],
+            ),
+            'byCategory' => $this->group(
+                $sales,
+                static fn (array $row): string => (string) ($row['pos_category_id'] ?? ''),
+                ['quantity', 'total_amount'],
+                fn (array $row): array => [
+                    'pos_category_id' => $row['pos_category_id'],
+                    'category_name' => $this->nameOf('pos_categories', $row['pos_category_id']),
+                ],
+            ),
+            'byTax' => $this->group(
+                $taxes,
+                static fn (array $row): string => (string) ($row['tax_id'] ?? ''),
+                ['base_amount', 'tax_amount'],
+                fn (array $row): array => [
+                    'tax_id' => $row['tax_id'],
+                    'tax_name' => $this->nameOf('taxes', $row['tax_id']),
+                ],
+                'base_amount',
+            ),
+            'byPaymentMethod' => $this->paymentPanel($frozenIds, $liveIds),
         ]);
+    }
+
+    /**
+     * Which of these sessions already have frozen summaries, and which must be computed live.
+     *
+     * Keyed on the presence of the rows rather than on the session's state, and that is the whole
+     * defence against double-counting: a session cannot be in both lists, because the question asked
+     * is literally "do we already hold a frozen answer for this one?". Keying on `state = closed`
+     * would read the same most of the time and then quietly report zero for a session whose close
+     * wrote no summaries.
+     *
+     * @param  list<int>  $sessionIds
+     * @return array{0: list<int>, 1: list<int>}
+     */
+    private function splitBySummaryState(array $sessionIds): array
+    {
+        if ($sessionIds === []) {
+            return [[], []];
+        }
+
+        $frozen = $this->connection->table('session_sales_summaries')
+            ->whereIn('pos_session_id', $sessionIds)
+            ->distinct()
+            ->pluck('pos_session_id')
+            ->map(static fn (mixed $v): int => (int) $v)
+            ->all();
+
+        return [$frozen, array_values(array_diff($sessionIds, $frozen))];
+    }
+
+    /**
+     * @param  list<int>  $sessionIds
+     * @return list<array<string, mixed>>
+     */
+    private function frozenSales(array $sessionIds): array
+    {
+        if ($sessionIds === []) {
+            return [];
+        }
+
+        return $this->connection->table('session_sales_summaries')
+            ->whereIn('pos_session_id', $sessionIds)
+            ->get()
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+    }
+
+    /**
+     * @param  list<int>  $sessionIds
+     * @return list<array<string, mixed>>
+     */
+    private function frozenTaxes(array $sessionIds): array
+    {
+        if ($sessionIds === []) {
+            return [];
+        }
+
+        return $this->connection->table('session_tax_summaries')
+            ->whereIn('pos_session_id', $sessionIds)
+            ->get()
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+    }
+
+    /**
+     * Payments: frozen `expected_amount` for closed sessions, live totals for open ones.
+     *
+     * `difference_amount` is only ever a closed-session number — it is the drawer count minus what
+     * was expected, and nobody has counted the drawer of a service still running. Reporting a live
+     * session's difference as `0` would look like "counted and balanced" rather than "not counted".
+     *
+     * @param  list<int>  $frozenIds
+     * @param  list<int>  $liveIds
+     * @return list<array<string, mixed>>
+     */
+    private function paymentPanel(array $frozenIds, array $liveIds): array
+    {
+        $rows = [];
+
+        if ($frozenIds !== []) {
+            foreach ($this->connection->table('session_payment_totals')->whereIn('pos_session_id', $frozenIds)->get() as $row) {
+                $rows[] = (array) $row;
+            }
+        }
+
+        foreach ($this->summaries->paymentTotalRows($liveIds) as $row) {
+            $rows[] = [...$row, 'difference_amount' => '0'];
+        }
+
+        $this->loadNames('payment_methods', $rows, 'payment_method_id');
+
+        return $this->group(
+            $rows,
+            static fn (array $row): string => (string) ($row['payment_method_id'] ?? ''),
+            ['expected_amount', 'difference_amount'],
+            fn (array $row): array => [
+                'payment_method_id' => $row['payment_method_id'],
+                'method_name' => $this->nameOf('payment_methods', $row['payment_method_id']),
+            ],
+            'expected_amount',
+        );
+    }
+
+    /**
+     * Sum `$fields` across `$rows`, grouped by `$keyOf`, sorted by the first field descending.
+     *
+     * Frozen rows and live rows have the same column names by construction — one is the persisted
+     * form of the other — so they add up without a translation step. The sums use `bcadd` rather
+     * than PHP floats for the same reason the rest of the codebase does: these are money.
+     *
+     * `$sortBy` is named rather than inferred from `$fields[0]`. Inferring it silently ranked
+     * `byProduct` by quantity, because that is the first field summed — so the report's headline
+     * list put cheap high-volume items above the ones that actually earn, which is the opposite of
+     * what a manager opens this page for.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @param  callable(array<string, mixed>): string  $keyOf
+     * @param  list<string>  $fields
+     * @param  callable(array<string, mixed>): array<string, mixed>  $identity
+     * @return list<array<string, mixed>>
+     */
+    private function group(array $rows, callable $keyOf, array $fields, callable $identity, string $sortBy = 'total_amount'): array
+    {
+        $out = [];
+
+        foreach ($rows as $row) {
+            $key = $keyOf($row);
+
+            if (! isset($out[$key])) {
+                $out[$key] = $identity($row);
+
+                foreach ($fields as $field) {
+                    $out[$key][$field] = '0';
+                }
+            }
+
+            foreach ($fields as $field) {
+                $out[$key][$field] = bcadd($out[$key][$field], (string) ($row[$field] ?? '0'), 4);
+            }
+        }
+
+        if (in_array($sortBy, $fields, true)) {
+            uasort($out, static fn (array $a, array $b): int => bccomp((string) $b[$sortBy], (string) $a[$sortBy], 4));
+        }
+
+        return array_values($out);
+    }
+
+    /**
+     * Load display names for exactly the ids in the result set.
+     *
+     * The panels used to get these from `leftJoin`s. Live rows do not come from a table that can be
+     * joined, so the lookup moved into PHP — but it has to stay as narrow as the join was. Reading
+     * the whole table and indexing it in memory worked on a seeded catalogue of 74 products and
+     * would load every product, category and tax of every company on a real one, to label a few
+     * dozen rows.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function loadNames(string $table, array $rows, string $column): void
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            $id = $row[$column] ?? null;
+
+            if ($id !== null && $id !== '') {
+                $ids[(int) $id] = true;
+            }
+        }
+
+        $this->names[$table] = $ids === []
+            ? []
+            : $this->connection->table($table)->whereIn('id', array_keys($ids))->pluck('name', 'id')->all();
+    }
+
+    /** A display name for an id, from the set loaded by {@see loadNames}. */
+    private function nameOf(string $table, mixed $id): ?string
+    {
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        return isset($this->names[$table][(int) $id]) ? (string) $this->names[$table][(int) $id] : null;
     }
 
     /** One session, end to end: the Z-report a manager signs. */

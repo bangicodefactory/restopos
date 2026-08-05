@@ -45,6 +45,7 @@ import type {
 
 export default function SalesDetails({
     filters,
+    openSessionCount,
     byProduct,
     byCategory,
     byTax,
@@ -56,7 +57,7 @@ export default function SalesDetails({
 
     const query = useServerQuery({
         url: routes.reports.salesDetails(),
-        only: ['filters', 'byProduct', 'byCategory', 'byTax', 'byPaymentMethod'],
+        only: ['filters', 'openSessionCount', 'byProduct', 'byCategory', 'byTax', 'byPaymentMethod'],
         initial: {
             from: filters.from,
             to: filters.to,
@@ -133,6 +134,15 @@ export default function SalesDetails({
                         })
                     }
                 />
+
+                {/*
+                  * These figures include a service still trading, so they are correct now and will
+                  * keep moving until it closes (BOF-160). Saying so is the difference between a
+                  * manager trusting the number and a manager wondering why it changed by evening.
+                  */}
+                {openSessionCount > 0 ? (
+                    <Notice tone="info">{t('report.openSessions', { n: String(openSessionCount) })}</Notice>
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <Stat label={t('report.base')} value={money(totals.base, EUR)} />

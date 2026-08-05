@@ -51,6 +51,14 @@ export type SalesByPaymentMethod = {
 
 export type SalesDetailsProps = {
     filters: ReportFilters;
+    /**
+     * How many of the period's sessions are still trading (BOF-160).
+     *
+     * Their figures come from live order rows rather than frozen summaries, so the totals are
+     * correct but not yet final. A manager reading a mid-service number needs to know which of the
+     * two they are looking at.
+     */
+    openSessionCount: number;
     byProduct: SalesByProduct[];
     byCategory: SalesByCategory[];
     byTax: SalesByTax[];
