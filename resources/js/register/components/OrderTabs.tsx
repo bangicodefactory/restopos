@@ -24,7 +24,6 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
     const orders = useOrderStore((state) => state.orders);
     const selected = useOrderStore((state) => state.selectedOrderUuid);
     const selectOrder = useOrderStore((state) => state.selectOrder);
-    const orderScreen = useOrderStore((state) => state.orderScreen);
     const setScreen = useUiStore((state) => state.setScreen);
     const openDialog = useUiStore((state) => state.openDialog);
     const isRestaurant = useCatalog().config?.is_restaurant === true;
@@ -49,9 +48,18 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
                         onDoubleClick={() => openDialog('orderName', { orderUuid: order.uuid })}
                         onClick={() => {
                             selectOrder(order.uuid);
-                            const screen = orderScreen[order.uuid];
-                            if (screen === 'payment' || screen === 'receipt' || screen === 'products') {
-                                setScreen(screen);
+
+                            // Restore where this order was left (REG-125) — except back into
+                            // payment while the kitchen is still owed items. That would step
+                            // straight past the send-first prompt (RST-143) and let the table be
+                            // settled for food nobody is cooking; the order screen is where the
+                            // cashier can see the unsent count and act on it.
+                            const screen = order.orderScreen;
+                            const restorable =
+                                screen === 'payment' && unsent > 0 ? 'products' : screen;
+
+                            if (restorable === 'payment' || restorable === 'receipt' || restorable === 'products') {
+                                setScreen(restorable);
                             }
                         }}
                         className={cn(

@@ -37,7 +37,7 @@ export default defineConfig({
             'resources/js/backoffice/**/*.test.tsx',
         ],
         exclude: ['**/node_modules/**', 'vendor/**', 'tools/**', 'public/**', 'storage/**'],
-        setupFiles: ['packages/domain/test/setup.ts'],
+        setupFiles: ['packages/domain/test/setup.ts', 'resources/js/test/setup-dom.ts'],
         // Node by default — the domain layer must run without a DOM. A shared/ test that needs one
         // opts in per file with a docblock:  /** @vitest-environment jsdom */
         // (`environmentMatchGlobs` is deprecated in Vitest 3; the docblock is the supported way.)

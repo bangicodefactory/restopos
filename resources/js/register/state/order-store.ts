@@ -27,8 +27,6 @@ export type OrderSlice = {
 
     selectedOrderUuid: string | null;
     selectedLineUuid: string | null;
-    /** Per-order screen, restored when the order is re-selected (REG-125). */
-    orderScreen: Record<string, string>;
 
     /** The single write door. Only `order-actions` may call it. */
     mutate: (recipe: (state: OrderSlice) => void) => void;
@@ -48,7 +46,6 @@ const EMPTY: Omit<OrderSlice, 'mutate' | 'selectOrder' | 'selectLine' | 'resetAl
     childLines: {},
     selectedOrderUuid: null,
     selectedLineUuid: null,
-    orderScreen: {},
 };
 
 export const useOrderStore = createPosStore<OrderSlice>((set) => ({
@@ -184,7 +181,6 @@ export function forgetOrder(state: OrderSlice, orderUuid: string): void {
     delete state.paymentsByOrder[orderUuid];
     delete state.coursesByOrder[orderUuid];
     delete state.orders[orderUuid];
-    delete state.orderScreen[orderUuid];
     if (state.selectedOrderUuid === orderUuid) {
         state.selectedOrderUuid = null;
         state.selectedLineUuid = null;

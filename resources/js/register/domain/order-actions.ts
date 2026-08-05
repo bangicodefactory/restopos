@@ -248,6 +248,7 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
         syncError: null,
         rev: 0,
         baseline: null,
+        orderScreen: null,
     };
 
     mutate((state) => {
@@ -973,6 +974,31 @@ export function removePayment(paymentUuid: string): void {
 }
 
 /** REG-220 / RST-121 — the tip rides on the configured tip product, never on a bare amount. */
+/**
+ * Remember which screen an order was on (REG-125).
+ *
+ * The field was declared, read by the order tabs and cleared by `forgetOrder` — but nothing ever
+ * wrote it, so "a mid-payment reload does not lose context" never happened. Written here rather
+ * than in the UI store so it goes through `persist()` like every other order mutation and survives
+ * the reload it exists for.
+ *
+ * Deliberately does **not** bump `rev`: the screen is not part of the order's value, and bumping it
+ * would recompute every memoised total on a navigation.
+ */
+export function recordOrderScreen(orderUuid: string, screen: string): void {
+    const state = snapshot();
+    const order = state.orders[orderUuid];
+
+    if (!order || order.orderScreen === screen) return;
+
+    mutate((draft) => {
+        const target = draft.orders[orderUuid];
+        if (target) target.orderScreen = screen;
+    });
+
+    deps.persist(orderUuid);
+}
+
 export function setTip(orderUuid: string, amount: string): void {
     const catalog = getCatalog();
     const tipProduct = catalog.products.find((product) => product.special_kind === 'tip');

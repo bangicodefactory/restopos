@@ -3,7 +3,13 @@ import type { JSX } from 'react';
 import { ApprovalDialog } from './dialogs/ApprovalDialog';
 import { ComboDialog } from './dialogs/ComboDialog';
 import { CustomerDialog } from './dialogs/CustomerDialog';
-import { CashMoveDialog, GuestsDialog, OrderNameDialog, ProductInfoDialog } from './dialogs/MiscDialogs';
+import {
+    CashMoveDialog,
+    GuestsDialog,
+    OrderNameDialog,
+    ProductInfoDialog,
+    SendBeforePayDialog,
+} from './dialogs/MiscDialogs';
 import { NotesDialog } from './dialogs/NotesDialog';
 import { OpenPriceDialog } from './dialogs/OpenPriceDialog';
 import { ScaleDialog } from './dialogs/ScaleDialog';
@@ -17,7 +23,13 @@ import { SyncDrawer } from './SyncDrawer';
  * dialog is adding a component here — no registry, no prop threading, and no chance of two dialogs
  * fighting over the top layer (the native `<dialog>` element handles that).
  */
-export function DialogHost(): JSX.Element {
+export function DialogHost({
+    onSend,
+    onPay,
+}: {
+    onSend: () => Promise<boolean>;
+    onPay: () => void;
+}): JSX.Element {
     return (
         <>
             <VariantDialog />
@@ -31,6 +43,7 @@ export function DialogHost(): JSX.Element {
             <CashMoveDialog />
             <ProductInfoDialog />
             <ApprovalDialog />
+            <SendBeforePayDialog onSend={onSend} onPay={onPay} />
             <SyncDrawer />
         </>
     );
