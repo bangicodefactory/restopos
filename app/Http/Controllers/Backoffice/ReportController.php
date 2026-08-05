@@ -89,6 +89,10 @@ final class ReportController extends Controller
             ...$this->summaries->taxSummaryRows($liveIds),
         ];
 
+        $this->loadNames('products', $sales, 'product_id');
+        $this->loadNames('pos_categories', $sales, 'pos_category_id');
+        $this->loadNames('taxes', $taxes, 'tax_id');
+
         return Inertia::render('Reports/SalesDetails', [
             'filters' => ['from' => $from, 'to' => $to, 'config_id' => $configId],
             'openSessionCount' => count($liveIds),
@@ -118,6 +122,7 @@ final class ReportController extends Controller
                     'tax_id' => $row['tax_id'],
                     'tax_name' => $this->nameOf('taxes', $row['tax_id']),
                 ],
+                'base_amount',
             ),
             'byPaymentMethod' => $this->paymentPanel($frozenIds, $liveIds),
         ]);
@@ -210,6 +215,8 @@ final class ReportController extends Controller
             $rows[] = [...$row, 'difference_amount' => '0'];
         }
 
+        $this->loadNames('payment_methods', $rows, 'payment_method_id');
+
         return $this->group(
             $rows,
             static fn (array $row): string => (string) ($row['payment_method_id'] ?? ''),
@@ -218,6 +225,7 @@ final class ReportController extends Controller
                 'payment_method_id' => $row['payment_method_id'],
                 'method_name' => $this->nameOf('payment_methods', $row['payment_method_id']),
             ],
+            'expected_amount',
         );
     }
 
@@ -228,13 +236,18 @@ final class ReportController extends Controller
      * form of the other — so they add up without a translation step. The sums use `bcadd` rather
      * than PHP floats for the same reason the rest of the codebase does: these are money.
      *
+     * `$sortBy` is named rather than inferred from `$fields[0]`. Inferring it silently ranked
+     * `byProduct` by quantity, because that is the first field summed — so the report's headline
+     * list put cheap high-volume items above the ones that actually earn, which is the opposite of
+     * what a manager opens this page for.
+     *
      * @param  list<array<string, mixed>>  $rows
      * @param  callable(array<string, mixed>): string  $keyOf
      * @param  list<string>  $fields
      * @param  callable(array<string, mixed>): array<string, mixed>  $identity
      * @return list<array<string, mixed>>
      */
-    private function group(array $rows, callable $keyOf, array $fields, callable $identity): array
+    private function group(array $rows, callable $keyOf, array $fields, callable $identity, string $sortBy = 'total_amount'): array
     {
         $out = [];
 
@@ -254,9 +267,7 @@ final class ReportController extends Controller
             }
         }
 
-        $sortBy = $fields[0] ?? null;
-
-        if ($sortBy !== null) {
+        if (in_array($sortBy, $fields, true)) {
             uasort($out, static fn (array $a, array $b): int => bccomp((string) $b[$sortBy], (string) $a[$sortBy], 4));
         }
 
@@ -264,18 +275,39 @@ final class ReportController extends Controller
     }
 
     /**
-     * A display name for an id, cached per request.
+     * Load display names for exactly the ids in the result set.
      *
-     * The old panels got these from SQL joins. Live rows do not come from a table that can be
-     * joined, so the lookup moved here — one query per table per request, not one per row.
+     * The panels used to get these from `leftJoin`s. Live rows do not come from a table that can be
+     * joined, so the lookup moved into PHP — but it has to stay as narrow as the join was. Reading
+     * the whole table and indexing it in memory worked on a seeded catalogue of 74 products and
+     * would load every product, category and tax of every company on a real one, to label a few
+     * dozen rows.
+     *
+     * @param  list<array<string, mixed>>  $rows
      */
+    private function loadNames(string $table, array $rows, string $column): void
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            $id = $row[$column] ?? null;
+
+            if ($id !== null && $id !== '') {
+                $ids[(int) $id] = true;
+            }
+        }
+
+        $this->names[$table] = $ids === []
+            ? []
+            : $this->connection->table($table)->whereIn('id', array_keys($ids))->pluck('name', 'id')->all();
+    }
+
+    /** A display name for an id, from the set loaded by {@see loadNames}. */
     private function nameOf(string $table, mixed $id): ?string
     {
         if ($id === null || $id === '') {
             return null;
         }
-
-        $this->names[$table] ??= $this->connection->table($table)->pluck('name', 'id')->all();
 
         return isset($this->names[$table][(int) $id]) ? (string) $this->names[$table][(int) $id] : null;
     }

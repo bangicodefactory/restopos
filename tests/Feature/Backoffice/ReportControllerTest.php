@@ -75,6 +75,22 @@ function totalOf(array $props, string $panel = 'byProduct'): string
     );
 }
 
+it('surfaces that the period includes a session still trading', function (): void {
+    sellFor($this->fx, '24.20');
+
+    $this->actingAs($this->manager);
+    expect(salesReport($this)['openSessionCount'])->toBe(1);
+
+    $sessionId = (int) $this->fx->session->getKey();
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$sessionId}/close", ['counted_cash' => '124.20'])
+        ->assertOk();
+
+    // Once everything is frozen the figures are final, and the page should stop hedging.
+    $this->actingAs($this->manager);
+    expect(salesReport($this)['openSessionCount'])->toBe(0);
+});
+
 it('shows an open session sales, where it used to show zero', function (): void {
     sellFor($this->fx, '24.20');
 
@@ -127,6 +143,47 @@ it('adds an open session to a closed one without double counting either', functi
 
     expect(totalOf($props))->toBe('36.3000')
         ->and($props['openSessionCount'])->toBe(1);
+});
+
+it('ranks products by revenue, not by units sold', function (): void {
+    // The regression this exists to catch: the grouping helper inferred its sort field from the
+    // first summed column, which is `quantity`. The headline list then put cheap high-volume items
+    // above the ones that actually earn — the opposite of what this page is opened for, and
+    // invisible to any assertion about totals.
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand((string) Str::uuid(), [
+            // Ten cheap items…
+            [
+                'op' => 'create',
+                'uuid' => (string) Str::uuid(),
+                'variant_id' => $this->fx->drinkVariant->getKey(),
+                'qty' => '10',
+                'price_unit' => '1.00',
+                'discount' => '0',
+            ],
+            // …against one expensive one.
+            [
+                'op' => 'create',
+                'uuid' => (string) Str::uuid(),
+                'variant_id' => $this->fx->variant->getKey(),
+                'qty' => '1',
+                'price_unit' => '90.00',
+                'discount' => '0',
+            ],
+        ], ['state' => OrderState::Paid->value], [[
+            'op' => 'create',
+            'uuid' => (string) Str::uuid(),
+            'payment_method_id' => $this->fx->cash->getKey(),
+            'amount' => '100.00',
+        ]])],
+    ])->assertOk();
+
+    $this->actingAs($this->manager);
+    $rows = salesReport($this)['byProduct'];
+
+    expect($rows)->toHaveCount(2)
+        ->and((float) $rows[0]['total_amount'])->toBeGreaterThan((float) $rows[1]['total_amount'])
+        ->and((float) $rows[0]['quantity'])->toBeLessThan((float) $rows[1]['quantity']);
 });
 
 it('reports tax and payment panels for an open session too', function (): void {
