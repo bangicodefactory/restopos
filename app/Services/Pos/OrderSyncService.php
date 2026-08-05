@@ -474,6 +474,8 @@ final readonly class OrderSyncService
                 'cancelled_at' => now(),
                 'cancel_reason' => (string) ($attributes['cancel_reason'] ?? 'Cancelled on device'),
             ])->save();
+
+            $this->withdrawFromKitchen($config, $device, $order);
         }
 
         // 5 — recompute every monetary field. This is the authoritative pass.
@@ -663,6 +665,30 @@ final readonly class OrderSyncService
         }
     }
 
+    /**
+     * Tell the kitchen to stop cooking an order that is no longer a sale (REG-295).
+     *
+     * Cancelling and deleting both used to touch `pos_orders` alone, so a fired order vanished from
+     * the till while the pass kept the ticket and kept plating it. The failure is invisible from
+     * the register — which is exactly why it survived this long.
+     *
+     * Failures are logged, not raised: the sale is already cancelled by the time this runs, and
+     * throwing here would roll that back and hand the till a sync error for an order it has
+     * correctly finished with. A kitchen ticket that outlives its order is a smaller problem than a
+     * cancellation the till cannot complete.
+     */
+    private function withdrawFromKitchen(PosConfig $config, ?PosDevice $device, Order $order): void
+    {
+        try {
+            $this->preparation->cancelAll($order, $config, $device?->getKey() === null ? null : (int) $device->getKey());
+        } catch (Throwable $e) {
+            $this->logger->warning('kitchen withdrawal failed', [
+                'order_uuid' => (string) $order->uuid,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
     /** @return array<string, mixed> */
     private function deleteDraft(PosConfig $config, ?PosDevice $device, Order $order, string $uuid): array
     {
@@ -675,6 +701,12 @@ final readonly class OrderSyncService
                 'warnings' => [['code' => 'not_a_draft']],
             ];
         }
+
+        // Before the soft delete: `cancelAll` reads the order's snapshot and fans out to the
+        // displays, and a deleted order is not something the kitchen path should have to reason
+        // about. A draft can absolutely have been fired — that is what "send to kitchen, then the
+        // table walks out" looks like (REG-295).
+        $this->withdrawFromKitchen($config, $device, $order);
 
         $order->delete();
 

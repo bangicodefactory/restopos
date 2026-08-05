@@ -204,6 +204,79 @@ final readonly class PreparationService
     }
 
     /**
+     * Withdraw everything already sent for this order (REG-295, BAN-465).
+     *
+     * Cancelling or deleting an order used to touch nothing but `pos_orders`: the prep order kept
+     * its pending lines, the display kept showing the ticket, and the kitchen kept cooking food for
+     * a sale that no longer existed. Nobody downstream was ever told.
+     *
+     * The delta cannot express this on its own — it compares the snapshot against the order's lines,
+     * and cancelling an order does not remove its lines, so the diff comes back empty. So the
+     * cancellation is built explicitly from the snapshot: every quantity the kitchen was told about,
+     * negated. It then goes through the same fan-out as any other change, which is what makes the
+     * cancellation tickets print and the displays update rather than needing a parallel path.
+     *
+     * @return array{delta: PreparationDelta, prep_orders: list<array<string, mixed>>, print_jobs: list<int>, snapshot_version: int}
+     */
+    public function cancelAll(Order $order, PosConfig $config, ?int $deviceId = null): array
+    {
+        return $this->connection->transaction(function () use ($order, $config, $deviceId): array {
+            $snapshot = $this->snapshot($order, lock: true);
+            $version = (int) ($snapshot['server_version'] ?? 0);
+
+            /** @var array<string, array<string, mixed>> $sent */
+            $sent = (array) ($snapshot['lines'] ?? []);
+
+            $changes = [];
+
+            foreach ($sent as $before) {
+                $quantity = (string) ($before['quantity'] ?? '0');
+
+                if (bccomp($quantity, '0', 3) === 0) {
+                    continue;
+                }
+
+                $changes[] = $this->change($before, '-'.ltrim($quantity, '-'), PrepChangeType::Cancelled);
+            }
+
+            $delta = new PreparationDelta(
+                orderUuid: (string) $order->uuid,
+                changes: $changes,
+                orderNoteChanged: false,
+                generalCustomerNote: $order->general_customer_note,
+                internalNote: is_string($order->internal_note) ? $order->internal_note : null,
+                snapshotVersion: $version,
+                snapshotAt: $snapshot['server_date'] ?? null,
+            );
+
+            if ($delta->isEmpty()) {
+                // Never sent to the kitchen, so there is nothing to withdraw. Not an error — most
+                // deleted drafts are abandoned before anyone fires them.
+                return ['delta' => $delta, 'prep_orders' => [], 'print_jobs' => [], 'snapshot_version' => $version];
+            }
+
+            $prepOrders = $this->fanOutToDisplays($order, $config, $delta);
+            $printJobs = $this->fanOutToPrinters($order, $config, $delta, $deviceId);
+
+            // An empty snapshot: nothing stands sent any more. Without this a re-send of the same
+            // order would diff against the old snapshot and re-cancel what it just cancelled.
+            $this->writeEmptySnapshot($order, $version + 1);
+
+            $order->forceFill([
+                'prep_state' => OrderPrepState::Sent->value,
+                'unsent_change_count' => 0,
+            ])->save();
+
+            return [
+                'delta' => $delta,
+                'prep_orders' => $prepOrders,
+                'print_jobs' => $printJobs,
+                'snapshot_version' => $version + 1,
+            ];
+        });
+    }
+
+    /**
      * Fire one course (RST-084). The fire ticket is a *note-update*-shaped
      * change listing the course's products, not a NEW ticket — otherwise the
      * kitchen counts those quantities twice.
@@ -876,6 +949,29 @@ final readonly class PreparationService
             ['pos_order_id' => $order->getKey()],
             [
                 'snapshot' => json_encode(['lines' => $lines]),
+                'general_customer_note' => $order->general_customer_note,
+                'internal_note' => is_string($order->internal_note) ? $order->internal_note : null,
+                'server_version' => $version,
+                'server_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
+    }
+
+    /**
+     * Record that nothing stands sent to the kitchen for this order any more.
+     *
+     * Written from the same shape `writeSnapshot` produces, minus the lines — `cancelAll` cannot
+     * reuse that method because it rebuilds the snapshot from the order's *current* lines, which a
+     * cancelled order still has.
+     */
+    private function writeEmptySnapshot(Order $order, int $version): void
+    {
+        $this->connection->table('order_preparation_snapshots')->updateOrInsert(
+            ['pos_order_id' => $order->getKey()],
+            [
+                'snapshot' => json_encode(['lines' => []]),
                 'general_customer_note' => $order->general_customer_note,
                 'internal_note' => is_string($order->internal_note) ? $order->internal_note : null,
                 'server_version' => $version,

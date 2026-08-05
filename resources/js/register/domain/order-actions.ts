@@ -249,6 +249,7 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
         rev: 0,
         baseline: null,
         orderScreen: null,
+        serverUpdatedAt: null,
     };
 
     mutate((state) => {
@@ -1466,6 +1467,8 @@ export function applyServerAck(
             >
         >;
         serverRev?: string | null;
+        /** The server's own `updated_at`, so the ticket-screen cache diff can skip this order. */
+        updated_at?: string | null;
         lineIds?: Record<string, number>;
         paymentIds?: Record<string, number>;
         courseIds?: Record<string, number>;
@@ -1483,6 +1486,10 @@ export function applyServerAck(
         if (ack.amounts) Object.assign(order, ack.amounts);
         order.syncState = 'synced';
         order.syncError = null;
+        // Without this the order stays "not seen from the server", so the next ticket-screen lookup
+        // treats every order this till pushed as stale and fetches all their bodies back — the one
+        // thing the two-step diff exists to avoid (BAN-465).
+        if (ack.updated_at != null) order.serverUpdatedAt = ack.updated_at as OrderRow['serverUpdatedAt'];
         order.baseline = {
             serverRev: ack.serverRev ?? null,
             order: { rev: order.rev },

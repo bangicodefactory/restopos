@@ -246,7 +246,11 @@ export async function loadOrdersFromDb(db: PosDb): Promise<{
     // Orders stored before `orderScreen` existed come back without the key, so the row would not
     // match its own type. Normalise at the boundary rather than making the field optional and
     // pushing `undefined` into every reader (REG-125).
-    const orders = keep.map((order) => ({ ...order, orderScreen: order.orderScreen ?? null }));
+    const orders = keep.map((order) => ({
+        ...order,
+        orderScreen: order.orderScreen ?? null,
+        serverUpdatedAt: order.serverUpdatedAt ?? null,
+    }));
 
     return { orders, lines, payments, courses };
 }

@@ -144,6 +144,7 @@ export function makeOrder(partial: Partial<OrderRow> = {}): OrderRow {
         rev: 0,
         baseline: null,
         orderScreen: null,
+        serverUpdatedAt: null,
         ...partial,
     };
 }

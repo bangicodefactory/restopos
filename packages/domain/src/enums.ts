@@ -348,6 +348,22 @@ export const PaymentMethodType = {
 } as const;
 export type PaymentMethodType = (typeof PaymentMethodType)[keyof typeof PaymentMethodType];
 
+/**
+ * Money that has already left the customer's card rather than sitting in a drawer.
+ *
+ * The mirror of `PaymentMethodType::isElectronic()` in PHP, and it must stay one: the ticket screen
+ * uses it to refuse deleting an order whose payment has already been captured, and a client that
+ * disagreed with the server about which methods those are would offer a delete the server would be
+ * right to have prevented (REG-295).
+ */
+export function isElectronicMethod(type: PaymentMethodType): boolean {
+    return (
+        type === PaymentMethodType.CardTerminal ||
+        type === PaymentMethodType.QrCode ||
+        type === PaymentMethodType.Online
+    );
+}
+
 export const PaymentProviderCode = {
     Stripe: 'stripe',
     Adyen: 'adyen',

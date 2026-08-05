@@ -230,6 +230,40 @@ class PosConfig extends Model
         return $this->belongsToMany(self::class, 'pos_config_trusted_config', 'pos_config_id', 'trusted_config_id');
     }
 
+    /**
+     * The configs whose orders this one may read: itself plus its trusted peers **in its own company**.
+     *
+     * A till is not an island. Two registers on the same counter serve one floor, so "look up the
+     * order I took ten minutes ago" fails from the second till if the query is pinned to one config
+     * — which is exactly what the ticket-screen lookup used to do (REG-293).
+     *
+     * The company filter is not belt-and-braces. `pos_config_trusted_config` is application-written
+     * data, so on its own it is not a tenant boundary: one row pointing at another company's
+     * register would hand that company's orders — payments, cardholder names and all — to this one.
+     * `OrderSyncService::isWritableBy` checks `company_id` before it consults the pivot for exactly
+     * this reason, and a read path that widens the same way has to carry the same guard.
+     *
+     * `CompanyScope` does not cover this: it keys on the `web` guard, and device requests have no
+     * web user by design.
+     *
+     * `Order::posLoadScope`, `DeltaService::orderDelta` and `OrderSyncService::isWritableBy` each
+     * build this set inline; they are correct as they stand, so they are left alone here rather than
+     * refactored under a bug fix.
+     *
+     * @return list<int>
+     */
+    public function visibleConfigIds(): array
+    {
+        return [
+            (int) $this->getKey(),
+            ...$this->trustedConfigs()
+                ->where('pos_configs.company_id', $this->company_id)
+                ->pluck('pos_configs.id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all(),
+        ];
+    }
+
     /** @return BelongsToMany<Floor, $this> */
     public function floors(): BelongsToMany
     {
