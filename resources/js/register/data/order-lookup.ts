@@ -37,7 +37,11 @@ export type OrderIndexRecord = {
 export type OrderIndexPage = {
     records: OrderIndexRecord[];
     next_cursor: number | null;
-    total: number;
+    /**
+     * How many orders match, or null on a cursor page — the server does not recount something it
+     * already answered on page one, so the caller keeps the value it was first given.
+     */
+    total: number | null;
 };
 
 export type OrderGraph = {
@@ -223,6 +227,10 @@ export function toClientRows(payload: ServerOrder): OrderGraph {
         currency_rate: str(payload.currency_rate, '1'),
         floating_order_name: strOrNull(payload.floating_order_name),
 
+        // Read from the payload, never defaulted. `is_tipped`, `tip_amount` and
+        // `refunded_order_uuid` all travel back up in the outbox command, so a default here is not
+        // a display gap — it is the client overwriting the server's own record the first time
+        // anything touches the order, and a reprint counts as touching it (BAN-465).
         amount_untaxed: str(payload.amount_untaxed, '0'),
         amount_tax: str(payload.amount_tax, '0'),
         amount_total: str(payload.amount_total, '0'),
@@ -236,11 +244,11 @@ export function toClientRows(payload: ServerOrder): OrderGraph {
         guest_count: num(payload.guest_count, 0),
         is_tipped: bool(payload.is_tipped),
         tip_amount: str(payload.tip_amount, '0'),
-        split_from_order_uuid: null,
+        split_from_order_uuid: strOrNull(payload.split_from_order_uuid),
         split_letter: strOrNull(payload.split_letter),
 
         is_refund: bool(payload.is_refund),
-        refunded_order_uuid: null,
+        refunded_order_uuid: strOrNull(payload.refunded_order_uuid),
         to_invoice: bool(payload.to_invoice),
 
         general_customer_note: strOrNull(payload.general_customer_note),

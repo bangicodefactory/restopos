@@ -79,6 +79,94 @@ it('finds an order taken on a trusted peer till', function (): void {
         ->assertJsonFragment(['uuid' => (string) $peerOrder->uuid]);
 });
 
+it('refuses a trusted-config row that points across companies', function (): void {
+    // `pos_config_trusted_config` is application-written data, so it is not a tenant boundary on its
+    // own. One row pointing at another company's register used to hand over that company's orders —
+    // index and full graph, payments and cardholder names included. `CompanyScope` does not cover
+    // this: it keys on the `web` guard, and a device request has no web user.
+    $stranger = PosFixtures::make()->withSession();
+    $this->fx->config->trustedConfigs()->attach($stranger->config->getKey());
+
+    $theirs = Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $stranger->company->getKey(),
+        'pos_config_id' => $stranger->config->getKey(),
+        'pos_session_id' => $stranger->session->getKey(),
+        'name' => 'THEIRS/0001',
+        'access_token' => (string) Str::uuid(),
+        'currency_id' => $stranger->config->currency_id,
+        'tracking_number' => 5,
+        'state' => 'paid',
+        'ordered_at' => now(),
+        'amount_total' => '999.0000',
+    ]);
+
+    expect($this->withHeaders($this->fx->headers())->getJson('/api/pos/orders')->assertOk()->json('records'))
+        ->toHaveCount(0);
+
+    $this->withHeaders($this->fx->headers())->getJson('/api/pos/orders/'.$theirs->uuid)->assertNotFound();
+
+    // …while a peer inside the same company is still visible, so the guard has not simply
+    // re-broken the multi-till lookup it was added to enable.
+    $peer = PosFixtures::make(['company_id' => $this->fx->company->getKey()]);
+    $this->fx->config->trustedConfigs()->attach($peer->config->getKey());
+
+    Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'pos_config_id' => $peer->config->getKey(),
+        'pos_session_id' => $this->fx->session->getKey(),
+        'name' => 'PEER/0001',
+        'access_token' => (string) Str::uuid(),
+        'currency_id' => $this->fx->config->currency_id,
+        'tracking_number' => 6,
+        'state' => 'paid',
+        'ordered_at' => now(),
+        'amount_total' => '12.0000',
+    ]);
+
+    expect($this->withHeaders($this->fx->headers())->getJson('/api/pos/orders')->assertOk()->json('records.0.name'))
+        ->toBe('PEER/0001');
+});
+
+it('sends the fields the client writes back, so a reprint cannot erase them', function (): void {
+    // A hydrated order is not read-only: the first thing that touches it pushes the whole row up
+    // through the outbox, and reprinting a looked-up order is the most ordinary thing a cashier does
+    // with one. `is_tipped` and `tip_amount` are client-writable on ingest, so omitting them here
+    // made that reprint push `is_tipped=false, tip_amount=0` and wipe the recorded tip.
+    $uuid = pushOrder($this->fx, ['state' => 'paid']);
+
+    Order::query()->where('uuid', $uuid)->update([
+        'is_tipped' => true,
+        'tip_amount' => '3.0000',
+        'print_count' => 4,
+    ]);
+
+    $body = $this->withHeaders($this->fx->headers())->getJson('/api/pos/orders/'.$uuid)->assertOk()->json();
+
+    expect($body['is_tipped'])->toBeTrue()
+        ->and($body['tip_amount'])->toBe('3.0000')
+        // Display-only, but wrong-by-default is still wrong: a hydrated order reported "Copy 1" for
+        // a receipt already printed four times.
+        ->and($body['print_count'])->toBe(4)
+        ->and($body['currency_id'])->toBe((int) $this->fx->config->currency_id)
+        ->and($body['company_id'])->toBe($this->fx->company->getKey());
+});
+
+it('sends the refunded order uuid, not just its id', function (): void {
+    // The client links orders by uuid and sends `refunded_order_uuid` back in the command. Without
+    // the uuid on the way down it can only send null, unpicking the refund from what it refunds.
+    $original = pushOrder($this->fx, ['state' => 'paid']);
+    $originalId = (int) Order::query()->where('uuid', $original)->value('id');
+
+    $refund = pushOrder($this->fx, ['state' => 'paid', 'is_refund' => true, 'refunded_order_uuid' => $original]);
+
+    $body = $this->withHeaders($this->fx->headers())->getJson('/api/pos/orders/'.$refund)->assertOk()->json();
+
+    expect($body['refunded_order_id'])->toBe($originalId)
+        ->and($body['refunded_order_uuid'])->toBe($original);
+});
+
 it('never returns another company orders', function (): void {
     $stranger = PosFixtures::make()->withSession();
     pushOrder($stranger);
@@ -106,8 +194,10 @@ it('pages with a cursor and reports a total that does not shrink', function (): 
         ->assertOk();
 
     expect($second->json('records'))->toHaveCount(1)
-        // `total` counted after the cursor would read 1 here, making it useless as a page count.
-        ->and($second->json('total'))->toBe(3)
+        // Null rather than a number: counting again would re-run the whole match set to answer a
+        // question page one already answered, and a count taken *after* the cursor would read 1 —
+        // which is worse than not answering, because it looks like a page count and is not one.
+        ->and($second->json('total'))->toBeNull()
         ->and($second->json('next_cursor'))->toBeNull();
 
     // The pages do not overlap — a cursor that used `<=` would repeat a row on every page boundary.

@@ -80,11 +80,13 @@ function useServerLookup({
     filter,
     query,
     pageSize,
+    server,
     setServer,
 }: {
     filter: Filter;
     query: string;
     pageSize: number;
+    server: ServerState;
     setServer: (update: (current: ServerState) => ServerState) => void;
 }): { loadMore: () => void } {
     const generation = useRef(0);
@@ -132,7 +134,8 @@ function useServerLookup({
                 setServer((current) => ({
                     records: cursor === null ? page.records : [...current.records, ...page.records],
                     cursor: page.next_cursor,
-                    total: page.total,
+                    // null on a cursor page: the server does not recount, so keep page one's answer.
+                    total: page.total ?? current.total,
                     loading: false,
                     offline: false,
                 }));
@@ -156,11 +159,10 @@ function useServerLookup({
     }, [filter, query, pageSize, run, setServer]);
 
     return {
+        // Reads the rendered state rather than peeking inside a `setServer` updater. Updaters must
+        // be pure: React double-invokes them under StrictMode, which fired this page request twice.
         loadMore: () => {
-            setServer((current) => {
-                if (current.cursor !== null && !current.loading) void run(current.cursor);
-                return current;
-            });
+            if (server.cursor !== null && !server.loading) void run(server.cursor);
         },
     };
 }
@@ -180,7 +182,7 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
     const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
     const [server, setServer] = useState<ServerState>(IDLE_SERVER_STATE);
 
-    const lookup = useServerLookup({ filter, query, pageSize, setServer });
+    const lookup = useServerLookup({ filter, query, pageSize, server, setServer });
 
     const rows = useMemo(() => {
         const needle = query.trim().toLowerCase();

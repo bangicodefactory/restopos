@@ -204,6 +204,29 @@ describe('toClientRows', () => {
         expect(staleUuids([record({ uuid: 'order-1', updated_at: '2026-08-05T10:00:00Z' })], held)).toEqual([]);
     });
 
+    it('carries the fields that travel back up in the outbox command', () => {
+        // A hydrated order is not read-only. The first thing that touches it — a reprint, say —
+        // pushes the whole row up, and `is_tipped`, `tip_amount` and `refunded_order_uuid` are all
+        // writable on ingest. Defaulting them here does not leave a display gap; it overwrites the
+        // server's own record with a guess.
+        const { orders } = toClientRows({
+            ...payload,
+            is_tipped: true,
+            tip_amount: '3.00',
+            print_count: 4,
+            currency_id: 7,
+            company_id: 2,
+            refunded_order_uuid: 'original-order',
+        });
+
+        expect(orders[0]?.is_tipped).toBe(true);
+        expect(orders[0]?.tip_amount).toBe('3.00');
+        expect(orders[0]?.refunded_order_uuid).toBe('original-order');
+        expect(orders[0]?.print_count).toBe(4);
+        expect(orders[0]?.currency_id).toBe(7);
+        expect(orders[0]?.company_id).toBe(2);
+    });
+
     it('tolerates an order with no children at all', () => {
         const graph = toClientRows({ uuid: 'bare', updated_at: '2026-08-05T10:00:00Z' });
 

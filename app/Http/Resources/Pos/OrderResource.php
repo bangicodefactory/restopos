@@ -51,8 +51,35 @@ final class OrderResource extends JsonResource
             'restaurant_table_id' => $order->restaurant_table_id,
             'guest_count' => (int) $order->guest_count,
             'floating_order_name' => $order->floating_order_name,
+            /*
+             * These four are not display sugar. A client that hydrates an order from this payload
+             * writes the row back through the outbox the first time anything touches it — and
+             * reprinting a looked-up order is the most ordinary thing a cashier does with one.
+             * `is_tipped` and `tip_amount` are client-writable on ingest, so omitting them here made
+             * a reprint push `is_tipped=false, tip_amount=0` and wipe the recorded tip (BAN-465).
+             * `refunded_order_uuid` is sent by the same command; without the uuid the client cannot
+             * reconstruct the link and would unpick a refund from the order it refunds.
+             */
+            'is_tipped' => (bool) $order->is_tipped,
+            'tip_amount' => (string) $order->tip_amount,
             'is_refund' => (bool) $order->is_refund,
             'refunded_order_id' => $order->refunded_order_id,
+            'refunded_order_uuid' => $order->refundedOrder?->uuid,
+            'split_from_order_uuid' => $order->splitFromOrder?->uuid,
+            'split_letter' => $order->split_letter,
+            // Display-only, but wrong-by-default is still wrong: a hydrated order reported "Copy 1"
+            // for a receipt that had already been printed four times, and a zero currency id would
+            // format the reprint in nothing at all.
+            'company_id' => (int) $order->company_id,
+            'currency_id' => (int) $order->currency_id,
+            'currency_rate' => (string) $order->currency_rate,
+            'print_count' => (int) $order->print_count,
+            'is_edited' => (bool) $order->is_edited,
+            'unsent_change_count' => (int) $order->unsent_change_count,
+            'last_prep_sent_at' => $order->last_prep_sent_at,
+            'closed_at' => $order->closed_at,
+            'cancelled_at' => $order->cancelled_at,
+            'cancel_reason' => $order->cancel_reason,
             'to_invoice' => (bool) $order->to_invoice,
             'general_customer_note' => $order->general_customer_note,
             'internal_note' => $order->internal_note,

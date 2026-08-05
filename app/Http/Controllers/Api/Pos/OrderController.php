@@ -50,12 +50,19 @@ final class OrderController extends Controller
             ->when($request->query('search'), fn ($q, $search) => $this->applySearch($q, (string) $search))
             ->orderByDesc('id');
 
+        $cursor = $request->query('cursor');
+
         // Counted before the cursor narrows it: `total` describes the result set the cashier is
         // paging through, and one that shrank with every page would be useless as a page count.
-        $total = (clone $query)->count();
+        //
+        // Skipped entirely on a cursor page. The count is the expensive half of this endpoint — with
+        // a search term it runs three correlated subqueries over the whole match set — and it cannot
+        // have changed since the first page, which is where the client took it from. Paying for it
+        // again on every "load more" would be paying for an answer we already gave.
+        $total = $cursor === null ? (clone $query)->count() : null;
 
         $rows = (clone $query)
-            ->when($request->query('cursor'), fn ($q, $cursor) => $q->where('id', '<', (int) $cursor))
+            ->when($cursor, fn ($q, $c) => $q->where('id', '<', (int) $c))
             ->limit($limit + 1)
             ->get(['id', 'uuid', 'name', 'receipt_number', 'state', 'amount_total', 'ordered_at', 'updated_at']);
 
@@ -90,8 +97,10 @@ final class OrderController extends Controller
         abort_unless(in_array((int) $order->pos_config_id, $config->visibleConfigIds(), true), 404);
 
         // `lines.attributeValues` eagerly: the ticket screen refunds from this payload, and the
-        // refund copies the chosen attributes onto the new line.
-        $order->load(['lines.attributeValues', 'payments', 'courses']);
+        // refund copies the chosen attributes onto the new line. `refundedOrder` and
+        // `splitFromOrder` are loaded for their uuids alone — the client links orders by uuid, and
+        // resolving them lazily inside the resource would be two queries per order rendered.
+        $order->load(['lines.attributeValues', 'payments', 'courses', 'refundedOrder', 'splitFromOrder']);
 
         return OrderResource::make($order)->response();
     }
