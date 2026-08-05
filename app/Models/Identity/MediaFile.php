@@ -20,13 +20,19 @@ use Illuminate\Support\Facades\Storage;
  * kiosk carousels, brand logos, receipt images (spec §2.A).
  *
  * The bootstrap payload ships metadata only — never binary (spec §5.3). The bytes come from
- * `GET /media/{media}`, which the register's service worker already caches (`sw.ts`, rule 4:
- * "Product imagery — nice to have, never blocking, LRU-capped").
+ * `GET /api/pos/media/{id}`, and the clients fetch them: that route is device-authenticated and an
+ * `<img src>` cannot carry a bearer token, so an `<img>` pointed at it would be an anonymous
+ * request (BAN-480).
  *
- * That split is why images work offline without bloating the replica: a product photo is an HTTP
- * resource the service worker keeps until it needs the space, while the receipt logo — which a
- * printer blocks on and which must survive an eviction — is pulled into the Dexie blob store under
- * `logo:{id}`, where `quota.ts` deliberately spares it (BAN-480).
+ * Both kinds of image therefore live in the Dexie blob store, not in an HTTP cache — the service
+ * worker treats `/api/*` as network-only precisely because IndexedDB is the offline store. What
+ * distinguishes them is the key: `product:{id}` for tiles, which `quota.ts` evicts first under
+ * storage pressure, and `logo:{id}` for the receipt mark, which it spares because a printer blocks
+ * on it.
+ *
+ * The kiosk is the exception, and has to be: a customer's phone holds a public token rather than a
+ * device token, so it cannot use that route at all. It receives public URLs in its menu payload,
+ * which is what `is_public` is for.
  */
 class MediaFile extends Model implements PosLoadable
 {

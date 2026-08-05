@@ -44,6 +44,11 @@ final class MediaController extends Controller
         abort_unless((int) $media->company_id === (int) $config->company_id, 404);
         abort_unless(in_array($media->collection->value, MediaFile::posCollections(), true), 404);
 
+        // `is_public` is deliberately not consulted. It marks what may be handed to an anonymous
+        // caller — the kiosk's menu photos — and this caller is neither anonymous nor untrusted: it
+        // is a paired device of this company holding a catalogue-scoped token. Requiring the flag
+        // here would hide a venue's own product photos from its own till.
+
         $disk = Storage::disk($media->disk);
 
         abort_unless($disk->exists($media->path), 404);
