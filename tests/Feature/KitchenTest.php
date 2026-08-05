@@ -292,3 +292,459 @@ it('queues and renders preparation print jobs, then acknowledges them', function
     expect(DB::table('preparation_print_jobs')->where('id', $job['id'])->value('state'))
         ->toBe(PrintJobState::Printed->value);
 });
+
+/**
+ * KDS-004 — a combo child has no category of its own: the category lives on the combo product the
+ * cashier tapped. Routing read the child's null category, matched no station, and the item was
+ * never cooked — silently, because a line that routes nowhere raises nothing.
+ */
+it('routes a combo child with no category to its parent station', function (): void {
+    // A display scoped to one category, so routing actually has to decide something.
+    $display = DB::table('prep_displays')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Grill',
+        'access_token' => Str::lower(Str::random(32)),
+        'show_all_categories' => false,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_prep_display')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'prep_display_id' => $display,
+    ]);
+    DB::table('pos_category_prep_display')->insert([
+        'prep_display_id' => $display,
+        'pos_category_id' => $this->fx->category->getKey(),
+    ]);
+    DB::table('prep_stages')->insert([
+        'prep_display_id' => $display,
+        'name' => 'To do',
+        'stage_type' => 'todo',
+        'sequence' => 10,
+        'is_default' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            [
+                'op' => 'create',
+                'uuid' => $parentUuid,
+                'variant_id' => $this->fx->variant->getKey(),
+                'qty' => '1',
+                'price_unit' => '10.00',
+                'discount' => '0',
+            ],
+            [
+                // The child carries no category — exactly how a combo component arrives.
+                'op' => 'create',
+                'uuid' => $childUuid,
+                'variant_id' => $this->fx->drinkVariant->getKey(),
+                'qty' => '1',
+                'price_unit' => '0.00',
+                'discount' => '0',
+                'combo_parent_uuid' => $parentUuid,
+                'pos_category_id' => null,
+            ],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $childUuid)->update(['pos_category_id' => null]);
+
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/orders/{$orderUuid}/preparation")
+        ->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+
+    expect($prepOrderId)->not->toBeNull();
+
+    $routed = DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->pluck('pos_order_line_uuid')
+        ->all();
+
+    // Both halves of the combo reach the station, not just the parent.
+    expect($routed)->toContain($parentUuid)
+        ->and($routed)->toContain($childUuid);
+
+    // And the child knows who its parent is, so the board can group them.
+    expect(DB::table('prep_order_lines')->where('pos_order_line_uuid', $childUuid)->value('combo_parent_uuid'))
+        ->toBe($parentUuid);
+});
+
+/**
+ * KDS-053 — an order note is not a line, so it routes to no category and the routed set is empty
+ * for every printer. `fanOutToPrinters` bailed there, so adding "no onions" after the send produced
+ * zero print jobs and the kitchen never learned about it — even though the delta is non-empty.
+ */
+it('prints a note-update ticket when only the order note changed', function (): void {
+    $printer = DB::table('pos_printers')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Kitchen printer',
+        'printer_type' => 'epson_epos',
+        'print_all_categories' => true,
+        'characters_per_line' => 42,
+        'copies' => 1,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_printer')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'pos_printer_id' => $printer,
+    ]);
+
+    $this->fx->config->forceFill(['use_preparation_printers' => true])->save();
+
+    $uuid = kitchenOrder($this->fx);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('preparation_print_jobs')->where('job_type', 'prep_note_update')->count())->toBe(0);
+
+    // The waiter comes back with "no onions" — nothing else about the order changes.
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'ALLERGY: no onions']);
+
+    $delta = $this->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/orders/{$uuid}/preparation-changes")
+        ->assertOk();
+
+    // Precondition: no line changed, only the note.
+    expect($delta->json('changes'))->toBe([])
+        ->and($delta->json('order_note_changed'))->toBeTrue();
+
+    $sent = $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation");
+    $sent->assertOk();
+
+    expect($sent->json('print_jobs'))->toHaveCount(1);
+
+    $job = DB::table('preparation_print_jobs')->where('job_type', 'prep_note_update')->first();
+
+    expect($job)->not->toBeNull()
+        ->and((int) $job->pos_printer_id)->toBe($printer);
+
+    // And the note is actually on the ticket the cook reads.
+    $rendered = $this->withHeaders($this->fx->headers())->getJson('/api/kitchen/print-jobs')
+        ->assertOk()
+        ->json('jobs');
+
+    $noteTicket = collect($rendered)->firstWhere('job_type', 'prep_note_update');
+
+    expect($noteTicket)->not->toBeNull()
+        ->and($noteTicket['rendered_text'])->toContain('ALLERGY: no onions');
+});
+
+it('does not print an order note to a station that never saw the order', function (): void {
+    // A second printer scoped to a category this order never touches.
+    $otherCategory = DB::table('pos_categories')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Bar',
+        'path' => '/bar',
+        'sequence' => 20,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $bar = DB::table('pos_printers')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Bar printer',
+        'printer_type' => 'epson_epos',
+        'print_all_categories' => false,
+        'characters_per_line' => 42,
+        'copies' => 1,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_printer')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'pos_printer_id' => $bar,
+    ]);
+    DB::table('pos_category_pos_printer')->insert([
+        'pos_printer_id' => $bar,
+        'pos_category_id' => $otherCategory,
+    ]);
+
+    $this->fx->config->forceFill(['use_preparation_printers' => true])->save();
+
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    // The bar never printed this order, so it has nothing to amend.
+    expect(DB::table('preparation_print_jobs')->where('pos_printer_id', $bar)->count())->toBe(0);
+});
+
+it('routes a cancelled combo child to the station that was cooking it', function (): void {
+    // Deleting a line builds its cancellation from the snapshot, so the snapshot has to carry the
+    // inherited category — otherwise the cancellation routes nowhere and the station keeps cooking.
+    $display = DB::table('prep_displays')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Grill',
+        'access_token' => Str::lower(Str::random(32)),
+        'show_all_categories' => false,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_prep_display')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'prep_display_id' => $display,
+    ]);
+    DB::table('pos_category_prep_display')->insert([
+        'prep_display_id' => $display,
+        'pos_category_id' => $this->fx->category->getKey(),
+    ]);
+    DB::table('prep_stages')->insert([
+        'prep_display_id' => $display,
+        'name' => 'To do',
+        'stage_type' => 'todo',
+        'sequence' => 10,
+        'is_default' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $parentUuid, 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $childUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $parentUuid],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $childUuid)->update(['pos_category_id' => null]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    // The child is struck off after the send.
+    DB::table('pos_order_lines')->where('uuid', $childUuid)->update(['deleted_at' => now()]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+
+    $cancellation = DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('pos_order_line_uuid', $childUuid)
+        ->where('change_type', 'cancelled')
+        ->first();
+
+    expect($cancellation)->not->toBeNull()
+        ->and($cancellation->combo_parent_uuid)->toBe($parentUuid);
+});
+
+/** A category-scoped grill station, so routing has to actually decide something. */
+function grillDisplay(PosFixtures $fx): int
+{
+    $display = DB::table('prep_displays')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $fx->company->getKey(),
+        'name' => 'Grill',
+        'access_token' => Str::lower(Str::random(32)),
+        'show_all_categories' => false,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_prep_display')->insert([
+        'pos_config_id' => $fx->config->getKey(),
+        'prep_display_id' => $display,
+    ]);
+    DB::table('pos_category_prep_display')->insert([
+        'prep_display_id' => $display,
+        'pos_category_id' => $fx->category->getKey(),
+    ]);
+    DB::table('prep_stages')->insert([
+        'prep_display_id' => $display,
+        'name' => 'To do',
+        'stage_type' => 'todo',
+        'sequence' => 10,
+        'is_default' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    return $display;
+}
+
+it('inherits through a combo nested inside a combo', function (): void {
+    $display = grillDisplay($this->fx);
+
+    $rootUuid = (string) Str::uuid();
+    $midUuid = (string) Str::uuid();
+    $leafUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $rootUuid, 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $midUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $rootUuid],
+            ['op' => 'create', 'uuid' => $leafUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $midUuid],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    // Only the root owns a category — the walk has to climb two levels to find it.
+    DB::table('pos_order_lines')->whereIn('uuid', [$midUuid, $leafUuid])->update(['pos_category_id' => null]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+
+    $routed = DB::table('prep_order_lines')->where('prep_order_id', $prepOrderId)->pluck('pos_order_line_uuid')->all();
+
+    expect($routed)->toContain($rootUuid)->toContain($midUuid)->toContain($leafUuid);
+});
+
+it('inherits past a parent that is not itself prepared', function (): void {
+    // A combo parent flagged skip_preparation is absent from the delta entirely. Resolving ancestry
+    // from the delta alone would leave its children with nothing to inherit — uncooked again.
+    $display = grillDisplay($this->fx);
+
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => $parentUuid, 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $childUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '0.00', 'discount' => '0', 'combo_parent_uuid' => $parentUuid],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $childUuid)->update(['pos_category_id' => null]);
+    DB::table('pos_order_lines')->where('uuid', $parentUuid)->update(['skip_preparation' => true]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $prepOrderId = DB::table('prep_orders')->where('prep_display_id', $display)->value('id');
+    $routed = DB::table('prep_order_lines')->where('prep_order_id', $prepOrderId)->pluck('pos_order_line_uuid')->all();
+
+    // The parent is not cooked; the child still is.
+    expect($routed)->toContain($childUuid)
+        ->and($routed)->not->toContain($parentUuid);
+});
+
+/**
+ * KDS-016, end to end — the acceptance criterion itself: cancel a line, serve the rest, and the
+ * card reaches "served" with no cook interaction on the cancelled row.
+ *
+ * The unit tests over `board.ts` cannot prove this. `prep_orders.state` is recomputed server-side
+ * on every line move, persisted and broadcast, and the client assigns that state verbatim — so a
+ * client-only fix is overwritten the moment the cook touches anything.
+ */
+it('lets a card reach served after a line is cancelled, with no cook interaction on it', function (): void {
+    $lineUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '2.50', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    // The customer changes their mind about the drink after it has been sent.
+    DB::table('pos_order_lines')->where('uuid', $lineUuid)->update(['deleted_at' => now()]);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $token = $this->fx->display->access_token;
+    $board = $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders");
+    $prepOrderId = (int) $board->json('orders.0.id');
+
+    // The cancellation is on the card as a todo row — that is how the kitchen is told to stop.
+    $cancellation = DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', 'cancelled')
+        ->first();
+
+    expect($cancellation)->not->toBeNull()
+        ->and((string) $cancellation->state)->toBe(PrepLineState::Todo->value);
+
+    // The cook serves every line that is actually food, and touches nothing else.
+    foreach (DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', '!=', 'cancelled')
+        ->pluck('id') as $lineId) {
+        $this->withHeaders($this->kdsHeaders)
+            ->postJson("/api/kitchen/{$token}/lines/{$lineId}/state", ['state' => PrepLineState::Served->value])
+            ->assertOk();
+    }
+
+    expect(DB::table('prep_orders')->where('id', $prepOrderId)->value('state'))
+        ->toBe(PrepOrderState::Served->value);
+
+    // The cancellation row was never touched.
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellation->id)->value('state'))
+        ->toBe(PrepLineState::Todo->value);
+});
+
+it('does not drag a cancellation along when the card is bumped or recalled', function (): void {
+    // The client skips cancellations in `applyStageLocally` / `applyRecallLocally`. The server has
+    // to agree: it broadcasts the authoritative line states, so a client-only skip is overwritten.
+    $lineUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '2.50', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $lineUuid)->update(['deleted_at' => now()]);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $token = $this->fx->display->access_token;
+    $board = $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders");
+    $prepOrderId = (int) $board->json('orders.0.id');
+    $stages = collect($board->json('stages'))->keyBy('stage_type');
+
+    $cancellationId = (int) DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', 'cancelled')
+        ->value('id');
+
+    // Bump the whole card to ready.
+    $this->withHeaders($this->kdsHeaders)
+        ->postJson("/api/kitchen/{$token}/orders/{$prepOrderId}/stage", ['stage_id' => $stages['ready']['id']])
+        ->assertOk()
+        ->assertJsonPath('state', PrepOrderState::Ready->value);
+
+    // "Don't make this" was not marked ready.
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellationId)->value('state'))
+        ->toBe(PrepLineState::Todo->value);
+
+    // Recalling reopens the food, and must not resurrect the cancellation as work either.
+    $this->withHeaders($this->kdsHeaders)
+        ->postJson("/api/kitchen/{$token}/orders/{$prepOrderId}/recall")
+        ->assertOk();
+
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellationId)->value('state'))
+        ->toBe(PrepLineState::Todo->value)
+        ->and(DB::table('prep_line_stage_logs')->where('prep_order_line_id', $cancellationId)->count())
+        ->toBe(0);
+});

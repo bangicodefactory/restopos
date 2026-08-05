@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Kitchen;
 
 use App\Enums\OrderPrepState;
+use App\Enums\PrepChangeType;
 use App\Enums\PrepLineState;
 use App\Enums\PrepOrderState;
 use App\Enums\PrepStageType;
@@ -124,6 +125,13 @@ final readonly class KitchenDisplayService
             $lines = $this->connection->table('prep_order_lines')->where('prep_order_id', $prepOrderId)->get();
 
             foreach ($lines as $line) {
+                // Bumping the card must not drag a cancellation along with it (KDS-016): marking
+                // "don't make this" as ready or served is nonsense, and it is what made the row
+                // look like work again on the next aggregate. Mirrors `applyStageLocally`.
+                if ($this->isCancelled($line)) {
+                    continue;
+                }
+
                 $this->transitionLine($line, $stageId, $target, $employeeId);
             }
 
@@ -171,6 +179,12 @@ final readonly class KitchenDisplayService
             $lines = $this->connection->table('prep_order_lines')->where('prep_order_id', $prepOrderId)->get();
 
             foreach ($lines as $line) {
+                // A recall reopens the food, not the cancellations — putting one back to `todo`
+                // resurrects "don't make this" as work to do (KDS-016). Mirrors `applyRecallLocally`.
+                if ($this->isCancelled($line)) {
+                    continue;
+                }
+
                 $this->transitionLine($line, $todoStage === null ? null : (int) $todoStage, PrepLineState::Todo, $employeeId);
             }
 
@@ -186,6 +200,22 @@ final readonly class KitchenDisplayService
     }
 
     // ------------------------------------------------------------- internals
+
+    /**
+     * Is this prep line a cancellation? (KDS-016)
+     *
+     * The server's single definition, and the mirror of `isLineCancelled` in
+     * `resources/js/kitchen/logic/board.ts` — the two must stay in step, because the client renders
+     * from its own copy right up until this side broadcasts and overwrites it.
+     *
+     * Both spellings count. A cancellation arrives as a *new* line in state `todo` carrying
+     * `change_type: 'cancelled'`; it only reaches state `cancelled` if something later sets it.
+     */
+    private function isCancelled(object $line): bool
+    {
+        return (string) $line->state === PrepLineState::Cancelled->value
+            || (string) $line->change_type === PrepChangeType::Cancelled->value;
+    }
 
     private function transitionLine(object $line, ?int $stageId, PrepLineState $state, ?int $employeeId): void
     {
@@ -227,9 +257,23 @@ final readonly class KitchenDisplayService
     {
         $lines = $this->connection->table('prep_order_lines')->where('prep_order_id', $prepOrderId)->get();
 
-        $states = $lines->pluck('state')->map(static fn (mixed $v): string => (string) $v)->all();
+        // KDS-016 — a cancellation is booked as a *new* prep line in state `todo` carrying
+        // `change_type: 'cancelled'`. It is the kitchen's instruction to stop cooking, not work,
+        // and `all()` demands every state match — so leaving it in pinned the card at `pending`
+        // whatever the cook did to the real food.
+        //
+        // This is the copy that matters. It persists `prep_orders.state` and broadcasts it, and the
+        // client assigns that state verbatim, so a client-side fix alone is overwritten on the next
+        // line move. The predicate mirrors `isLineCancelled` in resources/js/kitchen/logic/board.ts;
+        // the two must stay in step.
+        $active = $lines->reject(fn (object $line): bool => $this->isCancelled($line));
+
+        $states = $active->pluck('state')->map(static fn (mixed $v): string => (string) $v)->all();
 
         $state = match (true) {
+            // Every line cancelled: the card is cancelled, not served. `aggregateState` on the
+            // client says the same — these two answer the same question and must not diverge.
+            $lines->isNotEmpty() && $states === [] => PrepOrderState::Cancelled,
             $states === [] => PrepOrderState::Pending,
             $this->all($states, PrepLineState::Served->value) => PrepOrderState::Served,
             $this->all($states, PrepLineState::Ready->value) => PrepOrderState::Ready,
@@ -302,8 +346,14 @@ final readonly class KitchenDisplayService
             return;
         }
 
+        // A station whose whole card was cancelled has nothing left to plate, so it must not hold
+        // the order at "sent" for the register — treat it as settled alongside the served ones
+        // (KDS-016). An order cancelled at *every* station reads as served rather than in-flight.
+        $settled = [PrepOrderState::Served->value, PrepOrderState::Cancelled->value];
+        $servedOrCancelled = array_filter($states, static fn (string $s): bool => ! in_array($s, $settled, true)) === [];
+
         $prepState = match (true) {
-            $this->all($states, PrepOrderState::Served->value) => OrderPrepState::Served,
+            $servedOrCancelled => OrderPrepState::Served,
             $this->all($states, PrepOrderState::Ready->value) => OrderPrepState::Ready,
             $this->any($states, [PrepOrderState::Ready->value]) => OrderPrepState::PartiallyReady,
             default => OrderPrepState::Sent,

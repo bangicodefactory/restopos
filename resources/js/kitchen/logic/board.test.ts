@@ -13,6 +13,9 @@ import {
     filterLines,
     groupLinesByCourse,
     isCardComplete,
+    isLineCancelled,
+    isLineDone,
+    isLineOpen,
     nextLineState,
     nextStage,
     previousStage,
@@ -126,6 +129,29 @@ describe('effectiveStageId', () => {
             ],
         });
         expect(effectiveStageId(card, STAGES)).toBe(3);
+    });
+
+    // KDS-016 — the server books a cancellation as a *todo* row sitting in the To-Do stage. Counting
+    // it as the least-advanced line parked the whole card in that column however far along the real
+    // food was, which is the bug the cook actually sees.
+    it('ignores a cancellation row that is still in the todo stage', () => {
+        const card = order({
+            lines: [
+                line({ prep_stage_id: 1, state: 'todo', change_type: 'cancelled' }),
+                line({ prep_stage_id: 3, state: 'ready' }),
+            ],
+        });
+        expect(effectiveStageId(card, STAGES)).toBe(3);
+    });
+
+    it('uses the most advanced line when a cancellation row is all that is left open', () => {
+        const card = order({
+            lines: [
+                line({ prep_stage_id: 1, state: 'todo', change_type: 'cancelled' }),
+                line({ prep_stage_id: 4, state: 'served' }),
+            ],
+        });
+        expect(effectiveStageId(card, STAGES)).toBe(4);
     });
 
     it('falls back to the line state when the stage belongs to another display', () => {
@@ -303,6 +329,37 @@ describe('aggregateState', () => {
             aggregateState({ state: 'pending', lines: [line({ state: 'cancelled' }), line({ state: 'todo' })] }),
         ).toBe('pending');
     });
+
+    // KDS-016 — the server books a cancellation as a *new* prep line with `change_type: 'cancelled'`
+    // in state `todo`. That row is an instruction to stop cooking, not something to cook.
+    describe('a cancellation row is not open work (KDS-016)', () => {
+        const cancellation = (): KitchenLine => line({ state: 'todo', change_type: 'cancelled' });
+
+        it('lets the rest of the card reach served with no cook interaction on it', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'served' }), cancellation()] }),
+            ).toBe('served');
+        });
+
+        it('does not hold the card at pending', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'ready' }), cancellation()] }),
+            ).toBe('ready');
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'in_progress' }), cancellation()] }),
+            ).toBe('in_progress');
+        });
+
+        it('is cancelled when the cancellation row is all that is left', () => {
+            expect(aggregateState({ state: 'pending', lines: [cancellation()] })).toBe('cancelled');
+        });
+
+        it('still counts a genuine todo line as open work', () => {
+            expect(
+                aggregateState({ state: 'pending', lines: [line({ state: 'todo' }), cancellation()] }),
+            ).toBe('pending');
+        });
+    });
 });
 
 describe('optimistic mutation', () => {
@@ -411,5 +468,37 @@ describe('isCardComplete', () => {
         expect(isCardComplete({ lines: [] })).toBe(false);
         expect(isCardComplete({ lines: [line({ state: 'served' }), line({ state: 'cancelled' })] })).toBe(true);
         expect(isCardComplete({ lines: [line({ state: 'served' }), line({ state: 'ready' })] })).toBe(false);
+    });
+
+    // KDS-016 — this gates whether the card can be cleared off the board at all.
+    it('lets a card clear when the only unfinished row is a cancellation', () => {
+        expect(
+            isCardComplete({ lines: [line({ state: 'served' }), line({ state: 'todo', change_type: 'cancelled' })] }),
+        ).toBe(true);
+    });
+
+    it('still refuses to clear while real food is outstanding', () => {
+        expect(
+            isCardComplete({ lines: [line({ state: 'ready' }), line({ state: 'todo', change_type: 'cancelled' })] }),
+        ).toBe(false);
+    });
+});
+
+describe('isLineOpen', () => {
+    it('is the one answer the card state, the column and the clear check all use (KDS-016)', () => {
+        expect(isLineOpen(line({ state: 'todo' }))).toBe(true);
+        expect(isLineOpen(line({ state: 'in_progress' }))).toBe(true);
+        expect(isLineOpen(line({ state: 'ready' }))).toBe(true);
+        expect(isLineOpen(line({ state: 'served' }))).toBe(false);
+        expect(isLineOpen(line({ state: 'cancelled' }))).toBe(false);
+        // The shape the server actually writes a cancellation in.
+        expect(isLineOpen(line({ state: 'todo', change_type: 'cancelled' }))).toBe(false);
+    });
+
+    it('keeps "finished" and "cancelled" distinct for the line styling', () => {
+        // isLineDone answers a different question on purpose: the cook needs to tell "I cooked
+        // that" from "that was called off".
+        expect(isLineDone(line({ state: 'todo', change_type: 'cancelled' }))).toBe(false);
+        expect(isLineCancelled(line({ state: 'todo', change_type: 'cancelled' }))).toBe(true);
     });
 });
