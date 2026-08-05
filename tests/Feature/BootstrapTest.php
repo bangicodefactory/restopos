@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use App\Enums\DeviceType;
 use App\Enums\EmployeeRole;
+use App\Enums\OrderState;
 use App\Models\Identity\Employee;
+use App\Models\Pos\Order;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Services\Device\DevicePairingService;
@@ -291,4 +293,54 @@ it('gates endpoints on the token abilities of the device kind', function (): voi
         ->postJson('/api/pos/sync', ['orders' => [$this->fx->orderCommand((string) Str::uuid())]])
         ->assertStatus(403)
         ->assertJsonPath('error.code', 'missing_ability:pos:sync');
+});
+
+/**
+ * `GET /api/pos/open-orders` — the resume path a register uses on cold start to pick up drafts
+ * left on the floor, including those opened on a trusted peer till.
+ *
+ * gap-server.md §6.15 listed this among the endpoints no test touched. A route the contract test
+ * proves *exists* is not a route anything proves *works* (BAN-457).
+ */
+it('serves open draft orders, and drops one that has left the draft set', function (): void {
+    $fx = PosFixtures::make()->withSession();
+
+    $draftUuid = (string) Str::uuid();
+    $settledUuid = (string) Str::uuid();
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [
+            $fx->orderCommand($draftUuid),
+            $fx->orderCommand($settledUuid),
+        ],
+    ])->assertOk();
+
+    $first = test()->withHeaders($fx->headers())->getJson('/api/pos/open-orders');
+
+    $first->assertOk()->assertJsonStructure(['server_time', 'records', 'lines', 'payments', 'courses', 'tombstones']);
+
+    $draftId = (int) Order::query()->where('uuid', $draftUuid)->value('id');
+
+    expect(collect($first->json('records'))->pluck('uuid')->all())
+        ->toContain($draftUuid)
+        ->toContain($settledUuid)
+        // The lines came along, so a resumed order is not an empty shell.
+        ->and(collect($first->json('lines'))->pluck('pos_order_id')->map(intval(...))->all())
+        ->toContain($draftId);
+
+    $watermark = $first->json('server_time');
+
+    // One order is settled; it is no longer open, so the next pull must retract it rather than
+    // leaving the register holding a draft that no longer exists.
+    Order::query()->where('uuid', $settledUuid)->update([
+        'state' => OrderState::Paid->value,
+        'updated_at' => now()->addSecond(),
+    ]);
+
+    $second = test()->withHeaders($fx->headers())->getJson('/api/pos/open-orders?since='.urlencode((string) $watermark));
+
+    $second->assertOk();
+
+    expect($second->json('tombstones'))->toContain($settledUuid)
+        ->and(collect($second->json('records'))->pluck('uuid')->all())->not->toContain($settledUuid);
 });
