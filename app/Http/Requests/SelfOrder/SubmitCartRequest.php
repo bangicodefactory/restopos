@@ -26,6 +26,9 @@ final class SubmitCartRequest extends FormRequest
     {
         return [
             'order_uuid' => ['nullable', 'string', 'size:36'],
+            // Only meaningful alongside an `order_uuid` that already exists: it is how the caller
+            // proves the order is theirs (BAN-496). Usually sent as the `X-Order-Token` header.
+            'order_token' => ['nullable', 'string', 'max:64'],
             'preset_id' => ['nullable', 'integer'],
             'customer_note' => ['nullable', 'string', 'max:2000'],
             'customer_email' => ['nullable', 'email', 'max:160'],

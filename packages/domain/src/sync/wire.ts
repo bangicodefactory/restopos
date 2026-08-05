@@ -171,6 +171,8 @@ export type SyncRecordResult = {
         id: number;
         name: string;
         sequence_number: number;
+        /** Server-minted (BAN-496). The client's local value is a placeholder until this lands. */
+        access_token: string;
         state: string;
         amount_untaxed: Money;
         amount_tax: Money;

@@ -8,6 +8,7 @@ use App\Enums\SelfOrderPayAfter;
 use App\Enums\SelfOrderServiceMode;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
+use App\Models\Pos\PosConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -271,4 +272,119 @@ it('persists attribute selections from a self-order cart and fires them to the k
     // Fired to the kitchen on submit, with the option on the ticket.
     $displayName = (string) DB::table('prep_order_lines')->value('display_name');
     expect($displayName)->toContain('Chocolate');
+});
+
+/**
+ * BAN-496 — anonymous order takeover.
+ *
+ * `order_uuid` exists so a phone on a flaky connection can retry a submit without ordering twice.
+ * It was honoured unconditionally, so naming any draft order's uuid landed the upsert in *that*
+ * order and handed back its `access_token` — read it, add to it, cancel it. One uuid was the
+ * whole attack, and uuids are not secrets: they ride on the register, the KDS and the receipt.
+ */
+it('refuses a cart naming an order the caller does not own', function (): void {
+    // A victim's order, placed from another device entirely.
+    $victimUuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($victimUuid)],
+    ])->assertOk();
+
+    $victim = Order::query()->where('uuid', $victimUuid)->firstOrFail();
+    $victimToken = (string) $victim->access_token;
+    $victimLines = OrderLine::query()->where('pos_order_id', $victim->getKey())->count();
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'order_uuid' => $victimUuid,
+        'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+    ]);
+
+    $response->assertStatus(422)->assertJsonPath('error.code', 'cart_rejected');
+
+    // No token leaked, and the message does not confirm the order exists.
+    expect($response->json('access_token'))->toBeNull()
+        ->and(json_encode($response->json()))->not->toContain($victimToken);
+
+    // The victim's order is untouched: no lines added, token unrotated.
+    $victim->refresh();
+    expect(OrderLine::query()->where('pos_order_id', $victim->getKey())->count())->toBe($victimLines)
+        ->and((string) $victim->access_token)->toBe($victimToken);
+});
+
+it('refuses a cart naming an order from another venue even with its token', function (): void {
+    // A leaked token must not become a cross-venue write.
+    //
+    // The second venue is another config in the *same company*, sharing this fixture's catalogue
+    // and taxes. That is deliberate: built from a separate PosFixtures, the foreign order carries a
+    // tax id this config's catalogue does not know, so ingest rejects it for that reason and the
+    // test passes whether or not the config check exists — proving nothing. Here the only thing
+    // that can reject the submission is the guard, and the assertion on its message says so.
+    $sibling = PosConfig::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Terrace',
+        'access_token' => PosConfig::newAccessToken(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'is_restaurant' => true,
+        'limited_product_count' => 100,
+        'limited_customer_count' => 20,
+    ]);
+
+    $foreign = Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $sibling->getKey(),
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'pos_session_id' => $this->fx->session->getKey(),
+        'access_token' => (string) Str::uuid(),
+        'state' => OrderState::Draft->value,
+        'ordered_at' => now(),
+    ]);
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'order_uuid' => (string) $foreign->uuid,
+        'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+    ], ['X-Order-Token' => (string) $foreign->access_token]);
+
+    $response->assertStatus(422)->assertJsonPath('error.code', 'cart_rejected');
+
+    // The guard's own message — not an ingest failure that happens to look like a rejection.
+    expect($response->json('error.message'))->toContain('cannot be added to');
+
+    // And the foreign order is untouched: still its venue's, still empty.
+    $foreign->refresh();
+    expect((int) $foreign->pos_config_id)->toBe($sibling->getKey())
+        ->and(OrderLine::query()->where('pos_order_id', $foreign->getKey())->count())->toBe(0);
+});
+
+it('lets the caller add to its own order with the matching token', function (): void {
+    // The legitimate reason `order_uuid` exists: a retry, or a second round on the same cart.
+    $first = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+    ])->assertCreated();
+
+    $uuid = $first->json('order.uuid');
+    $token = $first->json('access_token');
+
+    $second = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'order_uuid' => $uuid,
+        'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+    ], ['X-Order-Token' => $token]);
+
+    $second->assertCreated()->assertJsonPath('order.uuid', $uuid);
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+    expect(OrderLine::query()->where('pos_order_id', $order->getKey())->count())->toBe(2);
+});
+
+it('mints the access token server-side and ignores the client value', function (): void {
+    $planted = (string) Str::uuid();
+    $uuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['access_token' => $planted])],
+    ])->assertOk();
+
+    // A client that could choose the token could pre-register the public channel name
+    // `pos.order.{token}` for an order it does not own yet.
+    expect((string) Order::query()->where('uuid', $uuid)->value('access_token'))->not->toBe($planted);
 });

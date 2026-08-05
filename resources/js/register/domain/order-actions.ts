@@ -1425,6 +1425,8 @@ export function applyServerAck(
         id?: number;
         name?: string | null;
         sequence_number?: number | null;
+        /** Server-minted (BAN-496); the local one is a placeholder until the ack lands. */
+        access_token?: string | null;
         state?: string;
         amounts?: Partial<
             Pick<
@@ -1449,6 +1451,9 @@ export function applyServerAck(
         if (ack.id !== undefined) order.id = ack.id;
         if (ack.name !== undefined) order.name = ack.name;
         if (ack.sequence_number !== undefined) order.sequence_number = ack.sequence_number;
+        // The server mints the access token, so adopt it — otherwise the local placeholder sticks
+        // around as the wrong answer to "which channel is this order broadcast on?" (BAN-496).
+        if (ack.access_token != null) order.access_token = ack.access_token;
         if (ack.amounts) Object.assign(order, ack.amounts);
         order.syncState = 'synced';
         order.syncError = null;

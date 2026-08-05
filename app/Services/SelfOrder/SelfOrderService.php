@@ -126,6 +126,7 @@ final readonly class SelfOrderService
         ?string $tableStandNumber = null,
         ?int $presetId = null,
         ?string $clientOrderUuid = null,
+        ?string $clientOrderToken = null,
     ): array {
         $config = $context->config;
 
@@ -139,8 +140,7 @@ final readonly class SelfOrderService
 
         $target = $this->targetOrder($context);
         $appending = $target !== null;
-        $orderUuid = $target?->uuid ?? ($clientOrderUuid ?? (string) Str::uuid());
-        $accessToken = $target?->access_token ?? (string) Str::uuid();
+        $orderUuid = $target?->uuid ?? $this->resolveCartOrderUuid($context, $clientOrderUuid, $clientOrderToken);
 
         $session = $this->sessions->resolveForIngest($config, null, (string) $orderUuid)['session'];
         $pricelistId = $this->pricing->resolvePricelistId($config, null, $presetId, null);
@@ -190,7 +190,10 @@ final readonly class SelfOrderService
                     'session_id' => $session->getKey(),
                     'state' => OrderState::Draft->value,
                     'source' => $source->value,
-                    'access_token' => (string) $accessToken,
+                    // No `access_token` here on purpose: the server mints it at creation and
+                    // ignores any client value (BAN-496), and `updateOrder` never writes it. Sending
+                    // one would read as though the caller still chooses it — the exact confusion
+                    // this fix removes. The real token is read back off the order below.
                     'pricelist_id' => $pricelistId,
                     'preset_id' => $presetId,
                     'table_id' => $this->tableIdFor($context),
@@ -446,6 +449,58 @@ final readonly class SelfOrderService
      * Append-to-table-order semantics: table service + `pay_after = meal` means
      * the cart joins the tab (SLF-110).
      */
+    /**
+     * Decide which uuid a cart submission may write to (BAN-496).
+     *
+     * `order_uuid` exists so a phone on a flaky connection can retry a submit without creating the
+     * order twice. It was honoured unconditionally, which made it an order-takeover primitive: name
+     * any draft order's uuid and the upsert below lands in *that* order, then this method's caller
+     * hands back its `access_token` — enough to read the order, add lines to it and cancel it.
+     * Learning one uuid was the whole attack.
+     *
+     * So a uuid naming an order that already exists is honoured only against the matching access
+     * token, which only the caller who created it was ever given.
+     *
+     * The existence check is deliberately **unscoped** by config. Scoping it would be the more
+     * natural-looking query and would reopen the hole: `OrderSyncService` resolves the uuid
+     * globally, so an order belonging to another venue would pass a config-scoped check here and
+     * still be hit by the upsert. Look the order up the way the thing being guarded looks it up.
+     * (Scoping the sync lookup itself is BAN-492; this guard must hold with or without it.)
+     */
+    private function resolveCartOrderUuid(
+        SelfOrderContext $context,
+        ?string $clientOrderUuid,
+        ?string $clientOrderToken,
+    ): string {
+        if ($clientOrderUuid === null) {
+            return (string) Str::uuid();
+        }
+
+        /** @var Order|null $existing */
+        $existing = Order::query()->where('uuid', $clientOrderUuid)->first();
+
+        if ($existing === null) {
+            return $clientOrderUuid; // Fresh uuid, or the retry of a submit that never landed.
+        }
+
+        $ownsIt = $clientOrderToken !== null
+            && $clientOrderToken !== ''
+            && hash_equals((string) $existing->access_token, $clientOrderToken)
+            && (int) $existing->pos_config_id === (int) $context->config->getKey();
+
+        if (! $ownsIt) {
+            // The message says nothing about why. The *response* still does: an unknown uuid is
+            // created and returns 201, a known one without its token returns 422, so a caller can
+            // confirm whether a uuid names a live order. That is unavoidable while `order_uuid`
+            // doubles as the retry key, and it is bounded — v4 uuids are not guessable and the
+            // route is behind `throttle:self-order`. It turns an *observed* uuid (a receipt, a KDS
+            // screen) into confirmation, and nothing more: no token, no contents, no write.
+            throw new DomainException('That order cannot be added to.');
+        }
+
+        return $clientOrderUuid;
+    }
+
     private function targetOrder(SelfOrderContext $context): ?Order
     {
         $config = $context->config;
