@@ -1,5 +1,7 @@
 import type { OrderRow, PaymentRow } from '@domain/types';
 
+import type { OrderIndexRecord } from '../data/order-lookup';
+
 /**
  * The ticket screen's decisions, extracted from the component (REG-295, REG-301).
  *
@@ -48,6 +50,64 @@ export function needsKitchenWithdrawal(order: OrderRow | null): boolean {
     if (order === null) return false;
 
     return order.last_prep_sent_at !== null || order.prep_state === 'sent';
+}
+
+/**
+ * A row in the ticket list: either a hydrated order, or an index record whose body is not here.
+ *
+ * The stub exists because a body fetch can fail on its own — the till drops off the network halfway
+ * through a page, or the order was deleted server-side between the index and the hydrate. Rendering
+ * only hydrated orders meant that row silently vanished, which reads as "that order does not exist"
+ * to the cashier looking straight at the receipt in their hand. The index already carries enough to
+ * show it honestly: name, receipt, state and total.
+ */
+export type TicketRow =
+    | { kind: 'order'; uuid: string; order: OrderRow }
+    | { kind: 'stub'; uuid: string; record: OrderIndexRecord };
+
+/**
+ * Merge the server's answer with the local working set, for a server-backed filter.
+ *
+ * The server decided the result set — it can match on invoice, customer and cardholder, fields this
+ * till has never held — so its records are never re-filtered through the local search term. Doing
+ * that would throw away the very matches that made the round trip worth making.
+ *
+ * Locally unsynced orders are appended regardless: they are this till's own unpushed work, and the
+ * server cannot know about them yet.
+ */
+export function mergeTicketRows(
+    records: OrderIndexRecord[],
+    ordersByUuid: Record<string, OrderRow>,
+    localUnsynced: OrderRow[],
+): TicketRow[] {
+    const rows = new Map<string, TicketRow>();
+
+    for (const record of records) {
+        const order = ordersByUuid[record.uuid];
+        rows.set(
+            record.uuid,
+            order
+                ? { kind: 'order', uuid: record.uuid, order }
+                : { kind: 'stub', uuid: record.uuid, record },
+        );
+    }
+
+    for (const order of localUnsynced) {
+        rows.set(order.uuid, { kind: 'order', uuid: order.uuid, order });
+    }
+
+    return [...rows.values()].sort((a, b) => sortKey(b) - sortKey(a));
+}
+
+/**
+ * Newest first, across both shapes.
+ *
+ * A stub has no `updatedAtLocal` — it was never a local row — so its server timestamp stands in.
+ * Mixing a local clock and a server clock in one sort is imprecise by a few seconds of drift, which
+ * is the right trade: the alternative is stubs bunched at one end of the list regardless of age.
+ */
+function sortKey(row: TicketRow): number {
+    return row.kind === 'order' ? row.order.updatedAtLocal : (Date.parse(row.record.updated_at) || 0);
 }
 
 /**

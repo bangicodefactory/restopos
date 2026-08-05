@@ -1,7 +1,13 @@
 import type { OrderRow, PaymentRow } from '@domain/types';
 import { describe, expect, it } from 'vitest';
 
-import { canDeleteOrder, clampPageSize, needsKitchenWithdrawal } from './ticket-rules';
+import type { OrderIndexRecord } from '../data/order-lookup';
+import {
+    canDeleteOrder,
+    clampPageSize,
+    mergeTicketRows,
+    needsKitchenWithdrawal,
+} from './ticket-rules';
 
 /**
  * BAN-465 / REG-295 — the two things the delete button was missing.
@@ -12,12 +18,14 @@ import { canDeleteOrder, clampPageSize, needsKitchenWithdrawal } from './ticket-
  * the customer from.
  */
 
-function order(overrides: Partial<OrderRow> = {}): OrderRow {
+/** Overrides are loose so a test can write `uuid: 'a'` without branding every literal. */
+function order(overrides: Record<string, unknown> = {}): OrderRow {
     return {
         uuid: 'o1',
         state: 'draft',
         last_prep_sent_at: null,
         prep_state: 'none',
+        updatedAtLocal: 0,
         ...overrides,
     } as OrderRow;
 }
@@ -88,6 +96,66 @@ describe('needsKitchenWithdrawal', () => {
     it('is true once anything reached the pass', () => {
         expect(needsKitchenWithdrawal(order({ last_prep_sent_at: '2026-08-05T10:00:00Z' }))).toBe(true);
         expect(needsKitchenWithdrawal(order({ prep_state: 'sent' }))).toBe(true);
+    });
+});
+
+describe('mergeTicketRows', () => {
+    const record = (uuid: string, updatedAt = '2026-08-05T10:00:00Z'): OrderIndexRecord => ({
+        id: 1,
+        uuid,
+        name: `A/${uuid}`,
+        receipt_number: `RC-${uuid}`,
+        state: 'paid',
+        amount_total: '10.00',
+        ordered_at: updatedAt,
+        updated_at: updatedAt,
+    });
+
+    it('renders a hydrated order as an order row', () => {
+        const rows = mergeTicketRows([record('a')], { a: order({ uuid: 'a' }) }, []);
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.kind).toBe('order');
+    });
+
+    it('keeps an index record whose body never arrived, as a stub', () => {
+        // This is the whole point: dropping the row tells a cashier holding the receipt that the
+        // order does not exist. The index already knows enough to show it honestly.
+        const rows = mergeTicketRows([record('missing')], {}, []);
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ kind: 'stub', uuid: 'missing' });
+    });
+
+    it('promotes a stub to an order row once the body lands', () => {
+        const records = [record('a')];
+
+        expect(mergeTicketRows(records, {}, [])[0]?.kind).toBe('stub');
+        expect(mergeTicketRows(records, { a: order({ uuid: 'a' }) }, [])[0]?.kind).toBe('order');
+    });
+
+    it('appends local unsynced orders the server cannot know about yet', () => {
+        const rows = mergeTicketRows([record('a')], { a: order({ uuid: 'a' }) }, [order({ uuid: 'local' })]);
+
+        expect(rows.map((row) => row.uuid).sort()).toEqual(['a', 'local']);
+    });
+
+    it('does not duplicate an order that is both in the page and locally unsynced', () => {
+        const shared = order({ uuid: 'a' });
+        const rows = mergeTicketRows([record('a')], { a: shared }, [shared]);
+
+        expect(rows).toHaveLength(1);
+    });
+
+    it('sorts newest first across both shapes', () => {
+        const rows = mergeTicketRows(
+            [record('old', '2026-08-05T09:00:00Z'), record('new', '2026-08-05T11:00:00Z')],
+            { old: order({ uuid: 'old', updatedAtLocal: Date.parse('2026-08-05T09:00:00Z') }) },
+            [],
+        );
+
+        // 'new' is a stub and 'old' is hydrated, so this only holds if the sort spans both shapes.
+        expect(rows.map((row) => row.uuid)).toEqual(['new', 'old']);
     });
 });
 

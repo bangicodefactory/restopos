@@ -7,7 +7,7 @@ import { Button, SearchInput, cn } from '@shared/ui';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { lookupOrders, type OrderIndexRecord } from '../data/order-lookup';
+import { fetchOrderGraphs, lookupOrders, type OrderIndexRecord } from '../data/order-lookup';
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
 import {
@@ -22,7 +22,13 @@ import { buildReceipt } from '../domain/receipt';
 import { orderTotals } from '../domain/totals';
 import { useCatalog, useMoney, useOrderLines } from '../hooks/use-register';
 import { useOrderStore, paymentsOf } from '../state/order-store';
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, canDeleteOrder } from './ticket-rules';
+import {
+    DEFAULT_PAGE_SIZE,
+    PAGE_SIZE_OPTIONS,
+    canDeleteOrder,
+    mergeTicketRows,
+    type TicketRow,
+} from './ticket-rules';
 
 /**
  * The order list (REG-290 … REG-300) and tip settlement (RST-127).
@@ -207,24 +213,39 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                     .includes(needle);
             });
 
-        // On the paid filter the server decided the result set — it can search fields this till has
-        // never held (invoice, customer, cardholder), so re-filtering its answer through the local
-        // needle would throw away the very matches that made the round trip worth making. The local
-        // list still supplies anything the server has not seen yet, and anything at all when offline.
+        // On a server-backed filter the server decided the result set; `mergeTicketRows` explains
+        // why its records are not re-filtered locally, and renders an index record whose body did
+        // not arrive as a stub rather than dropping it.
         if (isServerBacked(filter) && server.records.length > 0) {
-            const merged = new Map<string, OrderRow>();
-            for (const record of server.records) {
-                const order = orders[record.uuid];
-                if (order) merged.set(record.uuid, order);
-            }
-            for (const order of local) {
-                if (order.syncState !== 'synced') merged.set(order.uuid, order);
-            }
-            return [...merged.values()].sort((a, b) => b.updatedAtLocal - a.updatedAtLocal);
+            return mergeTicketRows(
+                server.records,
+                orders,
+                local.filter((order) => order.syncState !== 'synced'),
+            );
         }
 
-        return local.sort((a, b) => b.updatedAtLocal - a.updatedAtLocal).slice(0, pageSize);
+        return local
+            .sort((a, b) => b.updatedAtLocal - a.updatedAtLocal)
+            .slice(0, pageSize)
+            .map((order): TicketRow => ({ kind: 'order', uuid: order.uuid, order }));
     }, [catalog, filter, orders, pageSize, query, server.records]);
+
+    /**
+     * Fetch one order's body on demand — the retry behind a stub row.
+     *
+     * Stubs come from a body fetch that failed while its page succeeded, so the useful recovery is
+     * per row and on the cashier's initiative, not another sweep of the whole page.
+     */
+    const hydrateOne = useCallback(async (uuid: string): Promise<void> => {
+        const runtime = tryRuntime();
+        if (!runtime) return;
+
+        const graph = await fetchOrderGraphs(runtime.api, [uuid]);
+        if (graph.orders.length === 0) return;
+
+        hydrateOrders(graph);
+        for (const order of graph.orders) runtime.persistence.persist(order.uuid);
+    }, []);
 
     const detailLines = useOrderLines(selected);
     const detail = selected !== null ? (orders[selected] ?? null) : null;
@@ -314,41 +335,74 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
 
                 <ul className="min-h-0 flex-1 overflow-auto divide-y divide-slate-200">
                     {rows.length === 0 ? <li className="p-4 text-slate-500">{t('reg.tickets.none')}</li> : null}
-                    {rows.map((order) => (
-                        <li key={order.uuid}>
+                    {rows.map((row) =>
+                        row.kind === 'stub' ? (
+                            <li key={row.uuid}>
+                                {/*
+                                 * The body did not arrive. Everything shown here comes from the
+                                 * index, which is why the row can exist at all — dropping it would
+                                 * tell a cashier holding the receipt that the order does not exist.
+                                 * Tapping retries just this one.
+                                 */}
+                                <button
+                                    type="button"
+                                    onClick={() => void hydrateOne(row.uuid)}
+                                    className="flex w-full items-center gap-2 p-3 text-start"
+                                >
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate font-semibold text-slate-500">
+                                            {row.record.name ?? row.record.receipt_number}
+                                        </span>
+                                        <span className="block text-sm text-slate-400">
+                                            {row.record.state} · {t('reg.tickets.notLoaded')}
+                                        </span>
+                                    </span>
+                                    <span className="tabular-nums font-semibold text-slate-500">
+                                        {money(row.record.amount_total)}
+                                    </span>
+                                    <span
+                                        className="h-2.5 w-2.5 rounded-full bg-slate-300"
+                                        aria-label={t('reg.tickets.notLoaded')}
+                                    />
+                                </button>
+                            </li>
+                        ) : (
+                        <li key={row.uuid}>
                             <button
                                 type="button"
-                                onClick={() => setSelected(order.uuid)}
+                                onClick={() => setSelected(row.uuid)}
                                 className={cn(
                                     'flex w-full items-center gap-2 p-3 text-start',
-                                    selected === order.uuid && 'bg-brand-50',
+                                    selected === row.uuid && 'bg-brand-50',
                                 )}
                             >
                                 <span className="min-w-0 flex-1">
                                     <span className="block truncate font-semibold">
-                                        {order.name ?? order.floating_order_name ?? order.receipt_number}
+                                        {row.order.name ?? row.order.floating_order_name ?? row.order.receipt_number}
                                     </span>
                                     <span className="block text-sm text-slate-500">
-                                        {order.state} · {new Date(order.updatedAtLocal).toLocaleTimeString()}
+                                        {row.order.state} ·{' '}
+                                        {new Date(row.order.updatedAtLocal).toLocaleTimeString()}
                                     </span>
                                 </span>
                                 <span className="tabular-nums font-semibold">
-                                    {money(orderTotals(order.uuid).roundedTotal)}
+                                    {money(orderTotals(row.uuid).roundedTotal)}
                                 </span>
                                 <span
                                     className={cn(
                                         'h-2.5 w-2.5 rounded-full',
-                                        order.syncState === 'synced'
+                                        row.order.syncState === 'synced'
                                             ? 'bg-ok'
-                                            : order.syncState === 'quarantined'
+                                            : row.order.syncState === 'quarantined'
                                               ? 'bg-danger'
                                               : 'bg-warn',
                                     )}
-                                    aria-label={order.syncState}
+                                    aria-label={row.order.syncState}
                                 />
                             </button>
                         </li>
-                    ))}
+                        ),
+                    )}
                     {isServerBacked(filter) && server.cursor !== null ? (
                         <li className="p-2">
                             <Button block variant="secondary" disabled={server.loading} onClick={lookup.loadMore}>
