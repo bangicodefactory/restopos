@@ -116,9 +116,17 @@ final class SessionController extends Controller
             'session_ids' => ['nullable', 'array'],
         ]);
 
+        // Falling back to company 1 meant an operator of any other tenant exported company 1's
+        // ledger — the report is built from a company id, not from the scoped query (XCT-101).
+        $companyId = $request->user()?->getAttribute('company_id');
+
+        if ($companyId === null) {
+            return back()->with('error', 'Your account is not attached to a company, so it cannot export.');
+        }
+
         try {
             $this->exports->build(
-                companyId: (int) ($request->user()?->getAttribute('company_id') ?? 1),
+                companyId: (int) $companyId,
                 periodStart: (string) $data['period_start'],
                 periodEnd: (string) $data['period_end'],
                 sessionIds: isset($data['session_ids']) ? array_map(intval(...), (array) $data['session_ids']) : null,

@@ -45,11 +45,29 @@ final class CategoryController extends Controller
             'self_order_visible' => ['nullable', 'boolean'],
         ]);
 
-        $parent = $data['parent_id'] === null ? null : PosCategory::query()->find($data['parent_id']);
+        // `nullable` leaves the key absent when the field is not submitted at all, so read it
+        // defensively — indexing it directly 500s on a top-level category.
+        $parentId = $data['parent_id'] ?? null;
+        $parent = $parentId === null ? null : PosCategory::query()->find($parentId);
+
+        // `exists:pos_categories,id` runs unscoped, so it passes for another tenant's category while
+        // the scoped `find()` above returns null. Silently rooting the category would move it between
+        // companies; say so instead (XCT-101).
+        if ($parentId !== null && $parent === null) {
+            return back()->with('error', 'That parent category no longer exists.');
+        }
+
+        // The tenant comes from who is signed in, never from a default. `?? 1` put every company's
+        // top-level categories into company 1, where the creator could no longer see them.
+        $companyId = $parent?->company_id ?? $request->user()?->getAttribute('company_id');
+
+        if ($companyId === null) {
+            return back()->with('error', 'Your account is not attached to a company, so it cannot create categories.');
+        }
 
         PosCategory::query()->create([
             ...$data,
-            'company_id' => $parent?->company_id ?? 1,
+            'company_id' => (int) $companyId,
             'depth' => $parent === null ? 0 : (int) $parent->depth + 1,
             'path' => ($parent?->path ?? '').'/'.$data['name'],
         ]);
