@@ -10,6 +10,7 @@ use App\Models\Identity\Customer;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
+use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -596,4 +597,80 @@ it('replaces a line’s options when it is resent (edit)', function (): void {
         ->pluck('product_attribute_line_value_id')->map(fn ($v) => (int) $v)->all();
 
     expect($ids)->toBe([$swap]);
+});
+
+/**
+ * BAN-492 — the sync path looked an order up by uuid alone, then wrote to whatever it found.
+ *
+ * Any paired device could therefore mutate any draft order in the database — any venue, any tenant
+ * — by pushing a uuid it had merely observed. The read paths already scoped (spec §0.5); this one
+ * did not, and nothing tested it.
+ */
+it('refuses to mutate an order belonging to another register', function (): void {
+    $other = PosFixtures::make()->withSession();
+
+    $victimUuid = (string) Str::uuid();
+    $this->withHeaders($other->headers())->postJson('/api/pos/sync', [
+        'orders' => [$other->orderCommand($victimUuid)],
+    ])->assertOk();
+
+    $victim = Order::query()->where('uuid', $victimUuid)->firstOrFail();
+    $before = OrderLine::query()->where('pos_order_id', $victim->getKey())->count();
+
+    // This fixture's device pushes an edit to the other venue's order.
+    $response = $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($victimUuid, [], ['state' => OrderState::Cancelled->value])],
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.0.error.code', 'order_not_writable');
+
+    $victim->refresh();
+
+    expect($victim->state->value)->toBe(OrderState::Draft->value)
+        ->and((int) $victim->pos_config_id)->toBe($other->config->getKey())
+        ->and(OrderLine::query()->where('pos_order_id', $victim->getKey())->count())->toBe($before);
+
+    // The attempt is recorded, not just refused.
+    expect(DB::table('sync_conflicts')->where('conflict_type', SyncConflictType::UuidCollision->value)->count())->toBe(1);
+});
+
+it('still lets a trusted peer register sync a shared open order', function (): void {
+    // Trusted configs exist to "share open orders": the bootstrap and the delta both ship a peer's
+    // drafts to this till, so it will sync changes back. Scoping the lookup to `pos_config_id`
+    // alone — the obvious one-line fix — would break multi-till service.
+    $peer = PosConfig::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Terrace till',
+        'access_token' => PosConfig::newAccessToken(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'is_restaurant' => true,
+        'limited_product_count' => 100,
+        'limited_customer_count' => 20,
+    ]);
+
+    $this->fx->config->trustedConfigs()->syncWithoutDetaching([$peer->getKey()]);
+
+    // An order opened on the peer till.
+    $shared = Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $peer->getKey(),
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'pos_session_id' => $this->fx->session->getKey(),
+        'access_token' => (string) Str::uuid(),
+        'state' => OrderState::Draft->value,
+        'ordered_at' => now(),
+    ]);
+
+    // A waiter picks it up on this till and adds a round.
+    $response = $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand((string) $shared->uuid)],
+    ]);
+
+    $response->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(OrderLine::query()->where('pos_order_id', $shared->getKey())->count())->toBe(1);
 });

@@ -401,6 +401,25 @@ final readonly class OrderSyncService
         //     is what actually makes this idempotent.
         /** @var Order|null $order */
         $order = Order::query()->where('uuid', $uuid)->lockForUpdate()->first();
+
+        // …and check the caller may write to what it found (BAN-492, spec §0.5). Without this, any
+        // paired device could mutate any draft order in the database — in any venue, any tenant —
+        // by pushing a uuid it had merely observed: add lines, attach payments, move the table,
+        // cancel it. The read paths already scope; this one did not.
+        //
+        // Looked up globally and *then* authorised, rather than scoping the query: a scoped lookup
+        // returns null for someone else's order, which falls through to the create branch and dies
+        // on the unique index — an `ingest_failed` that says nothing. The caller gets a defined
+        // answer instead, and the attempt is recorded.
+        if ($order !== null && ! $this->isWritableBy($config, $order)) {
+            $this->recordConflict($config, $device, SyncConflictType::UuidCollision, SyncResolution::Rejected, $uuid, [
+                'order_config' => (int) $order->pos_config_id,
+                'device_config' => (int) $config->getKey(),
+            ]);
+
+            return $this->rejected($uuid, 'order_not_writable', 'That order belongs to another register.');
+        }
+
         $isNew = $order === null;
         $previousState = $order === null ? null : $this->stateValue($order->state);
 
@@ -1488,6 +1507,35 @@ final readonly class OrderSyncService
     }
 
     /** @return array<string, mixed> */
+    /**
+     * May this config write to this order? (BAN-492)
+     *
+     * The set is the config's **own** orders plus those of its trusted peers — not the config
+     * alone. Trusted configs exist precisely to "share open orders" (`PosConfig::trustedConfigs`),
+     * and both the bootstrap (`Order::posLoadScope`) and the delta ship a peer's drafts to this
+     * register, so a till holding one will sync its changes back. Scoping to `pos_config_id` alone
+     * would have looked like the obvious one-line fix and broken multi-till service.
+     *
+     * `company_id` is checked too. A trusted pairing across tenants would be a configuration
+     * mistake rather than an intention, and this is the boundary that must not depend on someone
+     * having configured the pivot correctly.
+     */
+    private function isWritableBy(PosConfig $config, Order $order): bool
+    {
+        if ((int) $order->company_id !== (int) $config->company_id) {
+            return false;
+        }
+
+        if ((int) $order->pos_config_id === (int) $config->getKey()) {
+            return true;
+        }
+
+        // Property access, not `->trustedConfigs()`: Eloquent caches the loaded relation on the
+        // model, so a batch of N orders costs one query rather than N.
+        return $config->trustedConfigs
+            ->contains(static fn (PosConfig $peer): bool => (int) $peer->getKey() === (int) $order->pos_config_id);
+    }
+
     private function rejected(string $uuid, string $code, string $message): array
     {
         return [
