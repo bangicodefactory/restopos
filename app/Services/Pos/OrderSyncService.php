@@ -329,9 +329,18 @@ final readonly class OrderSyncService
     {
         $orderUuid = (string) ($payload['order_uuid'] ?? '');
 
+        // Same visibility rule as the order path (BAN-492), not a narrower one. Scoping this to
+        // `pos_config_id` alone meant a waiter who picked up a trusted peer's order on this till
+        // could add to it but not fire it to the kitchen — the two paths disagreeing about whose
+        // order this is. A non-writable order reports as unknown rather than as forbidden: whose
+        // it really is stays none of the caller's business.
         $order = $orderUuid === ''
             ? null
-            : Order::query()->where('pos_config_id', $config->getKey())->where('uuid', $orderUuid)->first();
+            : Order::query()->where('uuid', $orderUuid)->first();
+
+        if ($order !== null && ! $this->isWritableBy($config, $order)) {
+            $order = null;
+        }
 
         if ($order === null) {
             // Orders are ingested before this command runs, so one in the same batch is already
@@ -767,7 +776,7 @@ final readonly class OrderSyncService
             'unit_cost' => (string) $variant['standard_price'],
             'customer_note' => $command['customer_note'] ?? null,
             'internal_note' => $this->normaliseNote($command['note'] ?? $command['internal_note'] ?? null),
-            'combo_parent_line_id' => $this->lineIdFor($command['combo_parent_uuid'] ?? null, $existing),
+            'combo_parent_line_id' => $this->lineIdFor($command['combo_parent_uuid'] ?? null, $existing, $order),
             'combo_id' => $command['combo_id'] ?? null,
             'combo_item_id' => $command['combo_item_id'] ?? null,
             'restaurant_course_id' => $this->courseIdFor($order, $command['course_uuid'] ?? null),
@@ -1604,23 +1613,39 @@ final readonly class OrderSyncService
         ];
     }
 
-    /** @param array<string, int> $existing */
-    private function lineIdFor(mixed $uuid, array $existing): ?int
+    /**
+     * Resolve a sibling line's id — the combo parent of the line being written.
+     *
+     * Scoped to the order under edit (BAN-492). The fallback lookup used to search every line in
+     * the database, so a crafted `combo_parent_uuid` could point a line at a parent on someone
+     * else's order. Narrower than the order hole — it writes one FK on a line the caller does own —
+     * but the same reach-across, in the same file.
+     *
+     * The fallback is still needed: `$existing` starts as the lines already on the order and grows
+     * as this batch creates more, but a parent created in an *earlier* request is in neither, and
+     * `createLine` receives `$existing` by reference precisely so within-batch parents resolve.
+     *
+     * @param  array<string, int>  $existing
+     */
+    private function lineIdFor(mixed $uuid, array $existing, ?Order $order = null): ?int
     {
         if (! is_string($uuid) || $uuid === '') {
             return null;
         }
 
-        return $existing[$uuid] ?? $this->lineIdByUuid($uuid);
+        return $existing[$uuid] ?? $this->lineIdByUuid($uuid, $order);
     }
 
-    private function lineIdByUuid(mixed $uuid): ?int
+    private function lineIdByUuid(mixed $uuid, ?Order $order = null): ?int
     {
-        if (! is_string($uuid) || $uuid === '') {
+        if (! is_string($uuid) || $uuid === '' || $order === null) {
             return null;
         }
 
-        $id = OrderLine::query()->where('uuid', $uuid)->value('id');
+        $id = OrderLine::query()
+            ->where('uuid', $uuid)
+            ->where('pos_order_id', $order->getKey())
+            ->value('id');
 
         return $id === null ? null : (int) $id;
     }

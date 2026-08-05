@@ -636,6 +636,44 @@ it('refuses to mutate an order belonging to another register', function (): void
     expect(DB::table('sync_conflicts')->where('conflict_type', SyncConflictType::UuidCollision->value)->count())->toBe(1);
 });
 
+it('refuses a second till in the same venue that is not a trusted peer', function (): void {
+    // The realistic attack, and the one the cross-tenant test above cannot reach: two configs in
+    // one company — a chain, or a second till at the same bar — with no trusted pairing. The
+    // `company_id` half of the guard passes here, so only the config-set half can reject it.
+    $sibling = PosConfig::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Terrace till',
+        'access_token' => PosConfig::newAccessToken(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'is_restaurant' => true,
+        'limited_product_count' => 100,
+        'limited_customer_count' => 20,
+    ]);
+
+    $victim = Order::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $sibling->getKey(),
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'pos_session_id' => $this->fx->session->getKey(),
+        'access_token' => (string) Str::uuid(),
+        'state' => OrderState::Draft->value,
+        'ordered_at' => now(),
+    ]);
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand((string) $victim->uuid, [], ['state' => OrderState::Cancelled->value])],
+    ])->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.0.error.code', 'order_not_writable');
+
+    $victim->refresh();
+
+    expect($victim->state->value)->toBe(OrderState::Draft->value)
+        ->and(OrderLine::query()->where('pos_order_id', $victim->getKey())->count())->toBe(0);
+});
+
 it('still lets a trusted peer register sync a shared open order', function (): void {
     // Trusted configs exist to "share open orders": the bootstrap and the delta both ship a peer's
     // drafts to this till, so it will sync changes back. Scoping the lookup to `pos_config_id`
@@ -673,4 +711,92 @@ it('still lets a trusted peer register sync a shared open order', function (): v
     $response->assertOk()->assertJsonPath('results.0.status', 'ok');
 
     expect(OrderLine::query()->where('pos_order_id', $shared->getKey())->count())->toBe(1);
+});
+
+it('lets a trusted peer fire a shared order to the kitchen, and refuses a stranger', function (): void {
+    // `prep.sent` used to scope to `pos_config_id` alone, so a waiter who picked up a peer's order
+    // on this till could add to it but not fire it — the two write paths disagreeing about whose
+    // order it is (BAN-492).
+    $makeConfig = fn (string $name): PosConfig => PosConfig::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => $name,
+        'access_token' => PosConfig::newAccessToken(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'is_restaurant' => true,
+        'limited_product_count' => 100,
+        'limited_customer_count' => 20,
+    ]);
+
+    $peer = $makeConfig('Terrace till');
+    $stranger = $makeConfig('Other bar');
+    $this->fx->config->trustedConfigs()->syncWithoutDetaching([$peer->getKey()]);
+
+    $orderOn = function (PosConfig $config): Order {
+        $order = Order::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'pos_config_id' => $config->getKey(),
+            'company_id' => $this->fx->company->getKey(),
+            'currency_id' => $this->fx->currency->getKey(),
+            'pos_session_id' => $this->fx->session->getKey(),
+            'access_token' => (string) Str::uuid(),
+            'state' => OrderState::Draft->value,
+            'ordered_at' => now(),
+        ]);
+
+        return $order;
+    };
+
+    $shared = $orderOn($peer);
+    $foreign = $orderOn($stranger);
+
+    pushBatch([command('prep.sent', ['order_uuid' => (string) $shared->uuid, 'snapshot_version' => 0, 'course_index' => null])])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
+
+    expect($shared->fresh()->last_prep_sent_at)->not->toBeNull();
+
+    // The stranger's order is not this register's to fire, and it is not told that it exists.
+    pushBatch([command('prep.sent', ['order_uuid' => (string) $foreign->uuid, 'snapshot_version' => 0, 'course_index' => null])])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.0.error.code', 'unknown_order');
+
+    expect($foreign->fresh()->last_prep_sent_at)->toBeNull();
+});
+
+it('does not link a combo child to a parent line on another order', function (): void {
+    // `combo_parent_uuid` resolved through a database-wide line lookup, so a crafted uuid could
+    // point a line at a parent belonging to someone else's order (BAN-492).
+    $otherUuid = (string) Str::uuid();
+    $parentLineUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($otherUuid, [[
+            'op' => 'create',
+            'uuid' => $parentLineUuid,
+            'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '1',
+            'price_unit' => '10.00',
+            'discount' => '0',
+        ]])],
+    ])->assertOk();
+
+    $childUuid = (string) Str::uuid();
+    $mineUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($mineUuid, [[
+            'op' => 'create',
+            'uuid' => $childUuid,
+            'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '1',
+            'price_unit' => '10.00',
+            'discount' => '0',
+            'combo_parent_uuid' => $parentLineUuid,
+        ]])],
+    ])->assertOk();
+
+    // The line is created, but unparented — it never reaches across to the other order.
+    expect(DB::table('pos_order_lines')->where('uuid', $childUuid)->value('combo_parent_line_id'))->toBeNull();
 });
