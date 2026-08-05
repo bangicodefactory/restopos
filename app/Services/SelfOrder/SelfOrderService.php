@@ -19,10 +19,12 @@ use App\Models\Pos\Order;
 use App\Models\Pos\Payment as OrderPayment;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
+use App\Models\Pos\PosSession;
 use App\Services\Kitchen\PreparationService;
 use App\Services\Payment\Dto\PaymentIntent;
 use App\Services\Payment\PaymentProvider;
 use App\Services\Pos\BootstrapService;
+use App\Services\Pos\ComboCartPricer;
 use App\Services\Pos\OrderSyncService;
 use App\Services\Pos\PricingService;
 use App\Services\Pos\SessionService;
@@ -51,6 +53,7 @@ final readonly class SelfOrderService
         private BootstrapService $bootstrap,
         private OrderSyncService $sync,
         private PricingService $pricing,
+        private ComboCartPricer $comboPricer,
         private SessionService $sessions,
         private PreparationService $preparation,
         private PaymentProvider $payments,
@@ -145,19 +148,27 @@ final readonly class SelfOrderService
         $session = $this->sessions->resolveForIngest($config, null, (string) $orderUuid)['session'];
         $pricelistId = $this->pricing->resolvePricelistId($config, null, $presetId, null);
 
+        // Server-resolved prices for the whole cart at once (SLF-030). Per-line pricing cannot see
+        // a combo: it returns each child's own list price, which reverses the meal-deal discount.
+        $prices = $this->comboPricer->priceCart($config, $pricelistId, $lines, $this->roundingStep($config));
+
         $lineCommands = [];
 
         foreach ($lines as $line) {
             $variantId = (int) $line['variant_id'];
             $quantity = (string) $line['quantity'];
+            // The cart's own line uuid, not a fresh one. `combo_parent_uuid` points at it, so
+            // minting a new uuid here orphaned every combo child at ingest — the components were
+            // stored as unrelated top-level lines (SLF-030).
+            $lineUuid = (string) ($line['uuid'] ?? Str::uuid());
 
             $command = [
                 'op' => 'create',
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $lineUuid,
                 'variant_id' => $variantId,
                 'qty' => $quantity,
                 // Server-resolved price. The cart's own number is never used.
-                'price_unit' => $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
+                'price_unit' => $prices[$lineUuid] ?? $this->pricing->priceFor($config, $variantId, $pricelistId, $quantity),
                 'discount' => '0',
                 'customer_note' => $line['customer_note'] ?? null,
                 'combo_parent_uuid' => $line['combo_parent_uuid'] ?? null,
@@ -195,12 +206,13 @@ final readonly class SelfOrderService
                     // one would read as though the caller still chooses it — the exact confusion
                     // this fix removes. The real token is read back off the order below.
                     'pricelist_id' => $pricelistId,
+                    'fiscal_position_id' => $this->fiscalPositionFor($config, $presetId),
                     'preset_id' => $presetId,
                     'table_id' => $this->tableIdFor($context),
                     'general_customer_note' => $customerNote,
                     'customer_email' => $customerEmail,
                     'customer_phone' => $customerPhone,
-                    'tracking_number' => $target?->tracking_number ?? $this->trackingNumber($source),
+                    'tracking_number' => $target?->tracking_number ?? $this->trackingNumber($source, $session),
                 ], static fn ($v): bool => $v !== null),
                 'lines' => $lineCommands,
             ]],
@@ -566,9 +578,73 @@ final readonly class SelfOrderService
         ];
     }
 
-    private function trackingNumber(OrderSource $source): string
+    /**
+     * A per-session order number the counter can call out (SLF-043).
+     *
+     * Was `random_int(1, 999)` with no uniqueness check: by the birthday bound two customers in one
+     * service share a number after about 37 orders, at which point the counter calls the wrong
+     * person. Now the lowest free number in the session, so the first collision is at 999 orders
+     * rather than 37 — and it still reads like a ticket number rather than a database id.
+     */
+    private function trackingNumber(OrderSource $source, PosSession $session): string
     {
-        return $source->trackingPrefix().str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+        $prefix = $source->trackingPrefix();
+
+        $taken = $this->connection->table('pos_orders')
+            ->where('pos_session_id', $session->getKey())
+            ->whereNotNull('tracking_number')
+            ->pluck('tracking_number')
+            ->all();
+
+        $used = [];
+
+        foreach ($taken as $number) {
+            $used[ltrim((string) $number, $prefix)] = true;
+        }
+
+        for ($n = 1; $n <= 999; $n++) {
+            $candidate = str_pad((string) $n, 3, '0', STR_PAD_LEFT);
+
+            if (! isset($used[$candidate])) {
+                return $prefix.$candidate;
+            }
+        }
+
+        // 999 live orders in one session is not a service, it is a data problem — but a duplicate
+        // number is still better than refusing the sale.
+        return $prefix.str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * The fiscal position to apply (SLF-038).
+     *
+     * A preset is how "takeaway" is expressed, and takeaway is frequently a different VAT rate — so
+     * the preset's fiscal position must win over the config's default when one is set. The
+     * self-order path never sent one at all, so a kiosk takeaway order was taxed as if eaten in.
+     */
+    private function fiscalPositionFor(PosConfig $config, ?int $presetId): ?int
+    {
+        if ($presetId !== null) {
+            $fromPreset = $this->connection->table('pos_presets')
+                ->where('id', $presetId)
+                ->value('fiscal_position_id');
+
+            if ($fromPreset !== null) {
+                return (int) $fromPreset;
+            }
+        }
+
+        return $config->default_fiscal_position_id === null ? null : (int) $config->default_fiscal_position_id;
+    }
+
+    /** The currency's rounding step, for the combo split (spec 04 §11.2.3). */
+    private function roundingStep(PosConfig $config): string
+    {
+        $places = (int) ($this->connection->table('currencies')
+            ->where('id', $config->currency_id)
+            ->value('decimal_places') ?? 2);
+
+        return $places <= 0 ? '1' : '0.'.str_repeat('0', $places - 1).'1';
     }
 
     /** @param array<string, mixed> $detail */

@@ -388,3 +388,102 @@ it('mints the access token server-side and ignores the client value', function (
     // `pos.order.{token}` for an order it does not own yet.
     expect((string) Order::query()->where('uuid', $uuid)->value('access_token'))->not->toBe($planted);
 });
+
+/**
+ * SLF-030 — the combo overcharge.
+ *
+ * `submitCart` priced every line through `PricingService::priceFor`, which knows nothing about
+ * combos and returns each child's own list price. The customer agreed to the meal-deal price on the
+ * kiosk and was charged that *plus* every component in full: the discount silently reversed between
+ * the screen and the order.
+ */
+it('charges a combo at the meal price, not the base plus every child in full', function (): void {
+    // A €12 meal: pick a pizza (weight 8) and a drink (weight 4).
+    $combo = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 1,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $item = DB::table('combo_items')->insertGetId([
+        'combo_id' => $combo,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'lines' => [
+            ['uuid' => $parentUuid, 'variant_id' => $this->fx->variant->getKey(), 'quantity' => 1],
+            [
+                'uuid' => $childUuid,
+                'variant_id' => $this->fx->drinkVariant->getKey(),
+                'quantity' => 1,
+                'combo_parent_uuid' => $parentUuid,
+                'combo_item_id' => $item,
+            ],
+        ],
+    ])->assertCreated();
+
+    $orderUuid = $response->json('order.uuid');
+    $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+
+    $parent = OrderLine::query()->where('uuid', $parentUuid)->firstOrFail();
+    $child = OrderLine::query()->where('uuid', $childUuid)->firstOrFail();
+
+    // All of the money rides on the children; a parent that also carried a price would charge the
+    // meal twice, which is precisely the overcharge.
+    expect((float) $parent->price_unit)->toBe(0.0);
+
+    // Parent + children together are the meal price — the whole point.
+    expect((float) $parent->price_unit + (float) $child->price_unit)->toBe(10.0);
+
+    // …and the child is actually attached to its parent, rather than stored as a loose line. The
+    // server used to mint fresh line uuids, so `combo_parent_uuid` pointed at nothing.
+    expect((int) $child->combo_parent_line_id)->toBe((int) $parent->getKey());
+
+    // 10.00 + 21 % — not 12.50 + tax, which is what the child's list price would have produced.
+    expect((float) $order->amount_total)->toBe(12.10);
+});
+
+/**
+ * SLF-043 — two customers in one service used to get the same order number: the tracking number
+ * was `random_int(1, 999)` with no uniqueness check, so by the birthday bound collisions start at
+ * roughly 37 orders and the counter calls the wrong person.
+ */
+it('never gives two orders in a session the same tracking number', function (): void {
+    $numbers = [];
+
+    for ($i = 0; $i < 25; $i++) {
+        $numbers[] = $this->postJson("/api/self-order/{$this->token}/orders", [
+            'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+        ])->assertCreated()->json('order.tracking_number');
+    }
+
+    expect($numbers)->toHaveCount(25)
+        ->and(array_unique($numbers))->toHaveCount(25);
+});
+
+/** SLF-038 — takeaway is a preset, and takeaway is frequently a different VAT rate. */
+it('takes the fiscal position from the preset rather than the config default', function (): void {
+    $position = DB::table('fiscal_positions')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Takeaway', 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $preset = DB::table('pos_presets')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Takeaway', 'service_at' => 'counter', 'identification' => 'none',
+        'fiscal_position_id' => $position, 'sequence' => 10,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $response = $this->postJson("/api/self-order/{$this->token}/orders", [
+        'preset_id' => $preset,
+        'lines' => [['variant_id' => $this->fx->variant->getKey(), 'quantity' => 1]],
+    ])->assertCreated();
+
+    $order = Order::query()->where('uuid', $response->json('order.uuid'))->firstOrFail();
+
+    expect((int) $order->fiscal_position_id)->toBe($position);
+});
