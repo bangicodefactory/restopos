@@ -43,7 +43,13 @@ use Illuminate\Support\Str;
  */
 final readonly class PreparationService
 {
-    /** Guards the combo-parent walk in {@see inheritComboRouting()} against a cyclic parent chain. */
+    /**
+     * Guards the combo-parent walk in {@see inheritComboRouting()} against a cyclic parent chain.
+     *
+     * Untested on purpose: no code path can produce a cycle, so reaching this bound means the data
+     * is already corrupt. It exists so that corruption is a missing category rather than a hung
+     * send request.
+     */
     private const MAX_COMBO_DEPTH = 8;
 
     public function __construct(

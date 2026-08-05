@@ -643,3 +643,108 @@ it('inherits past a parent that is not itself prepared', function (): void {
     expect($routed)->toContain($childUuid)
         ->and($routed)->not->toContain($parentUuid);
 });
+
+/**
+ * KDS-016, end to end — the acceptance criterion itself: cancel a line, serve the rest, and the
+ * card reaches "served" with no cook interaction on the cancelled row.
+ *
+ * The unit tests over `board.ts` cannot prove this. `prep_orders.state` is recomputed server-side
+ * on every line move, persisted and broadcast, and the client assigns that state verbatim — so a
+ * client-only fix is overwritten the moment the cook touches anything.
+ */
+it('lets a card reach served after a line is cancelled, with no cook interaction on it', function (): void {
+    $lineUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '2.50', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    // The customer changes their mind about the drink after it has been sent.
+    DB::table('pos_order_lines')->where('uuid', $lineUuid)->update(['deleted_at' => now()]);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $token = $this->fx->display->access_token;
+    $board = $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders");
+    $prepOrderId = (int) $board->json('orders.0.id');
+
+    // The cancellation is on the card as a todo row — that is how the kitchen is told to stop.
+    $cancellation = DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', 'cancelled')
+        ->first();
+
+    expect($cancellation)->not->toBeNull()
+        ->and((string) $cancellation->state)->toBe(PrepLineState::Todo->value);
+
+    // The cook serves every line that is actually food, and touches nothing else.
+    foreach (DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', '!=', 'cancelled')
+        ->pluck('id') as $lineId) {
+        $this->withHeaders($this->kdsHeaders)
+            ->postJson("/api/kitchen/{$token}/lines/{$lineId}/state", ['state' => PrepLineState::Served->value])
+            ->assertOk();
+    }
+
+    expect(DB::table('prep_orders')->where('id', $prepOrderId)->value('state'))
+        ->toBe(PrepOrderState::Served->value);
+
+    // The cancellation row was never touched.
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellation->id)->value('state'))
+        ->toBe(PrepLineState::Todo->value);
+});
+
+it('does not drag a cancellation along when the card is bumped or recalled', function (): void {
+    // The client skips cancellations in `applyStageLocally` / `applyRecallLocally`. The server has
+    // to agree: it broadcasts the authoritative line states, so a client-only skip is overwritten.
+    $lineUuid = (string) Str::uuid();
+    $orderUuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($orderUuid, [
+            ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+            ['op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1', 'price_unit' => '2.50', 'discount' => '0'],
+        ], ['table_id' => $this->fx->tableOne?->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    DB::table('pos_order_lines')->where('uuid', $lineUuid)->update(['deleted_at' => now()]);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$orderUuid}/preparation")->assertOk();
+
+    $token = $this->fx->display->access_token;
+    $board = $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders");
+    $prepOrderId = (int) $board->json('orders.0.id');
+    $stages = collect($board->json('stages'))->keyBy('stage_type');
+
+    $cancellationId = (int) DB::table('prep_order_lines')
+        ->where('prep_order_id', $prepOrderId)
+        ->where('change_type', 'cancelled')
+        ->value('id');
+
+    // Bump the whole card to ready.
+    $this->withHeaders($this->kdsHeaders)
+        ->postJson("/api/kitchen/{$token}/orders/{$prepOrderId}/stage", ['stage_id' => $stages['ready']['id']])
+        ->assertOk()
+        ->assertJsonPath('state', PrepOrderState::Ready->value);
+
+    // "Don't make this" was not marked ready.
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellationId)->value('state'))
+        ->toBe(PrepLineState::Todo->value);
+
+    // Recalling reopens the food, and must not resurrect the cancellation as work either.
+    $this->withHeaders($this->kdsHeaders)
+        ->postJson("/api/kitchen/{$token}/orders/{$prepOrderId}/recall")
+        ->assertOk();
+
+    expect((string) DB::table('prep_order_lines')->where('id', $cancellationId)->value('state'))
+        ->toBe(PrepLineState::Todo->value)
+        ->and(DB::table('prep_line_stage_logs')->where('prep_order_line_id', $cancellationId)->count())
+        ->toBe(0);
+});

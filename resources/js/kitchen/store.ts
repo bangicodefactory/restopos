@@ -2,7 +2,7 @@ import { createPosStore } from '@shared/store';
 
 import { KDS_CLIENT_VERSION, KitchenApi, createApiClient, errorCode, isAuthFailure, isOffline } from './api';
 import type { KitchenBootstrap } from './api';
-import { applyLineStateLocally, applyRecallLocally, applyStageLocally, applyTicketUpdate, effectiveStageId, nextLineState, nextStage, replayQueue, sortStages, stageById } from './logic/board';
+import { applyLineStateLocally, applyRecallLocally, applyStageLocally, applyTicketUpdate, effectiveStageId, isLineCancelled, nextLineState, nextStage, replayQueue, sortStages, stageById } from './logic/board';
 import type { PendingAction } from './logic/board';
 import { MAX_QUEUE, reconnectStrategy } from './logic/offline';
 import {
@@ -534,7 +534,9 @@ export const useKitchenStore = createPosStore<KitchenState>((set, get) => {
             const line = order?.lines.find((item) => item.id === lineId);
             if (!order || !line) return;
             // A cancelled line is a fact, not a task — tapping it must not "complete" it.
-            if (line.state === 'cancelled') return;
+            // `isLineCancelled`, because the server books a cancellation as a *todo* row carrying
+            // `change_type: 'cancelled'`; a state-only check let the cook tap it anyway (KDS-016).
+            if (isLineCancelled(line)) return;
 
             const target: KitchenLineState = line.state === 'served' ? 'todo' : nextLineState(line.state);
             const nowIso = new Date().toISOString();

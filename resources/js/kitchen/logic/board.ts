@@ -325,8 +325,9 @@ export function applyStageLocally(
     nowIso: string,
 ): KitchenOrder {
     const lineState = STAGE_TYPE_TO_LINE_STATE[stage.stage_type];
+    // Advancing the whole card must not drag a cancellation along with it (KDS-016).
     const lines = order.lines.map((line) =>
-        line.state === 'cancelled'
+        isLineCancelled(line)
             ? line
             : {
                   ...line,
@@ -381,7 +382,8 @@ export function applyRecallLocally(order: KitchenOrder, stages: readonly Kitchen
         served_at: null,
         first_started_at: null,
         lines: order.lines.map((line) =>
-            line.state === 'cancelled'
+            // Recalling the card must not resurrect a cancellation as work to do (KDS-016).
+            isLineCancelled(line)
                 ? line
                 : {
                       ...line,

@@ -136,14 +136,23 @@ class PrepOrderLine extends Model implements PosLoadable
         return $query->where('state', $state->value);
     }
 
-    /** Not yet served or cancelled. @param  Builder<static>  $query */
+    /**
+     * Not yet served or cancelled — work the kitchen still owes.
+     *
+     * The `change_type` half is not decoration: a cancellation is booked as a *new* line in state
+     * `todo`, so a state-only filter counts "stop cooking this" as something to cook (KDS-016).
+     *
+     * @param  Builder<static>  $query
+     */
     public function scopePending(Builder $query): Builder
     {
-        return $query->whereIn('state', [
-            PrepLineState::Todo->value,
-            PrepLineState::InProgress->value,
-            PrepLineState::Ready->value,
-        ]);
+        return $query
+            ->whereIn('state', [
+                PrepLineState::Todo->value,
+                PrepLineState::InProgress->value,
+                PrepLineState::Ready->value,
+            ])
+            ->where('change_type', '!=', PrepChangeType::Cancelled->value);
     }
 
     /** @param  Builder<static>  $query */
