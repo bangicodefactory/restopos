@@ -22,6 +22,7 @@ use App\Models\Catalog\ProductVariant;
 use App\Models\Catalog\Uom;
 use App\Models\Concerns\PosLoadable;
 use App\Models\Identity\Customer;
+use App\Models\Identity\MediaFile;
 use App\Models\Kitchen\PrepDisplay;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PaymentProvider;
@@ -115,7 +116,11 @@ final class BootstrapRegistry
         'restaurant_tables' => Table::class,
         'prep_displays' => PrepDisplay::class,
 
-        // 9 — people & devices
+        // 9 — media metadata. Ships with the catalogue so a tile knows it has an image before the
+        // bytes arrive; the bytes come from `GET /media/{media}` (BAN-480).
+        'media_files' => MediaFile::class,
+
+        // 10 — people & devices
         'customers' => Customer::class,
         'pos_devices' => PosDevice::class,
     ];

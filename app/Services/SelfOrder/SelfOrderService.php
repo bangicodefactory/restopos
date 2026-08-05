@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\SelfOrder;
 
 use App\Enums\DeviceType;
+use App\Enums\MediaCollection;
 use App\Enums\OrderSource;
 use App\Enums\OrderState;
 use App\Enums\PaymentStatus;
@@ -15,6 +16,7 @@ use App\Enums\SyncResolution;
 use App\Events\Pos\PaymentStatusChanged;
 use App\Events\SelfOrder\SelfOrderPlaced;
 use App\Models\Concerns\PosLoadable;
+use App\Models\Identity\MediaFile;
 use App\Models\Pos\Order;
 use App\Models\Pos\Payment as OrderPayment;
 use App\Models\Pos\PosConfig;
@@ -83,6 +85,13 @@ final readonly class SelfOrderService
             ],
             profile: PosLoadable::PROFILE_SELF_ORDER,
         );
+
+        // The kiosk is a customer's phone on a public token, not a paired device, so it cannot
+        // fetch the authenticated media route the register uses. It gets **public URLs** instead —
+        // which is what `media_files.is_public` was always for, and what `catalog.ts` has always
+        // read (`imageUrls` keyed `model:model_id`) against a payload that never carried them
+        // (BAN-480).
+        $payload['data']['media_files'] = $this->publicMedia($config);
 
         $payload['self_order'] = [
             'mode' => $config->self_ordering_mode->value,
@@ -728,5 +737,51 @@ final readonly class SelfOrderService
         ]);
 
         return $device;
+    }
+
+    /**
+     * Public image URLs for the kiosk, keyed the way its catalogue expects.
+     *
+     * Only `is_public` rows: a customer's phone holds no credential, so anything reachable here is
+     * reachable by anyone with the venue's QR code. That is fine for a menu photo and is the reason
+     * the private collections are not in this list.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function publicMedia(PosConfig $config): array
+    {
+        return MediaFile::query()
+            ->where('company_id', $config->company_id)
+            ->where('is_public', true)
+            ->whereIn('collection', [
+                MediaCollection::Image->value,
+                MediaCollection::SelfHome->value,
+                MediaCollection::SelfBackground->value,
+                MediaCollection::Brand->value,
+            ])
+            ->orderBy('sort_order')
+            ->get()
+            ->map(static fn (MediaFile $media): array => [
+                'id' => (int) $media->getKey(),
+                // `model` / `model_id` are what the kiosk keys its map by: `product:{id}`.
+                'model' => self::modelKey((string) $media->model_type),
+                'model_id' => $media->model_id === null ? null : (int) $media->model_id,
+                'collection' => $media->collection->value,
+                'mime_type' => (string) $media->mime_type,
+                'width' => $media->width,
+                'height' => $media->height,
+                'url' => $media->url(),
+                'variants' => $media->variants,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** `App\\Models\\Catalog\\Product` -> `product`, which is the prefix the kiosk builds its keys from. */
+    private static function modelKey(string $modelType): string
+    {
+        $short = str_contains($modelType, '\\') ? substr(strrchr($modelType, '\\') ?: '', 1) : $modelType;
+
+        return Str::snake($short);
     }
 }

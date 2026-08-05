@@ -23,6 +23,8 @@ import { ApiClient, ApiError, BootstrapClient, DeltaPuller, OutboxSyncer } from 
 
 import { loadCatalogIndex } from './data/catalog-load';
 import { setCatalog } from './data/catalog';
+import { mediaToWarm, warmMediaCache } from '@shared/media';
+
 import { createPersistence, loadOrdersFromDb } from './data/persistence';
 import { APP_VERSION, clearRuntime, configIdFromUrl, getRuntime, setRuntime, tryRuntime } from './data/runtime';
 import { remapPlaceholderCustomer } from './domain/customer-remap';
@@ -182,6 +184,11 @@ async function afterFirstPaint(): Promise<void> {
 
     void fetchCurrentSession();
     runtime.printer.startStatusPolling();
+
+    // Images last, and not awaited: the catalogue has to be usable before the pictures arrive, and a
+    // venue with two hundred product photos on a slow line must not delay a service by one second
+    // (BAN-480). Failures are per-image and already swallowed inside.
+    void warmMediaCache(runtime.db, runtime.api, await mediaToWarm(runtime.db));
 }
 
 export async function runBootstrap(force = false): Promise<boolean> {

@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Pos\BootstrapController;
 use App\Http\Controllers\Api\Pos\CatalogController;
 use App\Http\Controllers\Api\Pos\DeltaController;
 use App\Http\Controllers\Api\Pos\EmployeeAuthController;
+use App\Http\Controllers\Api\Pos\MediaController;
 use App\Http\Controllers\Api\Pos\OrderController;
 use App\Http\Controllers\Api\Pos\SessionController;
 use App\Http\Controllers\Api\Pos\SyncController;
@@ -66,6 +67,13 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::get('open-orders', [DeltaController::class, 'openOrders'])->name('open-orders');
         Route::get('products', [CatalogController::class, 'products'])->name('products');
         Route::get('customers', [CatalogController::class, 'customers'])->name('customers');
+
+        // Media bytes (BAN-480). Under `pos:catalog` because an image is catalogue data: a device
+        // that may not read the menu has no business reading its pictures.
+        // Bound by `id`, not uuid. `HasUuid` makes uuid the default binding key everywhere else,
+        // but the client only ever holds ids here: the payload's `*_media_id` columns are ids, and
+        // `receipt.ts` builds its blob key as `logo:{receipt_logo_media_id}`.
+        Route::get('media/{media:id}', [MediaController::class, 'show'])->name('media');
     });
 
     // Employee identity (spec 03 §2.3)

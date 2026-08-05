@@ -142,8 +142,15 @@ sw.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 4. Product imagery — nice to have, never blocking, LRU-capped.
-    if (url.pathname.startsWith('/storage/') || url.pathname.startsWith('/media/')) {
+    // 4. Public imagery — nice to have, never blocking, LRU-capped.
+    //
+    //    `/storage/` only. This used to also list `/media/`, a path nothing ever served; the media
+    //    route landed at `/api/pos/media/{id}` and deliberately does not belong here — it is
+    //    device-authenticated, so its responses have no business in a shared cache, and the clients
+    //    already keep those bytes in IndexedDB where the rest of the replica lives (BAN-480).
+    //    What still comes through here is the kiosk's public product photos, which are plain
+    //    `/storage/` URLs because a customer's phone has no token to fetch with.
+    if (url.pathname.startsWith('/storage/')) {
         if (!profile.cacheProductImages) return;
         event.respondWith(cacheFirstCapped(request, names.images, profile.imageCacheLimit));
         return;

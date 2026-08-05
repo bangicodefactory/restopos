@@ -1,8 +1,11 @@
 import type { ProductRow } from '@domain/types';
 import { normalizeSearch } from '@shared/db';
+import { useMediaUrl } from '@shared/media';
 import { VirtualGrid, cn } from '@shared/ui';
 import type { JSX } from 'react';
 import { useMemo } from 'react';
+
+import { tryRuntime } from '../data/runtime';
 
 import { baseListPrice, categoryDescendants, type CatalogIndex } from '../data/catalog';
 import { useT } from '../i18n';
@@ -117,6 +120,11 @@ function ProductCard({
 }): JSX.Element {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    // The bytes come from IndexedDB, not from an `<img src>` pointing at the route: the media route
+    // is device-authenticated and an `<img>` cannot carry a bearer token (BAN-480).
+    const runtime = tryRuntime();
+    const image = useMediaUrl(runtime?.db ?? null, runtime?.api ?? null, product.image_media_id);
+
     return (
         <button
             type="button"
@@ -142,8 +150,46 @@ function ProductCard({
                 COLORS[product.color % COLORS.length],
             )}
         >
-            <span className="line-clamp-3 text-sm font-semibold leading-tight text-slate-900">{product.name}</span>
-            <span className="text-base font-bold text-slate-700">{price}</span>
+            {image !== null ? (
+                <>
+                    <img
+                        src={image}
+                        alt=""
+                        aria-hidden
+                        // Decorative: the product name is right there in text, so a screen reader
+                        // announcing the picture as well would just say everything twice.
+                        className="absolute inset-0 h-full w-full rounded-pos object-cover"
+                        loading="lazy"
+                    />
+                    {/*
+                      * A scrim, not a faded photo. The tile has to do two jobs at once — be
+                      * recognisable at a glance and stay readable — and washing the image out to a
+                      * quarter serves neither: too faint to identify, still enough to fight the
+                      * text. A dark gradient under the label keeps the name legible against any
+                      * photo while the image itself stays fully visible above it.
+                      */}
+                    <span
+                        aria-hidden
+                        className="absolute inset-0 rounded-pos bg-gradient-to-t from-black/70 via-black/25 to-transparent"
+                    />
+                </>
+            ) : null}
+            <span
+                className={cn(
+                    'relative line-clamp-3 text-sm font-semibold leading-tight',
+                    image !== null ? 'text-white drop-shadow' : 'text-slate-900',
+                )}
+            >
+                {product.name}
+            </span>
+            <span
+                className={cn(
+                    'relative text-base font-bold',
+                    image !== null ? 'text-white drop-shadow' : 'text-slate-700',
+                )}
+            >
+                {price}
+            </span>
             {quantity > 0 ? (
                 <span className="absolute right-1 top-1 min-w-6 rounded-full bg-brand-600 px-1.5 text-center text-xs font-bold text-white">
                     {quantity}

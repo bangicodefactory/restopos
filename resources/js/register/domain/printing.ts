@@ -8,7 +8,10 @@ import {
     type TransportKind,
 } from '@shared/printing';
 
+import { resolveDocImages } from '@shared/printing/images';
+
 import { getCatalog, type CatalogIndex } from '../data/catalog';
+import { tryRuntime } from '../data/runtime';
 
 /**
  * Printer wiring (spec 03 §7.3, REG-242 … REG-244).
@@ -81,7 +84,21 @@ export type PrintRequest = {
  * The router retries internally with the outbox's backoff, so a rejection here means the job was
  * dropped for good — that is when a retry dialog is worth showing the cashier (REG-248).
  */
-export function print(router: PrinterRouter, doc: EscPosDoc, request: PrintRequest = {}): Promise<PrintOutcome> {
+export async function print(
+    router: PrinterRouter,
+    doc: EscPosDoc,
+    request: PrintRequest = {},
+): Promise<PrintOutcome> {
+    // Turn `{t:'image', key}` into pixels before the doc reaches a transport (BAN-480). Done here
+    // rather than inside the router because resolution needs the blob store, and the router is
+    // meant to stay usable from a worker where Dexie may not be open.
+    const runtime = tryRuntime();
+    const resolved = runtime ? await resolveDocImages(doc, runtime.db) : doc;
+
+    return printResolved(router, resolved, request);
+}
+
+function printResolved(router: PrinterRouter, doc: EscPosDoc, request: PrintRequest = {}): Promise<PrintOutcome> {
     return new Promise((resolve) => {
         const timeoutMs = request.timeoutMs ?? 20_000;
         let settled = false;
