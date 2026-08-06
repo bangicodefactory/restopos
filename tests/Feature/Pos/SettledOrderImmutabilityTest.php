@@ -76,6 +76,24 @@ function repushSettled(PosFixtures $fx, string $orderUuid, array $lines = [], ar
     return pushOrders($fx, [$command]);
 }
 
+/** A variant whose product is `special_kind = tip` — the one line that may join a settled order. */
+function tipVariant(PosFixtures $fx): int
+{
+    $product = Product::query()->where('company_id', $fx->company->getKey())->firstOrFail()->replicate(['uuid']);
+    $product->uuid = (string) Str::uuid();
+    $product->name = 'Pourboire';
+    $product->special_kind = SpecialKind::Tip->value;
+    $product->save();
+
+    $variant = $fx->variant->replicate(['uuid']);
+    $variant->uuid = (string) Str::uuid();
+    $variant->product_id = $product->getKey();
+    $variant->display_name = 'Pourboire';
+    $variant->save();
+
+    return (int) $variant->getKey();
+}
+
 // ---------------------------------------------------------------- the acceptance criteria
 
 it('refuses a line added to an order that is already paid', function (): void {
@@ -363,4 +381,157 @@ it('refuses a new tender added after the order was settled', function (): void {
     $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
 
     expect(Payment::query()->where('pos_order_id', $order->getKey())->count())->toBe(1);
+});
+
+// ---------------------------------------------------------------- the ways round the guard
+
+it('refuses a tip that would take value off a settled order', function (): void {
+    // The exemption is a hole without this, and the review found it open. A device sends a tip line
+    // priced at −20.00 and knocks €20 off an order that is already paid, printed and reconciled —
+    // the exact fraud the guard exists to stop, walking in through the door held open for tipping.
+    $tipVariant = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $before = (string) Order::query()->where('uuid', $orderUuid)->value('amount_total');
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tipVariant,
+        'qty' => '1', 'price_unit' => '-20.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+
+    expect((string) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe($before);
+});
+
+it('refuses a tip with a negative quantity, and one discounted past free', function (): void {
+    // The same value, reached two other ways. A rule stated as "the price must be positive" and
+    // checked nowhere else covers one of the three fields that decide what a line is worth.
+    $tipVariant = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $before = (string) Order::query()->where('uuid', $orderUuid)->value('amount_total');
+
+    foreach ([
+        ['qty' => '-1', 'price_unit' => '20.00', 'discount' => '0'],
+        ['qty' => '1', 'price_unit' => '20.00', 'discount' => '150'],
+    ] as $attempt) {
+        repushSettled($this->fx, $orderUuid, [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tipVariant,
+            'price_type' => 'manual', ...$attempt,
+        ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+    }
+
+    expect((string) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe($before);
+});
+
+it('refuses a tip edited downward into negative territory', function (): void {
+    // A partial update must not dodge the check by omitting the field it is changing.
+    $tipVariant = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+    $tipUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => $tipUuid, 'variant_id' => $tipVariant,
+        'qty' => '1', 'price_unit' => '5.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.status', 'ok');
+
+    repushSettled($this->fx, $orderUuid, [['op' => 'update', 'uuid' => $tipUuid, 'price_unit' => '-5.00']])
+        ->assertOk()
+        ->assertJsonPath('results.0.lines.0.code', 'order_settled');
+
+    expect((string) OrderLine::query()->where('uuid', $tipUuid)->value('price_unit'))->toBe('5.0000');
+});
+
+it('still lets a tip be corrected downward while it stays worth something', function (): void {
+    // Reducing €5 to €3 is an ordinary correction and must survive the rule above.
+    $tipVariant = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+    $tipUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => $tipUuid, 'variant_id' => $tipVariant,
+        'qty' => '1', 'price_unit' => '5.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk();
+
+    repushSettled($this->fx, $orderUuid, [['op' => 'update', 'uuid' => $tipUuid, 'price_unit' => '3.00']])
+        ->assertOk()
+        ->assertJsonPath('results.0.lines.0.status', 'ok');
+
+    expect((string) OrderLine::query()->where('uuid', $tipUuid)->value('price_unit'))->toBe('3.0000');
+});
+
+it('refuses to cancel an order that is already paid', function (): void {
+    // Narrowing the writable field list did nothing for `state`, which `updateOrder` sets outside
+    // it — so a push claiming `cancelled` wrote straight through and took a paid order out of every
+    // report while the money stayed in the drawer. Voiding a settled sale is a refund, which is a
+    // new order, not a state change on this one.
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Cancelled->value]);
+    $command['lines'] = [];
+
+    pushOrders($this->fx, [$command])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.0.code', 'order_settled');
+
+    expect(Order::query()->where('uuid', $orderUuid)->value('state')?->value)->toBe('paid');
+});
+
+it('refuses an explicit cancel op on a settled order', function (): void {
+    // The same move by the other route: `op: cancel` rather than a state field.
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value]);
+    $command['op'] = 'cancel';
+    $command['lines'] = [];
+
+    pushOrders($this->fx, [$command])
+        ->assertOk()
+        ->assertJsonPath('results.0.code', 'order_settled');
+
+    expect(Order::query()->where('uuid', $orderUuid)->value('state')?->value)->toBe('paid');
+});
+
+it('still lets a paid order be posted to done', function (): void {
+    // The one transition off `paid` that is real, and the rule must not cost it.
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Done->value]);
+    $command['lines'] = [];
+
+    pushOrders($this->fx, [$command])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(Order::query()->where('uuid', $orderUuid)->value('state')?->value)->toBe('done');
+});
+
+it('records a refused cancel like any other settled write', function (): void {
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+    AuditLog::query()->delete();
+
+    $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Cancelled->value]);
+    $command['lines'] = [];
+
+    pushOrders($this->fx, [$command])->assertOk();
+
+    $log = AuditLog::query()->where('event', AuditEvent::SettledOrderWriteRejected)->firstOrFail();
+
+    expect($log->changes['from']['new'])->toBe('paid')
+        ->and($log->changes['to']['new'])->toBe('cancelled')
+        ->and((int) $log->pos_device_id)->toBe((int) $this->fx->device->getKey());
 });

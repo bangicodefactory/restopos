@@ -78,6 +78,51 @@ final class SettledOrder
     }
 
     /**
+     * May a settled order move from `$from` to `$to`?
+     *
+     * Only forward, and only to `done`. A push claiming `cancelled` used to write straight through:
+     * `updateOrder` sets `state` outside the writable-field list, so narrowing that list did nothing
+     * for it. Cancelling a paid order removes it from every report while the money stays in the
+     * drawer — the same divergence this guard exists to stop, reached by a shorter route. Voiding a
+     * settled sale is a refund, which is a new order, not a state change on this one.
+     *
+     * A push repeating the state it already holds is not a transition; that is the resend.
+     */
+    public static function allowsTransition(string $from, string $to): bool
+    {
+        if ($from === $to) {
+            return true;
+        }
+
+        return $from === OrderState::Paid->value && $to === OrderState::Done->value;
+    }
+
+    /**
+     * Would this tip line add value, or quietly take it away?
+     *
+     * The exemption that lets a tip reach a settled order is a hole until this is asked. A device
+     * can send a tip line with a negative price and knock €20 off an order that is already paid,
+     * printed and reconciled — the exact fraud the guard around it was written to stop, walking in
+     * through the door held open for tipping.
+     *
+     * A tip may legitimately be corrected downward or removed outright (that is a delete, handled
+     * separately). What it may never be is worth less than nothing.
+     */
+    public static function tipIsAdditive(string $quantity, string $priceUnit, string $discountPercent): bool
+    {
+        foreach ([$quantity, $priceUnit, $discountPercent] as $value) {
+            if (preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $value) !== 1) {
+                return false;   // unreadable is not additive
+            }
+        }
+
+        return bccomp($quantity, '0', 6) > 0
+            && bccomp($priceUnit, '0', 6) >= 0
+            && bccomp($discountPercent, '0', 6) >= 0
+            && bccomp($discountPercent, '100', 6) <= 0;
+    }
+
+    /**
      * Is this the one product kind that may join an order after it is paid?
      *
      * Keyed on `products.special_kind` rather than on a name or a category, because those are

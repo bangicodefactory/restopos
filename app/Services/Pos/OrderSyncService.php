@@ -634,6 +634,20 @@ final readonly class OrderSyncService
                 ];
             }
 
+            // 3b — and no other move off a settled state either. Narrowing the writable field list
+            //      did nothing for `state`, which `updateOrder` sets outside it: a push claiming
+            //      `cancelled` wrote straight through and took a paid order out of every report
+            //      while the money stayed in the drawer (BAN-410). Voiding a settled sale is a
+            //      refund — a new order — not a state change on this one.
+            if (SettledOrder::isSettled($previousState)
+                && ! SettledOrder::allowsTransition($previousState, $incomingState)
+            ) {
+                return $this->refuseSettledWrite($config, $order, $device, $employeeId, 'order', 'state', $uuid, [
+                    'from' => $previousState,
+                    'to' => $incomingState,
+                ]);
+            }
+
             $this->updateOrder($order, $session, $attributes, $employeeId);
         }
 
@@ -652,6 +666,12 @@ final readonly class OrderSyncService
         $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device, $wasSettled);
         $courseResults = $this->applyCourseCommands($order, (array) ($command['courses'] ?? []));
         $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId, $wasSettled);
+
+        if ($op === 'cancel' && $previousState !== null && SettledOrder::isSettled($previousState)) {
+            return $this->refuseSettledWrite($config, $order, $device, $employeeId, 'order', 'cancel', $uuid, [
+                'from' => $previousState,
+            ]);
+        }
 
         if ($op === 'cancel') {
             $order->forceFill([
@@ -1055,16 +1075,57 @@ final readonly class OrderSyncService
         if ($op === 'create' || $lineId === null) {
             $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
 
-            return SettledOrder::isTipKind($this->variantMeta($variantId)['special_kind'] ?? null)
-                ? SettledOrder::Allow
-                : SettledOrder::Reject;
+            if (! SettledOrder::isTipKind($this->variantMeta($variantId)['special_kind'] ?? null)) {
+                return SettledOrder::Reject;
+            }
+
+            return $this->tipAdds($command, null) ? SettledOrder::Allow : SettledOrder::Reject;
         }
 
         if ($this->lineCommandChangesNothing($lineId, $command)) {
             return SettledOrder::Noop;
         }
 
-        return $this->isTipLine($lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+        if (! $this->isTipLine($lineId)) {
+            return SettledOrder::Reject;
+        }
+
+        return $this->tipAdds($command, $lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+    }
+
+    /**
+     * Does this tip command leave the line worth something, rather than taking value away?
+     *
+     * The tip exemption is a hole without this. A device can send a tip line priced at −20.00 and
+     * knock €20 off an order that is already paid, printed and reconciled — the very fraud the
+     * guard around it exists to stop, walking in through the door held open for tipping.
+     *
+     * Fields the command omits fall back to what the line already holds, so a partial update cannot
+     * dodge the check by simply not mentioning the value it is changing.
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function tipAdds(array $command, ?int $lineId): bool
+    {
+        $line = $lineId === null ? null : OrderLine::query()->find($lineId);
+
+        // `$stored` is whatever the driver hands back — SQLite returns a native int for a decimal
+        // column where Postgres returns a string — so it is taken as mixed and cast here.
+        $pick = static function (array $keys, mixed $stored, string $default) use ($command): string {
+            foreach ($keys as $key) {
+                if (array_key_exists($key, $command) && $command[$key] !== null) {
+                    return (string) $command[$key];
+                }
+            }
+
+            return $stored === null ? $default : (string) $stored;
+        };
+
+        return SettledOrder::tipIsAdditive(
+            $pick(['qty', 'quantity'], $line?->getRawOriginal('quantity'), '1'),
+            $pick(['price_unit'], $line?->getRawOriginal('price_unit'), '0'),
+            $pick(['discount', 'discount_percent'], $line?->getRawOriginal('discount_percent'), '0'),
+        );
     }
 
     /**
