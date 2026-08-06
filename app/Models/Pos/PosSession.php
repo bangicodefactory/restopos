@@ -176,6 +176,19 @@ class PosSession extends Model implements PosLoadable
         return $this->state->isOpen();
     }
 
+    /**
+     * How to refer to this session in prose — a log line, a list, a dashboard tile.
+     *
+     * `name` is null until the opening control is confirmed (REG-003): the number is minted when
+     * the session starts trading, so one that has not yet has no number to show. Falling back to
+     * the id keeps every human-facing surface pointing at *something*, which a blank string does
+     * not. The wire contract still sends the honest null — see `SessionResource`.
+     */
+    public function label(): string
+    {
+        return $this->name ?? '#'.$this->getKey();
+    }
+
     /** Opening float + cash payments + cash in/out − change given. */
     public function expectedCash(): string
     {

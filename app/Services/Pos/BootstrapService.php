@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Pos;
 
 use App\Enums\SessionState;
+use App\Http\Resources\Pos\SessionResource;
 use App\Models\Concerns\PosLoadable;
 use App\Models\Identity\Customer;
 use App\Models\Pos\PosConfig;
@@ -487,11 +488,13 @@ final readonly class BootstrapService
             return null;
         }
 
-        $row = $session->attributesToArray();
-        // Rename the column to the field the client reads (packages/domain PosSessionRow), matching
-        // SessionResource on the endpoint path — one contract, the raw column name never leaks.
-        $row['opening_float'] = (string) $session->cash_balance_opening;
-        unset($row['cash_balance_opening']);
+        // Renamed to the fields the client reads (packages/domain PosSessionRow) by the same helper
+        // the endpoint uses — one contract, and the raw column names never leak.
+        $row = [...$session->attributesToArray(), ...SessionResource::floats($session)];
+
+        foreach (SessionResource::RenamedColumns as $column) {
+            unset($row[$column]);
+        }
 
         return $row;
     }

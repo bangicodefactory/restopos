@@ -7,6 +7,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\BootstrapContract;
 
+use App\Http\Resources\Pos\SessionResource;
 use App\Models\Audit\SyncConflict;
 use App\Models\Pos\Order;
 use App\Models\Pos\Payment;
@@ -96,6 +97,26 @@ it('bootstrap exposes the session opening_float, not the raw column name', funct
 
     expect($session)->toHaveKey('opening_float')
         ->and($session['opening_float'])->toBe((string) $this->fx->session->cash_balance_opening);
+});
+
+it('bootstrap and the session endpoint agree on every renamed opening field', function (): void {
+    // A session reaches the register down two paths. A rename applied to one of them is worse than
+    // none at all: the field is simply absent on whichever path was missed, and the screen reading
+    // it shows nothing — which is how `opening_float` came to be renamed on bootstrap only.
+    $bootstrap = $this->withHeaders($this->fx->headers())->getJson('/api/pos/bootstrap')->assertOk()->json('data.pos_session');
+    $endpoint = $this->withHeaders($this->fx->headers())->getJson('/api/pos/sessions/current')->assertOk()->json('session');
+
+    foreach (['opening_float', 'expected_opening_float'] as $field) {
+        expect($bootstrap)->toHaveKey($field)
+            ->and($endpoint)->toHaveKey($field)
+            ->and($bootstrap[$field])->toBe($endpoint[$field]);
+    }
+
+    // …and neither path leaks the column names those replace.
+    foreach (SessionResource::RenamedColumns as $column) {
+        expect($bootstrap)->not->toHaveKey($column)
+            ->and($endpoint)->not->toHaveKey($column);
+    }
 });
 
 // ── (b) table transfer + (f) no reroute/conflict ──

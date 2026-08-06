@@ -723,13 +723,20 @@ export type PosSessionRow = {
     id: number;
     uuid: string;
     pos_config_id: number;
-    /** Human-readable session reference, e.g. `SALLE/00042`. Mirrors `pos_sessions.name`. */
-    name: string;
+    /**
+     * Human-readable session reference, e.g. `SALLE/00042`. Mirrors `pos_sessions.name`.
+     *
+     * Null while the session is in `opening_control`: the number is minted when the session starts
+     * trading, so one that has not yet been confirmed does not have it (REG-003).
+     */
+    name: string | null;
     opened_by_employee_id: number | null;
     state: SessionState;
     opened_at: Iso | null;
     closed_at: Iso | null;
     opening_float: Money;
+    /** What the previous close counted into the drawer — `cash_balance_opening_expected` (REG-004). */
+    expected_opening_float: Money;
     closing_balance: Money | null;
     order_seq: number;
     is_rescue: boolean;

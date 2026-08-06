@@ -51,7 +51,7 @@ final class SessionController extends Controller
             'sessions' => $sessions->through(static fn (PosSession $s): array => [
                 'id' => (int) $s->getKey(),
                 'uuid' => (string) $s->uuid,
-                'name' => (string) $s->name,
+                'name' => $s->label(),
                 'pos_config_id' => (int) $s->pos_config_id,
                 'state' => $s->state->value,
                 'business_date' => $s->business_date,

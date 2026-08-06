@@ -68,7 +68,7 @@ final class DashboardController extends Controller
                     'session' => $session === null ? null : [
                         'id' => (int) $session->getKey(),
                         'uuid' => (string) $session->uuid,
-                        'name' => (string) $session->name,
+                        'name' => $session->label(),
                         'state' => $session->state->value,
                         'opened_at' => $session->opened_at,
                         'order_count' => (int) $session->order_count,

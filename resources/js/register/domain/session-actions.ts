@@ -3,7 +3,12 @@ import type { PosSessionRow } from '@domain/types';
 import { ApiError } from '@shared/sync';
 
 import { getRuntime } from '../data/runtime';
-import { usePosSessionStore, type ClosingData, type DenominationCount } from '../state/session-store';
+import {
+    usePosSessionStore,
+    type ClosingData,
+    type DenominationCount,
+    type OpeningContext,
+} from '../state/session-store';
 
 /**
  * Session lifecycle (REG-001 … REG-021).
@@ -20,7 +25,7 @@ import { usePosSessionStore, type ClosingData, type DenominationCount } from '..
  * is an inconvenience; an order that cannot be taken is lost revenue.
  */
 
-export type SessionResponse = { session: PosSessionRow | null };
+export type SessionResponse = { session: PosSessionRow | null; opening?: OpeningContext };
 
 function describe(error: unknown): string {
     if (error instanceof ApiError) {
@@ -59,6 +64,10 @@ export async function fetchCurrentSession(): Promise<PosSessionRow | null> {
         const session = response.data?.session ?? null;
 
         store.setSession(session);
+        // The expected float and the register's configuration problems (REG-002, REG-004). Not
+        // cached: both are answers about *now*, and a stale "this register is fine" would let a
+        // cashier count a drawer into an open that is going to be refused anyway.
+        store.setOpening(response.data?.opening ?? null);
 
         // Written, never wiped. `pos_sessions` is a replicated table — bootstrap and delta own it,
         // scoped to this config's open sessions — so clearing it on "no current session" would
@@ -111,6 +120,31 @@ export async function openSessionFromDb(): Promise<PosSessionRow | null> {
             .filter((row) => row.state !== 'closed' && row.is_rescue !== true)
             .sort((a, b) => b.id - a.id)[0] ?? null
     );
+}
+
+/**
+ * The float to open with (REG-004).
+ *
+ * The rule is short and worth stating out loud, because inverting it is a one-character edit that
+ * loses money quietly: **with cash control, the counted drawer is the float — never the expected.**
+ * Substituting the expected for an untouched grid would record a drawer nobody counted, and a
+ * night's shortfall would open as though the money were still there, invisible until the close
+ * blamed it on the wrong shift.
+ *
+ * Without cash control there is no count to make and no grid to touch, so the previous close simply
+ * carries over — which is what a register that never counts its drawer actually wants, and is what
+ * the pane used to get wrong by hardcoding zero.
+ */
+export function openingFloatFor(input: {
+    cashControl: boolean;
+    countedTotal: number;
+    expectedFloat: string | null;
+}): string {
+    if (input.cashControl) return input.countedTotal.toFixed(2);
+
+    const expected = Number.parseFloat(input.expectedFloat ?? '0');
+
+    return Number.isFinite(expected) ? expected.toFixed(2) : '0.00';
 }
 
 export async function openSession(input: {
