@@ -1089,6 +1089,11 @@ export interface OutboxEntry {
 }
 ```
 
+**`audit.batch`** carries facts the till observed that the server has no other way to learn — the drawer opening is the one that matters, since it is an ESC/POS pulse sent straight from the browser to the printer (BAN-413). Two rules, both load-bearing:
+
+- **Idempotency is per event, not per batch.** Each event carries its own uuid, which becomes the `audit_logs` row's; the unique index is the real guard. A redelivered batch must not become two openings, and a batch that grew between attempts must not lose its new events.
+- **The event name is whitelisted server-side.** A device bearer token lives on the till, which is a machine the trail is partly evidence *about*. A passthrough would let anyone holding a paired device forge a `session.closed` into the record — with a real device id and a real employee attached, which is worse than no row at all. `OrderSyncService::ClientAuditEvents` is the accepted set.
+
 **Coalescing.** When an order mutates while an entry for it is already `pending`, we do not append a second entry — we replace the payload with a fresh diff-from-baseline. This keeps the queue bounded during a long offline stretch. An entry in `inflight` is never touched; the new mutation creates a follow-up entry that is sent after the in-flight one resolves. Per-order serialization is guaranteed by an in-memory `Map<Uuid, Promise>` lock.
 
 **Ordering.** Entries drain strictly by `seq` **within a `targetUuid`**, and with bounded parallelism (4) across different targets. Cross-order ordering does not matter except for session lifecycle entries, which are marked `barrier: true` and drain alone.

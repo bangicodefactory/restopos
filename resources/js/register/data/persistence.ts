@@ -1,5 +1,5 @@
-import type { OrderCommand, RecordCommand } from '@domain/sync/wire';
-import type { CourseRow, OrderLineRow, OrderRow, PaymentRow, Uuid } from '@domain/types';
+import type { ApprovalCommand, OrderCommand, RecordCommand } from '@domain/sync/wire';
+import type { ApprovalRow, CourseRow, OrderLineRow, OrderRow, PaymentRow, Uuid } from '@domain/types';
 import { asUuid } from '@domain/types';
 import { withQuotaRescue, type PosDb } from '@shared/db';
 import { createFlusher } from '@shared/store';
@@ -81,6 +81,17 @@ function paymentCommand(payment: PaymentRow): RecordCommand<PaymentRow> {
     };
 }
 
+function approvalCommand(approval: ApprovalRow): ApprovalCommand {
+    return {
+        uuid: approval.uuid,
+        ability: approval.ability,
+        manager_employee_id: approval.manager_employee_id,
+        verified: approval.verified,
+        at: approval.at,
+        context: approval.context ?? {},
+    };
+}
+
 function courseCommand(course: CourseRow): RecordCommand<CourseRow> {
     return {
         op: course.id === null ? 'create' : 'update',
@@ -92,8 +103,17 @@ function courseCommand(course: CourseRow): RecordCommand<CourseRow> {
     };
 }
 
-/** Build the push command for one order. Exported for the sync tests. */
-export function buildOrderCommand(state: OrderSlice, orderUuid: string): OrderCommand | null {
+/**
+ * Build the push command for one order. Exported for the sync tests.
+ *
+ * `approvals` is passed in rather than read here because it lives in Dexie, not in the order store,
+ * and this function is deliberately synchronous and pure.
+ */
+export function buildOrderCommand(
+    state: OrderSlice,
+    orderUuid: string,
+    approvals: ApprovalCommand[] = [],
+): OrderCommand | null {
     const order = state.orders[orderUuid];
     if (!order) return null;
 
@@ -144,7 +164,7 @@ export function buildOrderCommand(state: OrderSlice, orderUuid: string): OrderCo
         lines,
         payments: paymentsOf(state, orderUuid).map(paymentCommand),
         courses: coursesOf(state, orderUuid).map(courseCommand),
-        approvals: [],
+        approvals,
     };
 }
 
@@ -210,9 +230,25 @@ export function createPersistence(db: PosDb, syncer: OutboxSyncer): Persistence 
             flusher.schedule();
         },
         enqueue: (orderUuid) => {
-            const command = buildOrderCommand(useOrderStore.getState(), orderUuid);
-            if (!command) return;
-            void syncer.enqueueOrder(command);
+            // Approvals are read from Dexie, so this leg is async where the rest of `enqueue` is
+            // not. They used to be sent as a hardcoded `[]`: a manager override was recorded on the
+            // granting till and nowhere else, so clearing that device's storage — or simply
+            // replacing the tablet — erased the record of who authorised the discount. That is the
+            // one fact the PIN exists to capture (BAN-413).
+            void (async () => {
+                let approvals: ApprovalCommand[] = [];
+
+                try {
+                    const rows = await db.approvals.where('order_uuid').equals(orderUuid).toArray();
+                    approvals = rows.map(approvalCommand);
+                } catch {
+                    // A failed read must not hold up the sale; the order still goes.
+                }
+
+                const command = buildOrderCommand(useOrderStore.getState(), orderUuid, approvals);
+                if (!command) return;
+                await syncer.enqueueOrder(command);
+            })();
         },
         flushNow: async () => {
             flusher.schedule();

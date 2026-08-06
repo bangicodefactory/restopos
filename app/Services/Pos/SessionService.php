@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Pos;
 
+use App\Enums\AuditSeverity;
 use App\Enums\CashCountType;
 use App\Enums\CashMovementType;
 use App\Enums\OrderState;
@@ -13,7 +14,9 @@ use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use App\Models\Pos\SessionCashCount;
+use App\Services\Audit\AuditRecorder;
 use App\Services\Pos\Dto\SessionClosingData;
+use App\Support\Audit\AuditEvent;
 use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -40,6 +43,7 @@ final readonly class SessionService
     public function __construct(
         private ConnectionInterface $connection,
         private SessionSummaryService $summaries,
+        private AuditRecorder $audit,
         private Dispatcher $events,
         private LoggerInterface $logger,
         private Config $config,
@@ -100,6 +104,17 @@ final readonly class SessionService
                 $this->recordMovement($session, CashMovementType::OpeningFloat, $openingFloat, 'Opening float', $employeeId, $userId, null);
             }
 
+            $this->audit->record(
+                event: AuditEvent::SessionOpened,
+                subject: $session,
+                message: "Session {$session->name} opened with a float of {$openingFloat}",
+                changes: ['cash_balance_opening' => ['old' => null, 'new' => $openingFloat]],
+                config: $config,
+                session: $session,
+                employeeId: $employeeId,
+                userId: $userId,
+            );
+
             return $session;
         });
     }
@@ -111,11 +126,26 @@ final readonly class SessionService
             throw new DomainException('This session is not awaiting an opening control.');
         }
 
+        $expected = (string) $session->cash_balance_opening;
+
         $session->forceFill([
             'state' => SessionState::Opened->value,
             'cash_balance_opening' => $countedFloat,
             'opened_by_employee_id' => $session->opened_by_employee_id ?? $employeeId,
         ])->save();
+
+        $this->audit->record(
+            event: AuditEvent::SessionOpeningControlConfirmed,
+            subject: $session,
+            // A counted float that disagrees with the declared one is the first thing that can go
+            // wrong in a shift, and the last thing anyone remembers by the close.
+            severity: bccomp($countedFloat, $expected, 4) === 0 ? AuditSeverity::Info : AuditSeverity::Notice,
+            message: 'Opening control confirmed',
+            changes: ['cash_balance_opening' => ['old' => $expected, 'new' => $countedFloat]],
+            config: $session->pos_config_id,
+            session: $session,
+            employeeId: $employeeId,
+        );
 
         return $session;
     }
@@ -162,16 +192,53 @@ final readonly class SessionService
 
             $this->refreshCashTotals($session);
 
+            // `updateOrCreate` on the uuid means a replayed outbox entry lands here again; log the
+            // movement, not the request, or a flaky connection reads as repeated cash-outs.
+            if ($movement->wasRecentlyCreated) {
+                $this->audit->record(
+                    event: AuditEvent::CashMoveCreated,
+                    subject: $movement,
+                    companyId: (int) $session->company_id,
+                    severity: AuditSeverity::Notice,
+                    message: trim("{$type->value} {$signed} ".($reason ?? '')),
+                    changes: ['amount' => ['old' => null, 'new' => $signed]],
+                    config: $session->pos_config_id,
+                    session: $session,
+                    employeeId: $employeeId,
+                    userId: $userId,
+                    device: $deviceId,
+                );
+            }
+
             return $movement;
         });
     }
 
-    /** Delete a cash movement — manager-gated at the controller. */
+    /**
+     * Delete a cash movement — manager-gated at the controller.
+     *
+     * The deletion is logged, not the movement: the row itself is about to stop existing, and
+     * "money left the drawer and then the record of it was removed" is a materially different fact
+     * from either half on its own.
+     */
     public function deleteCashMovement(CashMovement $movement): void
     {
         $session = $movement->pos_session_id === null
             ? null
             : PosSession::query()->find($movement->pos_session_id);
+
+        $this->audit->record(
+            event: AuditEvent::CashMoveDeleted,
+            subject: $movement,
+            companyId: (int) $movement->company_id,
+            severity: AuditSeverity::Warning,
+            message: "Cash movement {$movement->movement_type->value} {$movement->amount} deleted",
+            changes: ['amount' => ['old' => (string) $movement->amount, 'new' => null]],
+            config: $session?->pos_config_id,
+            session: $session,
+            employeeId: $movement->employee_id,
+            device: $movement->pos_device_id,
+        );
 
         $movement->delete();
 
@@ -295,6 +362,56 @@ final readonly class SessionService
                     $employeeId,
                     $userId,
                     null,
+                );
+            }
+
+            $this->audit->record(
+                event: AuditEvent::SessionClosed,
+                subject: $session,
+                // A close that balances is routine; one that does not is the number an accountant
+                // will ask about, so it must be findable by severity alone.
+                severity: bccomp($difference, '0', 4) === 0 ? AuditSeverity::Info : AuditSeverity::Warning,
+                message: "Session {$session->name} closed, difference {$difference}",
+                changes: [
+                    'cash_balance_closing_expected' => ['old' => null, 'new' => $expectedCash],
+                    'cash_balance_closing_counted' => ['old' => null, 'new' => $counted],
+                    'cash_difference' => ['old' => null, 'new' => $difference],
+                ],
+                config: $session->pos_config_id,
+                session: $session,
+                employeeId: $employeeId,
+                userId: $userId,
+            );
+
+            // Two separate facts, deliberately two separate rows. A manager who signs off variances
+            // is a pattern; it only reads as one if each sign-off is its own row to count.
+            if ($overThreshold && $managerApproved) {
+                $this->audit->record(
+                    event: AuditEvent::SessionOverVarianceApproved,
+                    subject: $session,
+                    severity: AuditSeverity::Critical,
+                    message: "Difference {$difference} over the authorised {$threshold} approved",
+                    changes: [
+                        'cash_difference' => ['old' => null, 'new' => $difference],
+                        'threshold' => ['old' => null, 'new' => $threshold],
+                    ],
+                    config: $session->pos_config_id,
+                    session: $session,
+                    employeeId: $approvedByEmployeeId,
+                    userId: $userId,
+                );
+            }
+
+            if ($force && $drafts > 0) {
+                $this->audit->record(
+                    event: AuditEvent::SessionForceClosed,
+                    subject: $session,
+                    severity: AuditSeverity::Warning,
+                    message: "Closed with {$drafts} draft order(s) left open",
+                    config: $session->pos_config_id,
+                    session: $session,
+                    employeeId: $employeeId,
+                    userId: $userId,
                 );
             }
 

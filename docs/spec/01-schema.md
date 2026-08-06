@@ -2501,8 +2501,10 @@ Maps from Odoo's `is_edited` / `has_deleted_line` chatter messages.
 | old_value, new_value | string(96) nullable | |
 | amount_impact | decimal(16,4) default 0 | signed revenue impact |
 | employee_id | FK→employees.id nullable, set null | |
+| pos_device_id | FK→pos_devices.id nullable, set null | which till — employees share PINs, devices do not |
 | occurred_at | timestamp(3), index | |
 | timestamps | | |
+| index | (pos_order_id, occurred_at) | the per-order edit history |
 
 ### `sync_requests`
 Request-level idempotency + replay protection for the offline queue. A device retrying a batch that
