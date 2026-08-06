@@ -81,17 +81,31 @@ final readonly class RefundService
      * `$excludingLineId` lets an edit be measured as a replacement rather than an addition, so
      * correcting a refund from 2 to 3 is scored as 3 and not as 5.
      */
-    public function alreadyRefunded(int $originalLineId, ?int $excludingLineId = null): string
+    public function alreadyRefunded(int $originalLineId, ?int $excludingLineId = null, bool $lock = true): string
     {
-        OrderLine::query()->whereKey($originalLineId)->lockForUpdate()->first();
+        // The lock belongs to the decision, not to every read. `refreshRefundedQuantity` and the
+        // post-write check run *after* the preflight has already taken it in this transaction, so
+        // re-taking it there buys nothing and costs a query per line.
+        if ($lock) {
+            OrderLine::query()->whereKey($originalLineId)->lockForUpdate()->first();
+        }
 
         $rows = $this->connection->table('pos_order_lines')
             ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
             ->where('pos_order_lines.refunded_order_line_id', $originalLineId)
             // A withdrawn refund gives the quantity back; otherwise one mistake permanently
-            // reduces what the customer can still be given.
+            // reduces what the customer can still be given. Three ways a refund is withdrawn, and
+            // all three have to be honoured here:
+            //
+            //   - the order is cancelled
+            //   - the order is deleted (drafts soft-delete)
+            //   - the *line* is removed from the order — and `pos_order_lines` soft-deletes too,
+            //     which this missed at first. These are raw builder queries, so no Eloquent scope
+            //     is applied for us: a line the cashier took off a draft went on consuming its
+            //     quantity forever, and the customer could never be given it back.
             ->where('pos_orders.state', '!=', OrderState::Cancelled->value)
             ->whereNull('pos_orders.deleted_at')
+            ->whereNull('pos_order_lines.deleted_at')
             ->when($excludingLineId !== null, fn ($q) => $q->where('pos_order_lines.id', '!=', $excludingLineId))
             ->pluck('pos_order_lines.quantity');
 
@@ -129,8 +143,33 @@ final readonly class RefundService
         }
 
         $original->forceFill([
-            'refunded_quantity' => $this->alreadyRefunded($originalLineId),
+            'refunded_quantity' => $this->alreadyRefunded($originalLineId, lock: false),
         ])->save();
+    }
+
+    /**
+     * Re-derive every original line credited by this order.
+     *
+     * Called when refunds *leave* — a line deleted from a draft refund, or the whole refund
+     * cancelled. Both were missed at first, and the effect is nastier than it sounds: the cap
+     * recomputes correctly from the rows that remain, so the customer *can* be refunded again, but
+     * `refunded_quantity` is the column the ticket screen reads as "still refundable". Left stale it
+     * shows 0 remaining, and the cashier cannot even attempt the refund the guard would allow.
+     */
+    public function refreshOriginalsCreditedBy(int $refundOrderId): void
+    {
+        $ids = OrderLine::query()
+            ->withTrashed()
+            ->where('pos_order_id', $refundOrderId)
+            ->whereNotNull('refunded_order_line_id')
+            ->distinct()
+            ->pluck('refunded_order_line_id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+
+        foreach ($ids as $id) {
+            $this->refreshRefundedQuantity($id);
+        }
     }
 
     /**
@@ -147,14 +186,34 @@ final readonly class RefundService
      */
     public function firstOverRefunded(array $originalLineIds): ?int
     {
-        foreach (array_values(array_unique($originalLineIds)) as $originalLineId) {
-            $original = OrderLine::query()->find($originalLineId);
+        $ids = array_values(array_unique($originalLineIds));
 
-            if ($original === null) {
+        if ($ids === []) {
+            return null;
+        }
+
+        // One grouped query rather than two per line. A "refund everything" on a long restaurant tab
+        // is the case that made this worth doing.
+        $refunded = $this->connection->table('pos_order_lines')
+            ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+            ->whereIn('pos_order_lines.refunded_order_line_id', $ids)
+            ->where('pos_orders.state', '!=', OrderState::Cancelled->value)
+            ->whereNull('pos_orders.deleted_at')
+            ->whereNull('pos_order_lines.deleted_at')
+            ->groupBy('pos_order_lines.refunded_order_line_id')
+            ->selectRaw('pos_order_lines.refunded_order_line_id as original_id, SUM(pos_order_lines.quantity) as total')
+            ->pluck('total', 'original_id');
+
+        $sold = OrderLine::query()->whereKey($ids)->pluck('quantity', 'id');
+
+        foreach ($ids as $originalLineId) {
+            if (! $sold->has($originalLineId)) {
                 continue;
             }
 
-            if (bccomp($this->alreadyRefunded($originalLineId), (string) $original->quantity, 6) > 0) {
+            $given = bcmul((string) ($refunded[$originalLineId] ?? '0'), '-1', 6);
+
+            if (bccomp($given, (string) $sold[$originalLineId], 6) > 0) {
                 return $originalLineId;
             }
         }

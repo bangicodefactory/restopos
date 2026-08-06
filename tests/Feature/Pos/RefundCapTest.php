@@ -337,3 +337,101 @@ it('processes a sale and its refund arriving in one batch, whatever order they a
         ->and($byUuid[$refundUuid]['status'])->toBe('ok')
         ->and(refundedUnits($saleLine))->toBe('-1');
 });
+
+// ---------------------------------------------------------------- refunds that go away again
+
+it('gives the quantity back when a refund line is removed from a draft', function (): void {
+    // `pos_order_lines` soft-deletes, and the cap is counted with raw builder queries — so no
+    // Eloquent scope is applied for us. A line the cashier took off a draft went on consuming its
+    // quantity forever, and the customer could never be given it back.
+    [$originalUuid, $lineUuid] = capSell($this->fx, '2');
+
+    $refundUuid = (string) Str::uuid();
+    $refundLine = (string) Str::uuid();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [[
+        'op' => 'create', 'uuid' => $refundLine, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '-2', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid,
+    ]], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('refunded_quantity'))->toBe('2.000');
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [
+        ['op' => 'delete', 'uuid' => $refundLine],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])->assertOk();
+
+    // The column the ticket screen reads as "still refundable" — stale here means the cashier is
+    // shown nothing left on money the cap would happily give back.
+    expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('refunded_quantity'))->toBe('0.000');
+
+    // …and the cap agrees, which is the half that actually moves money.
+    capRefund($this->fx, $originalUuid, $lineUuid, '2')->assertOk()->assertJsonPath('results.0.status', 'ok');
+});
+
+it('tells the till what is refundable again after a refund is cancelled', function (): void {
+    // The cap already recomputed correctly here; `refunded_quantity` did not. Two halves of the same
+    // fact, and only one of them was being kept — the wrong one to leave stale, because it is the
+    // one the cashier sees.
+    [$originalUuid, $lineUuid] = capSell($this->fx, '2');
+    $refundUuid = (string) Str::uuid();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '-2', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid,
+    ]], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])->assertOk();
+
+    $cancel = $this->fx->orderCommand($refundUuid, [], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid]);
+    $cancel['lines'] = [];
+    $cancel['op'] = 'cancel';
+    capSync($this->fx, [$cancel])->assertOk();
+
+    expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('refunded_quantity'))->toBe('0.000');
+});
+
+it('does not let a soft-deleted refund line be counted twice over', function (): void {
+    // The other direction of the same rule: removing a refund and taking it again must leave one
+    // refund standing, not two.
+    [$originalUuid, $lineUuid] = capSell($this->fx, '2');
+
+    $refundUuid = (string) Str::uuid();
+    $refundLine = (string) Str::uuid();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [[
+        'op' => 'create', 'uuid' => $refundLine, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '-2', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid,
+    ]], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])->assertOk();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [
+        ['op' => 'delete', 'uuid' => $refundLine],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])->assertOk();
+
+    capRefund($this->fx, $originalUuid, $lineUuid, '2')->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    // Two units sold, two given back — never four, whatever the soft-deleted row says.
+    capRefund($this->fx, $originalUuid, $lineUuid, '1')
+        ->assertOk()
+        ->assertJsonPath('results.0.error.code', 'refund_exceeds_sold');
+});
+
+it('refuses an unlinked negative line reached by editing a positive one', function (): void {
+    // The sign is checked on the *command*, so flipping a line negative after the fact is caught by
+    // the same rule that catches creating it negative.
+    [$originalUuid] = capSell($this->fx, '2');
+
+    $refundUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [[
+        'op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+    ]], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])->assertOk();
+
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [
+        ['op' => 'update', 'uuid' => $lineUuid, 'qty' => '-99'],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])
+        ->assertOk()
+        ->assertJsonPath('results.0.error.code', 'refund_unlinked');
+
+    expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('quantity'))->toBe('1.000');
+});

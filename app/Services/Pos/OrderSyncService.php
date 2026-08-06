@@ -743,6 +743,12 @@ final readonly class OrderSyncService
                 device: $device,
             );
 
+            // A cancelled refund no longer counts against the cap, so every original it credited
+            // has to be re-derived. Missed at first, and the effect is worse than it sounds: the cap
+            // recomputes correctly, but the column the ticket screen reads stays stale, so the
+            // cashier is shown 0 refundable on money the guard would happily give back.
+            $this->refunds->refreshOriginalsCreditedBy((int) $order->getKey());
+
             $this->withdrawFromKitchen($config, $device, $order);
         }
 
@@ -1846,7 +1852,16 @@ final readonly class OrderSyncService
             $this->edits->lineRemoved($config, $order, $line, $employeeId, $device);
         }
 
+        // Read before the delete for the same reason.
+        $creditedLineId = $line?->refunded_order_line_id === null ? null : (int) $line->refunded_order_line_id;
+
         OrderLine::query()->whereKey($id)->delete();
+
+        if ($creditedLineId !== null) {
+            // The refund is gone, so the quantity it held is refundable again — and the till has to
+            // be told, or it shows 0 remaining and the cashier cannot attempt what the cap allows.
+            $this->refunds->refreshRefundedQuantity($creditedLineId);
+        }
 
         // `has_deleted_line` survives the line it describes; it is what a back-office list filters
         // on to find the orders worth opening (REG-123).
