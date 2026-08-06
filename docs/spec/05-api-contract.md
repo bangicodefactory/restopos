@@ -487,16 +487,31 @@ Payment rows carry terminal metadata only — brand, last four, auth code. Never
 
 ### `GET /api/pos/sessions/current`
 
-Auth: device + `pos:session`. `{ "session": SessionResource | null }`.
+Auth: device + `pos:session`.
+
+```jsonc
+{ "session": SessionResource | null,
+  // Everything the open pane needs before a session exists (REG-002, REG-004).
+  "opening": { "expected_float": "135.5000",     // what the last close counted into the drawer
+               "problems": [ { "code": "no_payment_method", "message": "…" } ] } }
+```
+
+`opening.problems` is empty on a register that can trade. A non-empty list is the same list
+`POST /api/pos/sessions` refuses with, answered early so a cashier is not sent to count a drawer
+into an open that will be rejected.
 
 **`SessionResource`:**
 
 ```jsonc
-{ "id": 881, "uuid": "…", "pos_config_id": 1, "name": "Bar/00001",
+{ "id": 881, "uuid": "…", "pos_config_id": 1,
+  "name": "Bar/00001",                        // null until the opening control is confirmed
   "state": "opened",                          // opening_control | opened | closing_control | closed
   "opened_at": "…", "closed_at": null, "business_date": "2026-07-28",
   "has_cash_control": true,
-  "cash_balance_opening": "150.0000", "cash_balance_closing_counted": null,
+  // Renamed from `cash_balance_opening` / `cash_balance_opening_expected`; the raw column names
+  // never reach the client, on this path or on bootstrap.
+  "opening_float": "150.0000", "expected_opening_float": "135.5000",
+  "cash_balance_closing_counted": null,
   "cash_balance_closing_expected": "0.0000", "cash_difference": "0.0000",
   "cash_in_total": "0.0000", "cash_out_total": "0.0000",
   "order_count": 0, "order_amount_total": "0.0000", "refund_amount_total": "0.0000",
@@ -513,7 +528,23 @@ Auth: device + `pos:session`.
   "denominations": [ { "denomination_value": "50.00", "quantity": 3, "pos_bill_id": 4 } ] }
 ```
 
-`201` with a `SessionResource`. With cash control on the session lands in `opening_control`; without it, straight to `opened`. `422 session_open_failed` when the register already has an open session — that invariant is a database constraint, re-checked here so you get a domain error instead of a constraint violation.
+`201` with a `SessionResource`. With cash control on the session lands in `opening_control` **without a name**; without it, straight to `opened` and numbered on the spot.
+
+`422 session_open_failed` when the register already has an open session — that invariant is a database constraint, re-checked here so you get a domain error instead of a constraint violation.
+
+`422 register_not_ready` when the register's configuration cannot support a session at all (REG-002). Deliberately a separate code: this one is fixed in the back office, not at the till. No session row is created.
+
+```jsonc
+{ "error": { "code": "register_not_ready", "message": "…",
+             "problems": [ { "code": "no_payment_method", "message": "…" },
+                           { "code": "currency_mismatch", "message": "…" },
+                           { "code": "fiscal_position_unresolved", "message": "…" } ] } }
+```
+
+The whole list is returned, not the first failure, so a manager fixes everything in one trip. The
+checks are: at least one active payment method owned by the register's company; the register's
+currency matching the company's; and, when `use_fiscal_positions` is on, a default fiscal position
+that `FiscalPosition::posLoadScope` will actually replicate to the till.
 
 ### `POST /api/pos/sessions/{session}/opening-control`
 
@@ -521,7 +552,7 @@ Auth: device + `pos:session`.
 { "counted_float": "150.00", "employee_id": 17 }
 ```
 
-`200` with a `SessionResource` in state `opened`. `422 invalid_transition` if the session was not awaiting an opening control.
+`200` with a `SessionResource` in state `opened`. **This is where the session number is minted** (REG-003) — an opening control that is abandoned never gets one, so it leaves no gap in the sequence. `422 invalid_transition` if the session was not awaiting an opening control.
 
 ### `GET /api/pos/sessions/{session}/closing-data`
 

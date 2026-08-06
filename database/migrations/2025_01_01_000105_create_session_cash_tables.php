@@ -38,7 +38,10 @@ return new class extends Migration
             $table->foreignId('pos_config_id')->constrained('pos_configs')->restrictOnDelete();
             $table->foreignId('company_id')->constrained()->cascadeOnDelete();
             $table->foreignId('currency_id')->constrained()->restrictOnDelete();
-            $table->string('name', 48)->index();
+            // Null until the session actually starts trading. The number is minted at the opening
+            // control, not at create, so an opening control that is abandoned burns nothing — see
+            // SessionService::confirmOpeningControl (REG-003).
+            $table->string('name', 48)->nullable()->index();
             $table->string('state', 24)->default(SessionState::OpeningControl->value)->index();
             $table->foreignId('opened_by_user_id')->nullable()->constrained('users')->restrictOnDelete();
             $table->foreignId('opened_by_employee_id')->nullable()->constrained('employees')->restrictOnDelete();

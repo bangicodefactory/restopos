@@ -51,7 +51,7 @@ final class SessionController extends Controller
             'sessions' => $sessions->through(static fn (PosSession $s): array => [
                 'id' => (int) $s->getKey(),
                 'uuid' => (string) $s->uuid,
-                'name' => (string) $s->name,
+                'name' => $s->label(),
                 'pos_config_id' => (int) $s->pos_config_id,
                 'state' => $s->state->value,
                 'business_date' => $s->business_date,
@@ -73,7 +73,12 @@ final class SessionController extends Controller
         Gate::authorize('view', $session);
 
         return Inertia::render('Sessions/Show', [
-            'session' => $session->attributesToArray(),
+            // `name` is null until the opening control is confirmed (REG-003), and this page types it
+            // as a string — the close action uses it as the phrase the manager must type back, and a
+            // null phrase can never be matched, so the button became impossible to confirm on exactly
+            // the sessions a manager most needs to close: an abandoned opening control holds the
+            // one-open-session index and blocks the register until someone clears it.
+            'session' => [...$session->attributesToArray(), 'name' => $session->label()],
             'paymentTotals' => $this->connection->table('session_payment_totals')
                 ->where('pos_session_id', $session->getKey())->get()->map(static fn ($r): array => (array) $r)->all(),
             'salesSummaries' => Inertia::defer(fn (): array => $this->connection->table('session_sales_summaries')

@@ -56,6 +56,8 @@ export const registerEn = {
     // ── session ──────────────────────────────────────────────────────────────
     'reg.session.openTitle': 'Open the session',
     'reg.session.openingFloat': 'Opening float',
+    'reg.session.expectedFloat': 'Expected from the last close',
+    'reg.session.notReady': 'This register cannot open a session yet:',
     'reg.session.countCash': 'Count the drawer',
     'reg.session.denomination': 'Denomination',
     'reg.session.count': 'Count',
@@ -381,6 +383,8 @@ export const registerFr: Record<RegisterKey, string> = {
 
     'reg.session.openTitle': 'Ouvrir la session',
     'reg.session.openingFloat': 'Fond de caisse',
+    'reg.session.expectedFloat': 'Attendu depuis la dernière clôture',
+    'reg.session.notReady': "Cette caisse ne peut pas encore ouvrir de session :",
     'reg.session.countCash': 'Compter le tiroir',
     'reg.session.denomination': 'Coupure',
     'reg.session.count': 'Nombre',

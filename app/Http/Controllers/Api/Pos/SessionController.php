@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Pos;
 
 use App\Enums\CashMovementType;
+use App\Exceptions\Pos\RegisterNotReady;
 use App\Http\Controllers\Api\Pos\Concerns\ResolvesDeviceContext;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Pos\CashMovementRequest;
@@ -15,6 +16,7 @@ use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosSession;
 use App\Services\Identity\EmployeeAuthService;
 use App\Services\Pos\AccountingExportService;
+use App\Services\Pos\RegisterReadiness;
 use App\Services\Pos\SessionService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -35,9 +37,17 @@ final class SessionController extends Controller
         private readonly SessionService $sessions,
         private readonly EmployeeAuthService $employees,
         private readonly AccountingExportService $exports,
+        private readonly RegisterReadiness $readiness,
     ) {}
 
-    /** `GET /api/pos/sessions/current` */
+    /**
+     * `GET /api/pos/sessions/current`
+     *
+     * Carries an `opening` block alongside the session: what the drawer should hold, and anything
+     * standing between this register and a session (REG-002, REG-004). Both are answered *before*
+     * the cashier counts, so a misconfigured register is refused on the screen that opens it rather
+     * than at the payment screen hours later.
+     */
     public function current(Request $request): JsonResponse
     {
         [, $config] = $this->deviceContext($request);
@@ -46,6 +56,10 @@ final class SessionController extends Controller
 
         return new JsonResponse([
             'session' => $session === null ? null : SessionResource::make($session)->resolve($request),
+            'opening' => [
+                'expected_float' => $this->sessions->expectedOpeningFloat($config),
+                'problems' => $this->readiness->problems($config),
+            ],
         ]);
     }
 
@@ -62,6 +76,17 @@ final class SessionController extends Controller
                 notes: $request->validated('notes'),
                 denominations: (array) ($request->validated('denominations') ?? []),
             );
+        } catch (RegisterNotReady $e) {
+            // Its own code, and the whole list: "not ready" is a back-office fix, unlike
+            // `session_open_failed`, which the cashier resolves at the till by closing the session
+            // that is already open. Caught before DomainException — it is one.
+            return new JsonResponse([
+                'error' => [
+                    'code' => 'register_not_ready',
+                    'message' => $e->getMessage(),
+                    'problems' => $e->problems,
+                ],
+            ], 422);
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'session_open_failed', 'message' => $e->getMessage()]], 422);
         }

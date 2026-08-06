@@ -10,6 +10,7 @@ use App\Enums\CashMovementType;
 use App\Enums\OrderState;
 use App\Enums\SessionState;
 use App\Events\Pos\SessionClosed;
+use App\Exceptions\Pos\RegisterNotReady;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
@@ -47,6 +48,7 @@ final readonly class SessionService
         private Dispatcher $events,
         private LoggerInterface $logger,
         private Config $config,
+        private RegisterReadiness $readiness,
     ) {}
 
     /**
@@ -54,7 +56,13 @@ final readonly class SessionService
      * `opening_control` until the float is confirmed; without it, straight to
      * `opened`.
      *
+     * Refuses outright on a register that cannot trade (REG-002). The check is the *first* thing
+     * inside the transaction, so a refused open leaves no session row, no cash count and no audit
+     * entry behind — the register is exactly as it was.
+     *
      * @param  list<array{denomination_value: string|float, quantity: int, pos_bill_id?: int|null}>  $denominations
+     *
+     * @throws RegisterNotReady when the register's configuration cannot support a session
      */
     public function open(
         PosConfig $config,
@@ -65,6 +73,12 @@ final readonly class SessionService
         array $denominations = [],
     ): PosSession {
         return $this->connection->transaction(function () use ($config, $openingFloat, $employeeId, $userId, $notes, $denominations): PosSession {
+            $problems = $this->readiness->problems($config);
+
+            if ($problems !== []) {
+                throw new RegisterNotReady($problems);
+            }
+
             $existing = PosSession::query()
                 ->where('pos_config_id', $config->getKey())
                 ->where('is_rescue', false)
@@ -76,7 +90,7 @@ final readonly class SessionService
                 throw new DomainException('This register already has an open session.');
             }
 
-            $expected = $this->lastClosingBalance($config);
+            $expected = $this->expectedOpeningFloat($config);
 
             /** @var PosSession $session */
             $session = PosSession::query()->create([
@@ -84,7 +98,9 @@ final readonly class SessionService
                 'pos_config_id' => $config->getKey(),
                 'company_id' => $config->company_id,
                 'currency_id' => $config->currency_id,
-                'name' => $this->nextName($config),
+                // Numbered only once it starts trading. A session that goes straight to `opened`
+                // is trading now; one held in `opening_control` may never be (REG-003).
+                'name' => $config->has_cash_control ? null : $this->nextName($config),
                 'state' => $config->has_cash_control ? SessionState::OpeningControl->value : SessionState::Opened->value,
                 'opened_by_employee_id' => $employeeId,
                 'opened_by_user_id' => $userId,
@@ -100,14 +116,19 @@ final readonly class SessionService
                 $this->recordCount($session, CashCountType::Opening, $denominations, $employeeId, $notes);
             }
 
-            if ($config->has_cash_control) {
+            // Money declared into the drawer gets a ledger row, whether or not the register counts.
+            // Gating this on `has_cash_control` was harmless only while such a register always
+            // opened at zero — which stopped being true when the expected float started carrying
+            // over (REG-004). Nothing sums `opening_float`, so expected cash was never wrong; the
+            // movements list a manager reads simply could not account for the opening balance.
+            if ($config->has_cash_control || $this->isNonZeroAmount($openingFloat)) {
                 $this->recordMovement($session, CashMovementType::OpeningFloat, $openingFloat, 'Opening float', $employeeId, $userId, null);
             }
 
             $this->audit->record(
                 event: AuditEvent::SessionOpened,
                 subject: $session,
-                message: "Session {$session->name} opened with a float of {$openingFloat}",
+                message: 'Session '.$session->label()." opened with a float of {$openingFloat}",
                 changes: ['cash_balance_opening' => ['old' => null, 'new' => $openingFloat]],
                 config: $config,
                 session: $session,
@@ -119,35 +140,55 @@ final readonly class SessionService
         });
     }
 
-    /** Confirm the opening control and start trading. */
+    /**
+     * Confirm the opening control and start trading.
+     *
+     * **This is where the session number is minted** (REG-003). A register held in `opening_control`
+     * has not traded and may never — the cashier walks off, the shift is cancelled, the drawer is
+     * short and the open is abandoned — and a number burnt on a session that never existed leaves a
+     * gap in the sequence an accountant has to explain.
+     *
+     * Serialised on the session row: two devices confirming the same opening control would otherwise
+     * both read "no name yet", both count the same sessions, and both mint the same number.
+     */
     public function confirmOpeningControl(PosSession $session, string $countedFloat, ?int $employeeId = null): PosSession
     {
-        if ($session->state !== SessionState::OpeningControl) {
-            throw new DomainException('This session is not awaiting an opening control.');
-        }
+        return $this->connection->transaction(function () use ($session, $countedFloat, $employeeId): PosSession {
+            // Re-read under the lock rather than trusting the instance the caller handed us: it was
+            // loaded by route binding, before this transaction, and its state may be stale.
+            /** @var PosSession $locked */
+            $locked = PosSession::query()->whereKey($session->getKey())->lockForUpdate()->firstOrFail();
 
-        $expected = (string) $session->cash_balance_opening;
+            if ($locked->state !== SessionState::OpeningControl) {
+                throw new DomainException('This session is not awaiting an opening control.');
+            }
 
-        $session->forceFill([
-            'state' => SessionState::Opened->value,
-            'cash_balance_opening' => $countedFloat,
-            'opened_by_employee_id' => $session->opened_by_employee_id ?? $employeeId,
-        ])->save();
+            $session->setRawAttributes($locked->getAttributes(), true);
 
-        $this->audit->record(
-            event: AuditEvent::SessionOpeningControlConfirmed,
-            subject: $session,
-            // A counted float that disagrees with the declared one is the first thing that can go
-            // wrong in a shift, and the last thing anyone remembers by the close.
-            severity: bccomp($countedFloat, $expected, 4) === 0 ? AuditSeverity::Info : AuditSeverity::Notice,
-            message: 'Opening control confirmed',
-            changes: ['cash_balance_opening' => ['old' => $expected, 'new' => $countedFloat]],
-            config: $session->pos_config_id,
-            session: $session,
-            employeeId: $employeeId,
-        );
+            $expected = (string) $session->cash_balance_opening;
 
-        return $session;
+            $session->forceFill([
+                'state' => SessionState::Opened->value,
+                'name' => $session->name ?? $this->nextName($session->posConfig()->firstOrFail()),
+                'cash_balance_opening' => $countedFloat,
+                'opened_by_employee_id' => $session->opened_by_employee_id ?? $employeeId,
+            ])->save();
+
+            $this->audit->record(
+                event: AuditEvent::SessionOpeningControlConfirmed,
+                subject: $session,
+                // A counted float that disagrees with the declared one is the first thing that can go
+                // wrong in a shift, and the last thing anyone remembers by the close.
+                severity: bccomp($countedFloat, $expected, 4) === 0 ? AuditSeverity::Info : AuditSeverity::Notice,
+                message: 'Opening control confirmed',
+                changes: ['cash_balance_opening' => ['old' => $expected, 'new' => $countedFloat]],
+                config: $session->pos_config_id,
+                session: $session,
+                employeeId: $employeeId,
+            );
+
+            return $session;
+        });
     }
 
     /**
@@ -371,7 +412,7 @@ final readonly class SessionService
                 // A close that balances is routine; one that does not is the number an accountant
                 // will ask about, so it must be findable by severity alone.
                 severity: bccomp($difference, '0', 4) === 0 ? AuditSeverity::Info : AuditSeverity::Warning,
-                message: "Session {$session->name} closed, difference {$difference}",
+                message: 'Session '.$session->label()." closed, difference {$difference}",
                 changes: [
                     'cash_balance_closing_expected' => ['old' => null, 'new' => $expectedCash],
                     'cash_balance_closing_counted' => ['old' => null, 'new' => $counted],
@@ -625,7 +666,14 @@ final readonly class SessionService
         $count->forceFill(['total_counted' => $total])->save();
     }
 
-    private function lastClosingBalance(PosConfig $config): string
+    /**
+     * What the drawer should hold at the start of the next shift: whatever was counted into it at
+     * the last close (REG-004).
+     *
+     * Public because the register asks for it *before* a session exists — the open pane shows it so
+     * the cashier counts against a number instead of into the void.
+     */
+    public function expectedOpeningFloat(PosConfig $config): string
     {
         $last = PosSession::query()
             ->where('pos_config_id', $config->getKey())
@@ -636,9 +684,19 @@ final readonly class SessionService
         return (string) ($last?->cash_balance_closing_counted ?? '0');
     }
 
+    /**
+     * The next session number for this register.
+     *
+     * Counts **named** sessions only. An opening control that was abandoned never got a name, and
+     * skipping it here is the whole point: numbering off the row count would leave a hole in the
+     * sequence for a session that never traded.
+     */
     private function nextName(PosConfig $config): string
     {
-        $count = PosSession::query()->where('pos_config_id', $config->getKey())->count() + 1;
+        $count = PosSession::query()
+            ->where('pos_config_id', $config->getKey())
+            ->whereNotNull('name')
+            ->count() + 1;
 
         return sprintf('%s/%05d', preg_replace('/[^A-Za-z0-9]/', '', (string) $config->name) ?: 'POS', $count);
     }
@@ -646,5 +704,19 @@ final readonly class SessionService
     private function abs(string $value): string
     {
         return ltrim($value, '-');
+    }
+
+    /**
+     * A well-formed, non-zero amount.
+     *
+     * The shape check is not belt-and-braces: `bccomp` is stricter than `is_numeric` and throws a
+     * ValueError on `1e2`, which `is_numeric` happily accepts. `open()` takes the float straight
+     * from a request, so an amount that never reaches bcmath is the difference between a rejected
+     * payload and a 500 (BAN-413).
+     */
+    private function isNonZeroAmount(string $amount): bool
+    {
+        return preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $amount) === 1
+            && bccomp($amount, '0', 4) !== 0;
     }
 }

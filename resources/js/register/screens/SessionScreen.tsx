@@ -12,6 +12,7 @@ import {
     fetchClosingData,
     fetchCurrentSession,
     openSession,
+    openingFloatFor,
 } from '../domain/session-actions';
 import { useCatalog, useMoney } from '../hooks/use-register';
 import { draftOrders, useOrderStore } from '../state/order-store';
@@ -115,6 +116,7 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
     const catalog = useCatalog();
     const cashier = useSessionStore((state) => state.cashier);
     const session = usePosSessionStore((state) => state.session);
+    const opening = usePosSessionStore((state) => state.opening);
     const busy = usePosSessionStore((state) => state.busy);
     const error = usePosSessionStore((state) => state.error);
     const [counts, update, total] = useDenominations();
@@ -125,7 +127,12 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
     }, []);
 
     const cashControl = catalog.config?.cash_control === true;
-    const float = total.toFixed(2);
+    const expected = Decimal.of(opening?.expected_float ?? '0');
+    const float = openingFloatFor({ cashControl, countedTotal: total, expectedFloat: opening?.expected_float ?? null });
+    const difference = Decimal.of(total.toFixed(2)).sub(expected);
+
+    const problems = opening?.problems ?? [];
+    const blocked = problems.length > 0;
 
     if (session && session.state === 'opened') {
         return (
@@ -146,10 +153,58 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
         <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
             <h1 className="text-2xl font-bold">{t('reg.session.openTitle')}</h1>
 
+            {/* Named before anything else on the screen: counting a drawer into an open that will be
+                refused is the exact waste this ticket exists to stop.
+
+                The retry is not decoration. This pane is a terminal screen — with no session there
+                is nowhere else to navigate — and the problems are only read on mount, so without it
+                a manager fixes the configuration in the back office and the till goes on refusing
+                with no way to ask again short of reloading the browser. */}
+            {blocked ? (
+                <section className="rounded-pos bg-danger-soft p-3 text-danger-fg">
+                    <h2 className="font-semibold">{t('reg.session.notReady')}</h2>
+                    <ul className="mt-1 list-disc pl-5">
+                        {problems.map((problem) => (
+                            <li key={problem.code}>{problem.message}</li>
+                        ))}
+                    </ul>
+                    <Button
+                        variant="secondary"
+                        className="mt-3"
+                        onClick={() => void fetchCurrentSession()}
+                    >
+                        {t('common.retry')}
+                    </Button>
+                </section>
+            ) : null}
+
             {cashControl ? (
-                <DenominationGrid counts={counts} onChange={update} total={total} />
+                <>
+                    <DenominationGrid counts={counts} onChange={update} total={total} />
+                    <dl className="rounded-pos bg-slate-50 p-3 text-lg">
+                        <div className="flex justify-between">
+                            <dt>{t('reg.session.expectedFloat')}</dt>
+                            <dd className="tabular-nums">{money(expected.withScale(2).toString())}</dd>
+                        </div>
+                        {/* Shown only once something has been counted: a difference against an empty
+                            grid is the whole float, which reads as an alarm before anyone has begun. */}
+                        {total > 0 && !difference.isZero() ? (
+                            <div
+                                className={cn(
+                                    'mt-1 flex justify-between border-t border-slate-200 pt-1 font-bold',
+                                    difference.signum() > 0 ? 'text-ok' : 'text-danger',
+                                )}
+                            >
+                                <dt>{t('reg.session.difference')}</dt>
+                                <dd className="tabular-nums">{money(difference.withScale(2).toString())}</dd>
+                            </div>
+                        ) : null}
+                    </dl>
+                </>
             ) : (
-                <p className="text-slate-600">{t('reg.session.openingFloat')}: {money('0')}</p>
+                <p className="text-slate-600">
+                    {t('reg.session.openingFloat')}: {money(float)}
+                </p>
             )}
 
             <label className="grid gap-1">
@@ -168,6 +223,7 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
                 size="xl"
                 block
                 loading={busy}
+                disabled={blocked}
                 onClick={async () => {
                     const created =
                         session ??

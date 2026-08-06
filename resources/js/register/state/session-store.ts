@@ -32,13 +32,28 @@ export type ClosingData = {
     enforces_maximum_difference: boolean;
 };
 
+/** Something about this register's configuration that stops a session opening (REG-002). */
+export type RegisterProblem = { code: string; message: string };
+
+/**
+ * What the server says about opening a session here, answered *before* one exists.
+ *
+ * Both halves are questions the open pane cannot answer for itself: the expected float lives in the
+ * previous session's close, and whether the register can trade at all depends on configuration the
+ * till does not replicate. Null when the server has not been reached — offline, the pane falls back
+ * to asking for a count and letting the open attempt fail, which is what it always did.
+ */
+export type OpeningContext = { expected_float: Money; problems: RegisterProblem[] };
+
 export type SessionSlice = {
     session: PosSessionRow | null;
+    opening: OpeningContext | null;
     closingData: ClosingData | null;
     busy: boolean;
     error: string | null;
 
     setSession: (session: PosSessionRow | null) => void;
+    setOpening: (opening: OpeningContext | null) => void;
     setClosingData: (data: ClosingData | null) => void;
     setBusy: (busy: boolean) => void;
     setError: (error: string | null) => void;
@@ -46,6 +61,7 @@ export type SessionSlice = {
 
 export const usePosSessionStore = createPosStore<SessionSlice>((set) => ({
     session: null,
+    opening: null,
     closingData: null,
     busy: false,
     error: null,
@@ -53,6 +69,11 @@ export const usePosSessionStore = createPosStore<SessionSlice>((set) => ({
     setSession: (session) =>
         set((state) => {
             state.session = session;
+        }),
+
+    setOpening: (opening) =>
+        set((state) => {
+            state.opening = opening;
         }),
 
     setClosingData: (data) =>
