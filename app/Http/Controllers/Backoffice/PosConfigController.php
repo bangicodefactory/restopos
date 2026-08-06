@@ -141,8 +141,16 @@ final class PosConfigController extends Controller
             'prep_display_ids' => 'prepDisplays',
         ];
 
+        // The pivots are read *before* the sync that overwrites them. They were originally left out
+        // of the trail because the diff below only sees scalar columns — but "who added a payment
+        // method to this register", "who granted this employee access to that till" and "who
+        // attached a pricelist" are the config changes with the most reach, and they all live here.
+        // A trail that records the checkbox next to them and not them is the wrong half.
+        $pivotBefore = [];
+
         foreach ($pivots as $key => $relation) {
             if (array_key_exists($key, $data)) {
+                $pivotBefore[$key] = $this->pivotIds($config, $relation);
                 $config->{$relation}()->sync(array_map(intval(...), (array) $data[$key]));
                 unset($data[$key]);
             }
@@ -157,6 +165,32 @@ final class PosConfigController extends Controller
         $config->forceFill($data)->save();
 
         $changes = AuditRecorder::diff($before, $data);
+
+        foreach ($pivotBefore as $key => $wasIds) {
+            $nowIds = $this->pivotIds($config->refresh(), $pivots[$key]);
+
+            $added = array_values(array_diff($nowIds, $wasIds));
+            $removed = array_values(array_diff($wasIds, $nowIds));
+
+            // Decided by set difference, not by comparing the two lists. Neither `pluck` carries an
+            // `ORDER BY`, so no database promises to hand the same membership back in the same order
+            // twice — and `sync()` deletes and re-inserts rows, which is exactly when the physical
+            // order changes. An equality check would have logged a settings change every time the
+            // rows came back shuffled. SQLite happens to be stable here, so a test could not have
+            // caught it; the fix is to not depend on the ordering in the first place.
+            if ($added === [] && $removed === []) {
+                continue;
+            }
+
+            // The split is spelled out because an auditor wants "employee 12 gained access", not
+            // two arrays to difference by eye.
+            $changes[$key] = [
+                'old' => $wasIds,
+                'new' => $nowIds,
+                'added' => $added,
+                'removed' => $removed,
+            ];
+        }
 
         if ($changes !== []) {
             $this->audit->record(
@@ -173,6 +207,26 @@ final class PosConfigController extends Controller
         $config->bumpRevision();
 
         return back()->with('success', 'Register settings saved.');
+    }
+
+    /**
+     * The ids currently attached through one pivot.
+     *
+     * Sorted for the reader's benefit only — the change decision above is a set difference and does
+     * not depend on it. Storing `[3, 7, 12]` rather than whatever order the rows came back in is
+     * what makes two audit rows comparable by eye a month later.
+     *
+     * @return list<int>
+     */
+    private function pivotIds(PosConfig $config, string $relation): array
+    {
+        $ids = $config->{$relation}()->pluck($config->{$relation}()->getRelated()->getTable().'.id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+
+        sort($ids);
+
+        return $ids;
     }
 
     /** `POST /backoffice/pos-configs/{config}/pairing-codes` (spec 03 §2.2). */

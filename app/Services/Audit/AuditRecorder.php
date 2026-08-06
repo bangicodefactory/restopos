@@ -10,6 +10,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -41,7 +42,7 @@ final readonly class AuditRecorder
 {
     public function __construct(
         private AuthFactory $auth,
-        private Request $request,
+        private Container $container,
     ) {}
 
     /**
@@ -199,10 +200,25 @@ final readonly class AuditRecorder
         return $user === null ? null : (int) $user->getAuthIdentifier();
     }
 
-    /** Null outside an HTTP request — a queue worker has no client. */
+    /**
+     * The caller's IP, or null outside an HTTP request — a queue worker has no client.
+     *
+     * Resolved per call rather than injected. Injecting `Request` into a constructor binds whichever
+     * request happened to be in flight when this service was first built; today nothing keeps it
+     * that long, but under a persistent worker (Octane) a service resolved once would go on stamping
+     * the first request's IP onto every later one. An audit trail that attributes an action to the
+     * wrong address is worse than one that admits it does not know.
+     */
     private function clientIp(): ?string
     {
-        $ip = $this->request->ip();
+        if (! $this->container->bound('request')) {
+            return null;
+        }
+
+        /** @var Request $request */
+        $request = $this->container->make('request');
+
+        $ip = $request->ip();
 
         return $ip === null ? null : mb_substr($ip, 0, 45);
     }
