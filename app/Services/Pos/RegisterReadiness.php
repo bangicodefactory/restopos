@@ -94,13 +94,20 @@ final readonly class RegisterReadiness
     {
         $companyCurrency = Company::query()->whereKey($config->company_id)->value('currency_id');
 
-        if ($companyCurrency === null || (int) $companyCurrency === (int) $config->currency_id) {
+        if ($companyCurrency !== null && (int) $companyCurrency === (int) $config->currency_id) {
             return null;
         }
 
+        // An unreadable company is *not* a pass. Treating "I could not check" as "nothing is wrong"
+        // is the wrong default for the one guard standing between a register and a day of trade
+        // booked in the wrong unit — and it is the failure mode nobody would notice, because the
+        // register would simply open. Unreachable today behind a non-nullable foreign key, which is
+        // exactly why the branch has to be decided rather than inherited.
         return [
             'code' => self::CurrencyMismatch,
-            'message' => 'This register trades in a different currency from its company. Align them in the back office before opening a session.',
+            'message' => $companyCurrency === null
+                ? 'This register is not attached to a readable company, so its currency cannot be confirmed.'
+                : 'This register trades in a different currency from its company. Align them in the back office before opening a session.',
         ];
     }
 

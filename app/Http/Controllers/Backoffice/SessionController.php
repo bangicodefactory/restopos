@@ -10,6 +10,7 @@ use App\Models\Pos\AccountingExport;
 use App\Models\Pos\PosSession;
 use App\Services\Pos\AccountingExportService;
 use App\Services\Pos\SessionService;
+use App\Support\Validation\Amount;
 use DomainException;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
@@ -98,11 +99,19 @@ final class SessionController extends Controller
     {
         Gate::authorize('close', $session);
 
+        // The register's close validates these; this one took the raw request and handed it to
+        // bcmath, so `1e2` — or an array, or any typo — was a 500 on the manager's own screen
+        // (BAN-507). Same rules as `CloseSessionRequest`, because it is the same close.
+        $data = $request->validate([
+            'counted_cash' => ['nullable', ...Amount::unsigned()],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+
         $this->sessions->close(
             session: $session,
-            countedCash: $request->input('counted_cash'),
+            countedCash: $data['counted_cash'] ?? null,
             userId: (int) $request->user()?->getKey(),
-            notes: $request->input('notes'),
+            notes: $data['notes'] ?? null,
             managerApproved: true,
             force: true,
         );
