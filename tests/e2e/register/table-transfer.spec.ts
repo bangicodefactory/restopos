@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
     addProduct,
+    freeTables,
     openTill,
     orderLines,
     orderTotalValue,
@@ -18,25 +19,32 @@ import {
  * sitting there now.
  */
 test.describe('table transfer', () => {
-    // STILL NOT RUNNING — but for a different reason than before, and that difference is the point
-    // of BAN-505. It is no longer blocked on selectors: the spec now finds tables by number, seats
-    // one, adds a line and reaches the "choose the destination table" prompt. It is blocked on
-    // BAN-506, a real defect this exercise uncovered: a till paired into a session that already
-    // holds its tracking number has every order rejected with `ingest_failed`, so the order has no
-    // server id and the transfer cannot be performed.
+    // STILL NOT RUNNING, and the reason has moved again — which is the point of recording it.
     //
-    // Left as the spec it should be, rather than weakened to assert the broken behaviour.
+    // It is no longer blocked on selectors (BAN-505) and no longer on the tracking-number collision
+    // (BAN-506, fixed here): the till syncs cleanly, the spec seats a free table, adds a line,
+    // reaches the destination prompt and picks a table. What does not happen is the destination
+    // tile becoming occupied — the order does not appear to land. That is either a refresh gap
+    // after `refreshAfterServerAction` or a genuine defect in the transfer itself, and it deserves
+    // its own investigation rather than a guess bolted onto this one.
     test.fixme('moves an order to another table and keeps it there across a reload', async ({ page, request }) => {
         await openTill(page, request);
 
         await page.getByRole('button', { name: 'Tables' }).click();
 
         // Addressed by number, not by position and not by the localised "1 2 places" label — which
-        // is what kept this spec unrunnable until the tiles carried a test id (BAN-505).
-        const one = tableTile(page, 1);
-        const two = tableTile(page, 2);
+        // is what kept this spec unrunnable until the tiles carried a test id (BAN-505). The numbers
+        // are read off the floor plan rather than hardcoded: the venue database accumulates across
+        // runs, so table 1 is only empty the first time.
+        await expect(page.getByTestId('table-tile').first()).toBeVisible({ timeout: 30_000 });
 
-        await expect(one).toBeVisible({ timeout: 30_000 });
+        const [from, to] = await freeTables(page);
+
+        expect(from, 'the floor plan needs two free tables').toBeTruthy();
+        expect(to).toBeTruthy();
+
+        const one = tableTile(page, from as string);
+        const two = tableTile(page, to as string);
 
         // Seat table 1 and put something on the tab.
         await one.click();
@@ -57,11 +65,11 @@ test.describe('table transfer', () => {
 
         // The tab is on table 2 — and, just as importantly, no longer on table 1. Both assertions
         // matter: a transfer that copies rather than moves would satisfy only the first.
-        await expect(tableTile(page, 2)).toHaveAttribute('data-occupied', 'true', { timeout: 30_000 });
-        await expect(tableTile(page, 1)).toHaveAttribute('data-occupied', 'false');
+        await expect(tableTile(page, to as string)).toHaveAttribute('data-occupied', 'true', { timeout: 30_000 });
+        await expect(tableTile(page, from as string)).toHaveAttribute('data-occupied', 'false');
 
         // …and the money went with it.
-        await tableTile(page, 2).click();
+        await tableTile(page, to as string).click();
         expect(await orderTotalValue(page)).toBe(total);
     });
 });

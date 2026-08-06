@@ -541,7 +541,14 @@ final readonly class OrderSyncService
             'pos_device_id' => $device?->getKey(),
             'currency_id' => $config->currency_id,
             'receipt_number' => $reference !== '' ? $reference : null,
-            'tracking_number' => $attributes['tracking_number'] ?? null,
+            // The client's number is a preference, not a fact: it comes from that till's own local
+            // counter, minted offline. A till paired into a session that already holds `001`
+            // proposes `001`, and since BAN-470 added the unique index that rejected the order and
+            // lost the sale — on the second till's very first order (BAN-506).
+            'tracking_number' => $this->sequences->availableTrackingNumber(
+                $session,
+                $attributes['tracking_number'] ?? null,
+            ),
             'ticket_code' => $attributes['ticket_code'] ?? $this->sequences->receiptToken(),
             // Server-minted, never the client's (BAN-496). This token is the whole authority over an
             // order for an anonymous caller — it names the public broadcast channel
@@ -616,11 +623,20 @@ final readonly class OrderSyncService
         $writable = [
             'customer_id', 'employee_id', 'pricelist_id', 'fiscal_position_id', 'preset_time',
             'guest_count', 'floating_order_name', 'general_customer_note', 'internal_note',
-            'to_invoice', 'customer_email', 'customer_phone', 'tracking_number',
+            'to_invoice', 'customer_email', 'customer_phone',
             // A table transfer, a tip, and an explicit "no tip" (is_tipped=false, tip_amount=0)
             // must all survive an update; the client sends the column names directly.
             'restaurant_table_id', 'is_tipped', 'tip_amount',
         ];
+
+        // `tracking_number` is deliberately NOT writable, for the same reason `access_token` is not
+        // (BAN-496): the server assigns it, so letting a client write it back would undo that.
+        //
+        // Concretely — the bug this closes. A till proposes `001`, the server finds it taken and
+        // assigns `002`, and the till syncs the same order again a moment later with its original
+        // `001` still attached. The update wrote it straight through, colliding with whoever holds
+        // `001`, and the order was rejected. Fixing only the create path left this open, and it is
+        // the path a register uses most: every draft is pushed again when it is paid (BAN-506).
 
         $update = ['pos_session_id' => $session->getKey()];
 
@@ -1549,6 +1565,10 @@ final readonly class OrderSyncService
             'name' => $order->name,
             'sequence_number' => $order->sequence_number,
             'receipt_number' => $order->receipt_number,
+            // The number the server assigned, which may not be the one the till proposed. The
+            // customer is called by this and the kitchen prints it, so a till showing its own guess
+            // would be calling a number nobody else uses (BAN-506).
+            'tracking_number' => $order->tracking_number,
             'ticket_code' => $order->ticket_code,
             'access_token' => (string) $order->access_token,
             'state' => $this->stateValue($order->state),

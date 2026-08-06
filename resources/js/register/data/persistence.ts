@@ -250,6 +250,10 @@ export async function loadOrdersFromDb(db: PosDb): Promise<{
         ...order,
         orderScreen: order.orderScreen ?? null,
         serverUpdatedAt: order.serverUpdatedAt ?? null,
+        // Same reason as the two above, and this one crashed the till: `computePrepDelta` guarded
+        // with `!== null`, so an `undefined` from an older stored row got past it and threw
+        // (BAN-506). Normalising at the boundary is what keeps every reader from needing the guard.
+        last_prep_snapshot: order.last_prep_snapshot ?? null,
     }));
 
     return { orders, lines, payments, courses };

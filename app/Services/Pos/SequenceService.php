@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Pos;
 
+use App\Enums\OrderSource;
 use App\Enums\SequencePurpose;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
@@ -124,6 +125,77 @@ final readonly class SequenceService
         }
 
         return $candidate;
+    }
+
+    /**
+     * A tracking number free in this session, preferring the one the client asked for (BAN-506).
+     *
+     * The number a till mints is a **proposal**, never authority. It comes from that device's own
+     * local counter, minted offline where nothing can be checked, so a till paired into a session
+     * that already holds `001` proposes `001` — and since BAN-470 added
+     * `pos_orders_session_tracking_unique`, that used to reject the order and lose the sale. A
+     * second till brought onto the counter mid-service hit it on its very first order.
+     *
+     * The self-order path has resolved this since BAN-470; this is the same rule, moved somewhere
+     * both callers can reach so they cannot drift apart again.
+     *
+     * Availability is keyed on the **bare** number, so kiosk `K001` also reserves mobile `S001` and
+     * register `001`. That is deliberate: the counter calls "001", and two customers answering to
+     * the same call is the failure the constraint exists to prevent.
+     */
+    public function availableTrackingNumber(PosSession $session, ?string $preferred = null, string $prefix = ''): string
+    {
+        $used = [];
+
+        // Soft-deleted rows are deliberately **not** excluded. `pos_orders_session_tracking_unique`
+        // is a plain unique index with no `deleted_at` term, so a deleted order still owns its
+        // number in the database; recycling it would violate the index and lose the very sale this
+        // method exists to save. Filtering them out looks like an obvious improvement and is not.
+        foreach (
+            $this->connection->table('pos_orders')
+                ->where('pos_session_id', $session->getKey())
+                ->whereNotNull('tracking_number')
+                ->pluck('tracking_number') as $number
+        ) {
+            $used[$this->bareTracking((string) $number)] = true;
+        }
+
+        $wanted = $preferred === null ? '' : $this->bareTracking(trim($preferred));
+
+        if ($wanted !== '' && ! isset($used[$wanted])) {
+            return $prefix.$wanted;
+        }
+
+        for ($n = 1; $n <= 999; $n++) {
+            $candidate = str_pad((string) $n, 3, '0', STR_PAD_LEFT);
+
+            if (! isset($used[$candidate])) {
+                return $prefix.$candidate;
+            }
+        }
+
+        // 999 live orders in one session is not a service, it is a data problem — but a duplicate
+        // number is still better than refusing the sale.
+        return $prefix.str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * A tracking number without its source prefix.
+     *
+     * A prefix strip, not `ltrim`: ltrim takes a *character list*, so it would eat repeated leading
+     * characters and misbehave the day a prefix becomes more than one letter.
+     */
+    private function bareTracking(string $number): string
+    {
+        foreach (OrderSource::cases() as $source) {
+            $prefix = $source->trackingPrefix();
+
+            if ($prefix !== '' && str_starts_with($number, $prefix)) {
+                return substr($number, \strlen($prefix));
+            }
+        }
+
+        return $number;
     }
 
     private function prefixFor(PosConfig $config): string

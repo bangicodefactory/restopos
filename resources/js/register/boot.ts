@@ -277,6 +277,7 @@ function applySyncResult(result: SyncRecordResult): void {
                       name: result.order.name,
                       sequence_number: result.order.sequence_number,
                       access_token: result.order.access_token,
+                      tracking_number: result.order.tracking_number,
                       updated_at: result.order.updated_at,
                       amounts: {
                           amount_untaxed: result.order.amount_untaxed,

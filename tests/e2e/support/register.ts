@@ -105,7 +105,27 @@ export async function signIn(page: Page): Promise<void> {
     await typePin(page, pin());
     await page.getByTestId('numpad-confirm').click();
 
+    await openSessionIfNeeded(page);
+
     await expect(till(page)).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * Open the session when the till asks for it.
+ *
+ * A freshly seeded venue has no session open, and opening one is the first thing a cashier does
+ * every morning — so the suite doing it makes the specs independent of how the database happened to
+ * be left, rather than requiring a seed that already has a session running.
+ */
+export async function openSessionIfNeeded(page: Page): Promise<void> {
+    const opener = page.getByRole('button', { name: 'Ouvrir la session' });
+    const grid = till(page);
+
+    await expect(opener.or(grid).first()).toBeVisible({ timeout: 30_000 });
+
+    if (await opener.isVisible()) {
+        await opener.click();
+    }
 }
 
 /** Tap a code into whichever numpad is on screen. */
@@ -123,6 +143,45 @@ export function till(page: Page) {
 /** A table on the floor plan, addressed by its number rather than its localised label. */
 export function tableTile(page: Page, tableNumber: number | string) {
     return page.getByTestId('table-tile').and(page.locator(`[data-table-number="${tableNumber}"]`));
+}
+
+/**
+ * Two tables that are free right now, as their numbers.
+ *
+ * Specs must not hardcode table 1 and 2: the venue database accumulates across runs, so a table that
+ * was empty the first time is occupied the fifth. Reading the floor plan is the difference between a
+ * spec that tests a transfer and a spec that tests how recently the database was seeded.
+ */
+export async function freeTables(page: Page, count = 2): Promise<string[]> {
+    const numbers = await page
+        .getByTestId('table-tile')
+        .evaluateAll((tiles) =>
+            tiles
+                .filter((tile) => tile.getAttribute('data-occupied') === 'false')
+                .map((tile) => tile.getAttribute('data-table-number') ?? ''),
+        );
+
+    return numbers.filter((number) => number !== '').slice(0, count);
+}
+
+/**
+ * Seat a free table and return its number.
+ *
+ * Courses, transfers and covers are restaurant concepts: they only exist on an order attached to a
+ * table. A spec that starts from the default "Vente directe" order has none of them, so it must
+ * establish the state it needs rather than inheriting whatever the last run left behind.
+ */
+export async function seatFreeTable(page: Page): Promise<string> {
+    await page.getByRole('button', { name: 'Tables' }).click();
+    await expect(page.getByTestId('table-tile').first()).toBeVisible({ timeout: 30_000 });
+
+    const [free] = await freeTables(page, 1);
+
+    expect(free, 'the floor plan needs a free table').toBeTruthy();
+
+    await tableTile(page, free as string).click();
+
+    return free as string;
 }
 
 /** The fire button for one course. */
