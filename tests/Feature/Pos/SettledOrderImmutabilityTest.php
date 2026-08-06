@@ -408,9 +408,9 @@ it('refuses a tip that would take value off a settled order', function (): void 
     expect((string) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe($before);
 });
 
-it('refuses a tip with a negative quantity, and one discounted past free', function (): void {
-    // The same value, reached two other ways. A rule stated as "the price must be positive" and
-    // checked nowhere else covers one of the three fields that decide what a line is worth.
+it('refuses a tip discounted past free', function (): void {
+    // The same value reached another way. A rule stated as "the price must be positive" and checked
+    // nowhere else covers one of the three fields that decide what a line is worth.
     $tipVariant = tipVariant($this->fx);
     $orderUuid = (string) Str::uuid();
 
@@ -418,15 +418,30 @@ it('refuses a tip with a negative quantity, and one discounted past free', funct
 
     $before = (string) Order::query()->where('uuid', $orderUuid)->value('amount_total');
 
-    foreach ([
-        ['qty' => '-1', 'price_unit' => '20.00', 'discount' => '0'],
-        ['qty' => '1', 'price_unit' => '20.00', 'discount' => '150'],
-    ] as $attempt) {
-        repushSettled($this->fx, $orderUuid, [[
-            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tipVariant,
-            'price_type' => 'manual', ...$attempt,
-        ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
-    }
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tipVariant,
+        'price_type' => 'manual', 'qty' => '1', 'price_unit' => '20.00', 'discount' => '150',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+
+    expect((string) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe($before);
+});
+
+it('refuses a negative tip before the settled guard even sees it', function (): void {
+    // A tip with a negative quantity is caught earlier and harder than by the settled-order rule:
+    // BAN-406 refuses *any* negative line that does not name the line it refunds, at order level,
+    // whatever the order's state. Two guards reaching the same money from different directions —
+    // worth pinning which one answers, so a later change to either is visible here.
+    $tipVariant = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $before = (string) Order::query()->where('uuid', $orderUuid)->value('amount_total');
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tipVariant,
+        'price_type' => 'manual', 'qty' => '-1', 'price_unit' => '20.00', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.error.code', 'refund_unlinked');
 
     expect((string) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe($before);
 });

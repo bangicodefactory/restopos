@@ -11,7 +11,10 @@ import { fetchOrderGraphs, lookupOrders, type OrderIndexRecord } from '../data/o
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
 import {
+    clampRefundQuantity,
     createRefundOrder,
+    refundEverything,
+    refundableQuantity,
     discardOrder,
     hydrateOrders,
     markPrinted,
@@ -427,19 +430,29 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                                 <li key={line.uuid} className="flex items-center gap-2 py-1.5">
                                     <span className="min-w-0 flex-1 truncate">{line.full_product_name}</span>
                                     <span className="tabular-nums text-slate-500">
-                                        {line.quantity - line.refunded_quantity} / {line.quantity}
+                                        {refundableQuantity(line)} / {line.quantity}
                                     </span>
                                     {detail.state !== 'draft' && can('refund.create') ? (
                                         <input
                                             type="number"
                                             min={0}
-                                            max={line.quantity - line.refunded_quantity}
+                                            max={refundableQuantity(line)}
+                                            data-testid="refund-qty"
+                                            data-line-uuid={line.uuid}
                                             className="min-h-touch w-20 rounded-pos border border-slate-300 px-2 text-right"
                                             value={refundQty[line.uuid] ?? 0}
                                             onChange={(event) =>
                                                 setRefundQty((current) => ({
                                                     ...current,
-                                                    [line.uuid]: Number.parseFloat(event.target.value || '0'),
+                                                    // Clamped here, not left to the `max` attribute:
+                                                    // `max` constrains the spinner and nothing else,
+                                                    // so a pasted value sails straight past it and
+                                                    // the cashier learns about it from a rejected
+                                                    // push instead of from the field (REG-273).
+                                                    [line.uuid]: clampRefundQuantity(
+                                                        line,
+                                                        Number.parseFloat(event.target.value || '0'),
+                                                    ),
                                                 }))
                                             }
                                             aria-label={t('reg.tickets.refundQty')}
@@ -448,6 +461,18 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                                 </li>
                             ))}
                         </ul>
+
+                        {detail.state !== 'draft' && can('refund.create') ? (
+                            <Button
+                                block
+                                variant="secondary"
+                                data-testid="refund-everything"
+                                disabled={detailLines.every((line) => refundableQuantity(line) === 0)}
+                                onClick={() => setRefundQty(refundEverything(detail.uuid))}
+                            >
+                                {t('reg.tickets.refundEverything')}
+                            </Button>
+                        ) : null}
 
                         <div className="grid grid-cols-2 gap-2">
                             <Button variant="secondary" onClick={() => onOpenOrder(detail.uuid)}>
@@ -462,7 +487,12 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                             </Button>
                             <Button
                                 variant="secondary"
-                                disabled={!can('refund.create') || detail.state === 'draft'}
+                                data-testid="refund"
+                                disabled={
+                                    !can('refund.create') ||
+                                    detail.state === 'draft' ||
+                                    Object.values(refundQty).every((quantity) => quantity <= 0)
+                                }
                                 onClick={async () => {
                                     const refundUuid = await createRefundOrder(detail.uuid, refundQty);
                                     setRefundQty({});

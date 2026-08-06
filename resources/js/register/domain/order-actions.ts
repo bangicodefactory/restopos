@@ -505,10 +505,29 @@ function defaultCourseUuid(state: OrderSlice, orderUuid: string): Uuid | null {
     return last ? last.uuid : null;
 }
 
+/**
+ * A refund line's numbers are the original's, not the cashier's (REG-274).
+ *
+ * The quantity was capped against what remains refundable and the price was copied from the line
+ * being credited. Letting either be edited afterwards is a way to refund more than was sold, or to
+ * refund it at a price that was never charged — and the second one leaves the cap looking satisfied.
+ */
+function isRefundLine(lineUuid: string): boolean {
+    // Keyed on the link, not on the sign. A negative quantity is how a refund is *stored*, but
+    // `setQuantity` is also how a negative quantity is reached in the first place — treating the
+    // sign as the definition made the rounding rules for negative quantities unreachable, which is
+    // how this was caught. The server draws the same line: since BAN-406 a negative line that names
+    // nothing is refused, so a negative line that exists is one that links.
+    const line = snapshot().lines[lineUuid];
+
+    return line !== undefined && line.refunded_line_uuid !== null;
+}
+
 export function setQuantity(lineUuid: string, quantity: number): void {
     const state = snapshot();
     const line = state.lines[lineUuid];
     if (!line) return;
+    if (isRefundLine(lineUuid)) return;
     // REG-177 — the line's unit of measure decides what quantities exist, not a hardcoded 3 dp.
     const rounded = roundQuantity(quantity, line.uom_id);
 
@@ -576,6 +595,7 @@ export function prepKeyOf(line: OrderLineRow): string {
 }
 
 export function setPriceUnit(lineUuid: string, price: string): void {
+    if (isRefundLine(lineUuid)) return;
     updateLine(lineUuid, (line) => {
         line.price_unit = price;
         line.price_type = 'manual';
@@ -583,6 +603,7 @@ export function setPriceUnit(lineUuid: string, price: string): void {
 }
 
 export function setDiscount(lineUuid: string, percent: string): void {
+    if (isRefundLine(lineUuid)) return;
     const clamped = Decimal.of(percent).lt('0') ? '0' : Decimal.of(percent).gt('100') ? '100' : percent;
     updateLine(lineUuid, (line) => {
         line.discount_percent = clamped;
@@ -1233,6 +1254,95 @@ export function adoptPrepSnapshot(orderUuid: string, serverSnapshot: PrepSnapsho
 // Refunds
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** What is still refundable on a line: what was sold, less what has already been given back. */
+export function refundableQuantity(line: OrderLineRow): number {
+    return Math.max(0, line.quantity - line.refunded_quantity);
+}
+
+/**
+ * Clamp a requested refund quantity into what the line can still give back (REG-273).
+ *
+ * The `max` attribute on a number input is advisory: it constrains the spinner and nothing else, so
+ * a pasted or typed value sails past it. The server refuses an over-refund either way — this is so
+ * the cashier finds out while the customer is still standing there, rather than after the push.
+ */
+export function clampRefundQuantity(line: OrderLineRow, requested: number): number {
+    if (!Number.isFinite(requested) || requested <= 0) return 0;
+
+    return Math.min(requested, refundableQuantity(line));
+}
+
+/**
+ * Expand a refund selection to whole combos (REG-276).
+ *
+ * A combo is one thing to the customer and several lines in the database. Refunding the parent and
+ * leaving the children behind credits the meal deal but keeps charging for the burger inside it,
+ * and refunding a child alone is not a transaction a till can settle — the price the customer paid
+ * was for the combo, distributed across its parts.
+ *
+ * So: selecting any part of a combo selects all of it, at the same ratio the parent was refunded.
+ * Selecting a child alone promotes to the whole combo rather than being refused, because refusing
+ * leaves the cashier with a customer, a complaint and no way to act on it.
+ */
+export function expandComboSelection(
+    lines: OrderLineRow[],
+    selection: Record<string, number>,
+): Record<string, number> {
+    const byUuid = new Map(lines.map((line) => [line.uuid as string, line]));
+    const childrenOf = new Map<string, OrderLineRow[]>();
+
+    for (const line of lines) {
+        const parent = line.combo_parent_uuid as string | null;
+        if (parent === null) continue;
+        childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), line]);
+    }
+
+    const expanded: Record<string, number> = { ...selection };
+
+    for (const [uuid, requested] of Object.entries(selection)) {
+        if (requested <= 0) continue;
+
+        const line = byUuid.get(uuid);
+        if (!line) continue;
+
+        // A child selected alone: promote to its parent and fall through to the parent's own rule.
+        const parentUuid = (line.combo_parent_uuid as string | null) ?? uuid;
+        const parent = byUuid.get(parentUuid);
+        if (!parent) continue;
+
+        const parentQty = parentUuid === uuid ? requested : clampRefundQuantity(parent, requested);
+        if (parentQty <= 0) continue;
+
+        expanded[parentUuid] = Math.max(expanded[parentUuid] ?? 0, clampRefundQuantity(parent, parentQty));
+
+        // Children follow at the ratio the parent is being refunded at, so half a combo refunds
+        // half of each part rather than all of one and none of another.
+        const ratio = parent.quantity === 0 ? 0 : expanded[parentUuid] / parent.quantity;
+
+        for (const child of childrenOf.get(parentUuid) ?? []) {
+            expanded[child.uuid] = Math.max(
+                expanded[child.uuid] ?? 0,
+                clampRefundQuantity(child, child.quantity * ratio),
+            );
+        }
+    }
+
+    return expanded;
+}
+
+/** Everything still refundable on this order, ready to hand to `createRefundOrder` (REG-276). */
+export function refundEverything(orderUuid: string): Record<string, number> {
+    const state = snapshot();
+    const selection: Record<string, number> = {};
+
+    for (const line of linesOf(state, orderUuid)) {
+        const remaining = refundableQuantity(line);
+        if (remaining > 0) selection[line.uuid] = remaining;
+    }
+
+    return selection;
+}
+
 /**
  * REG-270 / REG-271 — a refund is an ordinary order with **negative quantities** linked back to the
  * original lines. There is no document-level sign flag, on the wire or in the database.
@@ -1245,7 +1355,9 @@ export async function createRefundOrder(
     const original = state.orders[originalOrderUuid];
     if (!original) return null;
 
-    const lines = linesOf(state, originalOrderUuid).filter((line) => (selection[line.uuid] ?? 0) > 0);
+    const all = linesOf(state, originalOrderUuid);
+    const expanded = expandComboSelection(all, selection);
+    const lines = all.filter((line) => clampRefundQuantity(line, expanded[line.uuid] ?? 0) > 0);
     if (lines.length === 0) return null;
 
     const refundUuid = await createOrder({
@@ -1257,10 +1369,15 @@ export async function createRefundOrder(
         presetId: original.pos_preset_id,
     });
 
-    for (const line of lines) {
-        const quantity = Math.min(selection[line.uuid] ?? 0, line.quantity - line.refunded_quantity);
+    // Parents before children, so a combo child's `combo_parent_uuid` can point at the refund
+    // line rather than at the original order's.
+    const parentMap = new Map<string, string>();
+    const ordered = [...lines].sort((a, b) => Number(a.combo_parent_uuid !== null) - Number(b.combo_parent_uuid !== null));
+
+    for (const line of ordered) {
+        const quantity = clampRefundQuantity(line, expanded[line.uuid] ?? 0);
         if (quantity <= 0) continue;
-        addLine({
+        const refundLineUuid = addLine({
             orderUuid: refundUuid,
             variantId: line.product_variant_id,
             quantity: -quantity,
@@ -1272,17 +1389,25 @@ export async function createRefundOrder(
             customerNote: line.customer_note,
             refundedLineUuid: line.uuid,
             refundedLineId: line.id,
+            comboId: line.combo_id,
+            comboItemId: line.combo_item_id,
+            comboParentUuid: line.combo_parent_uuid
+                ? (parentMap.get(line.combo_parent_uuid as string) ?? null)
+                : null,
             skipMerge: true,
             fullProductName: line.full_product_name,
         });
+        parentMap.set(line.uuid as string, refundLineUuid);
     }
 
-    // REG-272 — refunded quantities are bookkept on the ORIGINAL order.
+    // REG-272 — refunded quantities are bookkept on the ORIGINAL order. Optimistic only: the server
+    // re-derives this column from the refunds that actually exist and sends it back, because a
+    // second till refunding the same line is a number this device cannot see (BAN-406).
     mutate((draft) => {
         for (const line of lines) {
             const target = draft.lines[line.uuid];
             if (!target) continue;
-            target.refunded_quantity += Math.min(selection[line.uuid] ?? 0, target.quantity - target.refunded_quantity);
+            target.refunded_quantity += clampRefundQuantity(line, expanded[line.uuid] ?? 0);
             target.rev += 1;
         }
         touch(draft, originalOrderUuid);

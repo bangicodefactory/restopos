@@ -94,6 +94,29 @@ function editLogs(?OrderEditAction $action = null): Collection
     return $query->get();
 }
 
+/**
+ * Sell two units, paid, then hand back the order and line uuids.
+ *
+ * Refund cases need a real original since BAN-406: a negative line must name the line it refunds,
+ * or it is refused outright. That is a better shape for these tests anyway — a refund with nothing
+ * behind it was never a thing the till could produce.
+ *
+ * @return array{0: string, 1: string}
+ */
+function soldOrder(PosFixtures $fx): array
+{
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    push($fx, ['orders' => [$fx->orderCommand($orderUuid, [
+        line($fx, $lineUuid, ['qty' => '2', 'price_unit' => '10.00']),
+    ], ['state' => OrderState::Paid->value], [
+        ['op' => 'create', 'uuid' => (string) Str::uuid(), 'payment_method_id' => $fx->cash->getKey(), 'amount' => '24.20'],
+    ])]])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    return [$orderUuid, $lineUuid];
+}
+
 // ---------------------------------------------------------------- the acceptance criterion
 
 it('records a scripted shift: two voids and a discount produce exactly three rows', function (): void {
@@ -672,17 +695,21 @@ it('points the impact the right way when a refund line is removed', function ():
     // *back*. The first cut of this hardcoded a minus sign, which reported removing a −€20 refund
     // as another €20 taken off — in the one column a fraud report ranks by, on the one kind of
     // order fraud actually lives in.
-    $orderUuid = (string) Str::uuid();
+    [$soldUuid, $soldLine] = soldOrder($this->fx);
+    OrderEditLog::query()->delete();
+
+    $refundUuid = (string) Str::uuid();
     $lineUuid = (string) Str::uuid();
 
-    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
-        line($this->fx, $lineUuid, ['qty' => '-2']),
-    ], ['is_refund' => true])]])->assertOk();
+    push($this->fx, ['orders' => [$this->fx->orderCommand($refundUuid, [
+        line($this->fx, $lineUuid, ['qty' => '-2', 'refunded_line_uuid' => $soldLine]),
+    ], ['is_refund' => true, 'refunded_order_uuid' => $soldUuid])]])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
 
     // Adding the refund line takes €20 off the ticket…
     expect((string) editLogs(OrderEditAction::LineAdded)->first()->amount_impact)->toBe('-20.0000');
 
-    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+    push($this->fx, ['orders' => [$this->fx->orderCommand($refundUuid, [
         ['op' => 'delete', 'uuid' => $lineUuid],
     ])]])->assertOk();
 
@@ -691,11 +718,14 @@ it('points the impact the right way when a refund line is removed', function ():
 });
 
 it('points the impact the right way when a refund order is cancelled', function (): void {
+    [$soldUuid, $soldLine] = soldOrder($this->fx);
+
     $orderUuid = (string) Str::uuid();
 
     push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
-        line($this->fx, (string) Str::uuid(), ['qty' => '-2']),
-    ], ['is_refund' => true])]])->assertOk();
+        line($this->fx, (string) Str::uuid(), ['qty' => '-2', 'refunded_line_uuid' => $soldLine]),
+    ], ['is_refund' => true, 'refunded_order_uuid' => $soldUuid])]])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
 
     OrderEditLog::query()->delete();
 
