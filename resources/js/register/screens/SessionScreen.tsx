@@ -154,7 +154,12 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
             <h1 className="text-2xl font-bold">{t('reg.session.openTitle')}</h1>
 
             {/* Named before anything else on the screen: counting a drawer into an open that will be
-                refused is the exact waste this ticket exists to stop. */}
+                refused is the exact waste this ticket exists to stop.
+
+                The retry is not decoration. This pane is a terminal screen — with no session there
+                is nowhere else to navigate — and the problems are only read on mount, so without it
+                a manager fixes the configuration in the back office and the till goes on refusing
+                with no way to ask again short of reloading the browser. */}
             {blocked ? (
                 <section className="rounded-pos bg-danger-soft p-3 text-danger-fg">
                     <h2 className="font-semibold">{t('reg.session.notReady')}</h2>
@@ -163,6 +168,13 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
                             <li key={problem.code}>{problem.message}</li>
                         ))}
                     </ul>
+                    <Button
+                        variant="secondary"
+                        className="mt-3"
+                        onClick={() => void fetchCurrentSession()}
+                    >
+                        {t('common.retry')}
+                    </Button>
                 </section>
             ) : null}
 

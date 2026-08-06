@@ -324,7 +324,9 @@ final class ReportController extends Controller
         $sessionId = $session->getKey();
 
         return Inertia::render('Reports/SessionReport', [
-            'session' => $session->attributesToArray(),
+            // Same as `Sessions/Show`: `name` is null before the opening control is confirmed, and
+            // the report header prints it unguarded.
+            'session' => [...$session->attributesToArray(), 'name' => $session->label()],
             'paymentTotals' => $this->connection->table('session_payment_totals')->where('pos_session_id', $sessionId)
                 ->get()->map(static fn ($r): array => (array) $r)->all(),
             'salesSummaries' => $this->connection->table('session_sales_summaries')->where('pos_session_id', $sessionId)

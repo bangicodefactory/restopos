@@ -18,7 +18,9 @@ final class OpenSessionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'opening_float' => ['nullable', 'string'],
+            // `decimal` rather than `numeric`: the float lands in bcmath and in a decimal column,
+            // and `numeric` accepts `1e2`, which bcmath throws on (BAN-413).
+            'opening_float' => ['nullable', 'string', 'decimal:0,4'],
             'employee_id' => ['nullable', 'integer'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'denominations' => ['nullable', 'array'],

@@ -8,13 +8,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Pos\SessionOpenValidation;
 
+use App\Enums\CashMovementType;
 use App\Enums\SessionState;
 use App\Models\Identity\Company;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\FiscalPosition;
+use App\Models\User;
 use App\Services\Pos\RegisterReadiness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
@@ -218,6 +221,82 @@ it('keeps numbering consecutive across a normal day', function (): void {
             ->postJson("/api/pos/sessions/{$id}/close", ['counted_cash' => '0'])
             ->assertOk();
     }
+});
+
+// ── an unnamed session is still a usable session ─────────────────────────────
+
+it('gives the back office something to call a session with no number yet', function (): void {
+    // `Sessions/Show` types `name` as a string and uses it as the phrase a manager must type back to
+    // confirm the close. A null phrase can never be matched — `typed.trim() === null` is false for
+    // every string — so the close button became impossible to confirm on precisely the sessions a
+    // manager most needs to clear: an abandoned opening control holds the one-open-session index and
+    // blocks the register until it is closed.
+    $this->withoutVite();
+    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+
+    $id = openRegister($this->fx)->assertCreated()->json('id');
+    $session = PosSession::query()->findOrFail($id);
+
+    expect($session->name)->toBeNull();
+
+    $props = $this->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => PosFixtures::inertiaVersion()])
+        ->get('/sessions/'.$session->uuid)
+        ->assertOk()
+        ->json('props.session');
+
+    expect($props['name'])->toBeString()->not->toBe('');
+});
+
+it('gives the session report the same fallback', function (): void {
+    $this->withoutVite();
+    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+
+    $id = openRegister($this->fx)->assertCreated()->json('id');
+
+    $props = $this->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => PosFixtures::inertiaVersion()])
+        ->get('/reports/session?session_id='.$id)
+        ->assertOk()
+        ->json('props.session');
+
+    expect($props['name'])->toBeString()->not->toBe('');
+});
+
+// ── the drawer ledger ────────────────────────────────────────────────────────
+
+it('records the opening float even on a register that does not count its drawer', function (): void {
+    // Gating the ledger row on `has_cash_control` was harmless only while such a register always
+    // opened at zero — which stopped being true when the expected float started carrying over.
+    // Nothing sums `opening_float`, so expected cash was never wrong; the movements list a manager
+    // reads simply could not account for the opening balance.
+    $this->fx->config->forceFill(['has_cash_control' => false])->save();
+
+    $id = openRegister($this->fx, ['opening_float' => '135.50'])->assertCreated()->json('id');
+
+    $rows = DB::table('cash_movements')
+        ->where('pos_session_id', $id)
+        ->where('movement_type', CashMovementType::OpeningFloat->value)
+        ->pluck('amount');
+
+    expect($rows)->toHaveCount(1)
+        ->and((float) $rows->first())->toBe(135.5);
+});
+
+it('writes no opening-float row for a register that opens at nothing', function (): void {
+    // The other half of the rule: a zero float moved no money, and a ledger row saying so is noise.
+    $this->fx->config->forceFill(['has_cash_control' => false])->save();
+
+    $id = openRegister($this->fx)->assertCreated()->json('id');
+
+    expect(DB::table('cash_movements')->where('pos_session_id', $id)->count())->toBe(0);
+});
+
+it('refuses an opening float bcmath cannot read', function (): void {
+    // `is_numeric('1e2')` is true and `bccomp('1e2', …)` throws — the difference between a rejected
+    // payload and a 500 (BAN-413). Rejected at the boundary rather than guarded downstream.
+    openRegister($this->fx, ['opening_float' => '1e2'])->assertStatus(422);
+    openRegister($this->fx, ['opening_float' => 'plenty'])->assertStatus(422);
+
+    expect(PosSession::query()->count())->toBe(0);
 });
 
 // ── the expected float ───────────────────────────────────────────────────────

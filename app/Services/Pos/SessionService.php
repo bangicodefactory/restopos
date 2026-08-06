@@ -116,7 +116,12 @@ final readonly class SessionService
                 $this->recordCount($session, CashCountType::Opening, $denominations, $employeeId, $notes);
             }
 
-            if ($config->has_cash_control) {
+            // Money declared into the drawer gets a ledger row, whether or not the register counts.
+            // Gating this on `has_cash_control` was harmless only while such a register always
+            // opened at zero — which stopped being true when the expected float started carrying
+            // over (REG-004). Nothing sums `opening_float`, so expected cash was never wrong; the
+            // movements list a manager reads simply could not account for the opening balance.
+            if ($config->has_cash_control || $this->isNonZeroAmount($openingFloat)) {
                 $this->recordMovement($session, CashMovementType::OpeningFloat, $openingFloat, 'Opening float', $employeeId, $userId, null);
             }
 
@@ -699,5 +704,19 @@ final readonly class SessionService
     private function abs(string $value): string
     {
         return ltrim($value, '-');
+    }
+
+    /**
+     * A well-formed, non-zero amount.
+     *
+     * The shape check is not belt-and-braces: `bccomp` is stricter than `is_numeric` and throws a
+     * ValueError on `1e2`, which `is_numeric` happily accepts. `open()` takes the float straight
+     * from a request, so an amount that never reaches bcmath is the difference between a rejected
+     * payload and a 500 (BAN-413).
+     */
+    private function isNonZeroAmount(string $amount): bool
+    {
+        return preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $amount) === 1
+            && bccomp($amount, '0', 4) !== 0;
     }
 }
