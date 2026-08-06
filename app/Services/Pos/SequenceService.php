@@ -9,8 +9,11 @@ use App\Enums\SequencePurpose;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use App\Models\Pos\Sequence;
+use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\QueryException;
+use Throwable;
 
 /**
  * The three server-owned numbers (spec 03 §6).
@@ -174,9 +177,72 @@ final readonly class SequenceService
             }
         }
 
-        // 999 live orders in one session is not a service, it is a data problem — but a duplicate
-        // number is still better than refusing the sale.
-        return $prefix.str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+        // Past 999 the three-digit space is exhausted. Widening it is the only option that still
+        // takes the money: a random three-digit number would collide with the unique index and the
+        // order would be refused, which is precisely the failure being fixed — the old comment here
+        // claimed a duplicate was "better than refusing the sale", and since BAN-470 added the index
+        // a duplicate *is* a refused sale.
+        for ($n = 1000; $n <= 9999; $n++) {
+            if (! isset($used[(string) $n])) {
+                return $prefix.$n;
+            }
+        }
+
+        throw new DomainException('tracking_numbers_exhausted');
+    }
+
+    /**
+     * Run an ingest attempt again if it lost a tracking number to another writer.
+     *
+     * Allocation reads the used set and then inserts, and those are two steps: two tills submitting
+     * in the same moment both read the same free number, and one loses on
+     * `pos_orders_session_tracking_unique`. Without this the loser's sale is refused, which is the
+     * defect this whole change exists to remove — fixing only the sequential case would have fixed
+     * the bug report and not the bug.
+     *
+     * **Wrapped around the transaction, not around the insert.** A failed statement poisons the
+     * transaction it is in, so catching the violation next to the `create` leaves nothing that can
+     * be retried — the attempt has to roll back completely and start again, re-reading the used set
+     * on the way. That is why the self-order path has always retried its whole request.
+     *
+     * Bounded: a caller that cannot win in a handful of attempts is contending with something other
+     * than a busy counter, and an unbounded loop would hold the request open forever.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $attempt
+     * @return T
+     */
+    public function retryOnTrackingCollision(callable $attempt, int $attempts = 4): mixed
+    {
+        for ($try = 1; ; $try++) {
+            try {
+                return $attempt();
+            } catch (QueryException $e) {
+                if ($try >= $attempts || ! self::isTrackingCollision($e)) {
+                    throw $e;
+                }
+            }
+        }
+    }
+
+    /**
+     * Is this the tracking-number unique violation?
+     *
+     * Matched on the index name **and** on the column pair, because the two drivers say different
+     * things: MySQL and Postgres name the index, SQLite names the columns —
+     * `UNIQUE constraint failed: pos_orders.pos_session_id, pos_orders.tracking_number`.
+     *
+     * Checking only the index name is why the equivalent retry added for the self-order path in
+     * BAN-470 had never once fired under the test suite: the string it looked for does not appear in
+     * any message SQLite produces (BAN-506).
+     */
+    public static function isTrackingCollision(Throwable $e): bool
+    {
+        $message = $e->getMessage();
+
+        return str_contains($message, 'pos_orders_session_tracking_unique')
+            || (str_contains($message, 'pos_session_id') && str_contains($message, 'tracking_number'));
     }
 
     /**

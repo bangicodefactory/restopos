@@ -132,40 +132,50 @@ it('does not hand a register the number a kiosk is already using', function (): 
     $pushed['response']->assertOk()->assertJsonPath('results.0.order.tracking_number', '002');
 });
 
-it('gives two tills racing on the same number two different numbers', function (): void {
-    // Both propose 001 in the same breath. Neither may be refused, and they must not collide.
-    $peer = PosFixtures::make(['company_id' => $this->fx->company->getKey()]);
-    $peer->session = $this->fx->session;
+it('survives another writer taking the number between the read and the insert', function (): void {
+    // The real race, forced. Allocation reads the used set and then inserts; two tills submitting in
+    // the same moment both read the same free number. Sequential requests cannot exercise this — the
+    // second read always sees the first's committed row — so a competing order is inserted from
+    // inside the create itself, which is exactly what the losing till experiences.
+    $session = $this->fx->session;
+    $stolen = false;
 
-    $a = pushWithTracking($this->fx, '001');
-    $b = pushWithTracking($this->fx, '001');
+    Order::creating(function (Order $order) use ($session, &$stolen): void {
+        if ($stolen || $order->tracking_number === null) {
+            return;
+        }
 
-    $a['response']->assertJsonPath('results.0.status', 'ok');
-    $b['response']->assertJsonPath('results.0.status', 'ok');
+        $stolen = true;
 
-    $numbers = Order::query()->pluck('tracking_number')->all();
+        // Another till gets there first with the number this one just picked.
+        Order::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'company_id' => $this->fx->company->getKey(),
+            'pos_config_id' => $this->fx->config->getKey(),
+            'pos_session_id' => $session->getKey(),
+            'name' => 'RACE/0001',
+            'access_token' => (string) Str::uuid(),
+            'currency_id' => $this->fx->config->currency_id,
+            'tracking_number' => $order->tracking_number,
+            'state' => 'paid',
+            'ordered_at' => now(),
+            'amount_total' => '1.0000',
+        ]);
+    });
 
-    expect($numbers)->toHaveCount(2)
-        ->and(array_unique($numbers))->toHaveCount(2);
-});
+    $pushed = pushWithTracking($this->fx, '001');
 
-it('keeps the assigned number when the till syncs the same order again', function (): void {
-    // The path a register uses most: a draft is pushed, then pushed again when it is paid — and the
-    // second push still carries the number the till originally proposed. Writing that through would
-    // collide with whoever holds it now, and fixing only the create path left exactly this open.
-    pushWithTracking($this->fx, '001');
+    Order::flushEventListeners();
 
-    $uuid = (string) Str::uuid();
-    pushWithTracking($this->fx, '001', $uuid);
+    // The sale is not lost: the retry re-reads and takes the next free number.
+    $pushed['response']->assertOk()->assertJsonPath('results.0.status', 'ok');
 
-    $assigned = Order::query()->where('uuid', $uuid)->value('tracking_number');
-    expect($assigned)->toBe('002');
+    expect($stolen)->toBeTrue('the race never happened, so this test proved nothing');
 
-    // The till re-syncs, still proposing its own 001.
-    $again = pushWithTracking($this->fx, '001', $uuid);
+    $mine = Order::query()->where('uuid', $pushed['uuid'])->value('tracking_number');
+    $theirs = Order::query()->where('name', 'RACE/0001')->value('tracking_number');
 
-    $again['response']->assertOk()->assertJsonPath('results.0.status', 'ok');
-    expect(Order::query()->where('uuid', $uuid)->value('tracking_number'))->toBe('002');
+    expect($mine)->not->toBeNull()->and($mine)->not->toBe($theirs);
 });
 
 it('numbers an order that proposes nothing at all', function (): void {

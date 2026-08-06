@@ -36,6 +36,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * The public self-order surface (spec 02 SLF-001…SLF-129).
@@ -666,7 +667,10 @@ final readonly class SelfOrderService
 
         $failed = (string) ($result['results'][0]['error']['message'] ?? '');
 
-        if ($failed !== '' && str_contains($failed, 'pos_orders_session_tracking_unique')) {
+        // Matched the index name only, which SQLite never emits — so this retry had never fired.
+        // `SequenceService` owns the test now, and the ingest path retries for itself, so this is
+        // belt-and-braces rather than the only line of defence (BAN-506).
+        if ($failed !== '' && SequenceService::isTrackingCollision(new RuntimeException($failed))) {
             return $ingest();
         }
 

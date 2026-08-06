@@ -137,7 +137,7 @@ final readonly class TableService
                 // source, and a soft-deleted row keeps its number under
                 // `pos_orders_session_tracking_unique` — so restoring the original number collides
                 // with the row it was copied from and fails the unmerge outright (BAN-506).
-                'tracking_number' => $this->sequences->availableTrackingNumber($target->session()->first()),
+                'tracking_number' => $this->sequences->availableTrackingNumber($target->session),
                 'state' => OrderState::Draft->value,
                 'restaurant_table_id' => $record->source_table_id,
                 'ordered_at' => now(),

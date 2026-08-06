@@ -152,7 +152,13 @@ final readonly class OrderSyncService
         }
 
         try {
-            return $this->connection->transaction(fn (): array => $this->ingest($config, $device, $uuid, $command, $employeeId));
+            // Retried around the whole transaction: a tracking-number collision poisons the
+            // transaction it happens in, so the attempt has to roll back and re-read (BAN-506).
+            return $this->sequences->retryOnTrackingCollision(
+                fn (): array => $this->connection->transaction(
+                    fn (): array => $this->ingest($config, $device, $uuid, $command, $employeeId),
+                ),
+            );
         } catch (ChangeWithoutCashException $e) {
             $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::Rejected, $uuid, [
                 'message' => $e->getMessage(),
