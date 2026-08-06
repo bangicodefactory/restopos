@@ -3,7 +3,7 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./sw-globals.d.ts" />
 
-import { cacheNames, filterManifest, resolveProfile } from './profile';
+import { cacheNames, filterManifest, manifestVersion, resolveProfile } from './profile';
 
 /**
  * The RestoPOS service worker (spec 03 §8).
@@ -37,15 +37,30 @@ import { cacheNames, filterManifest, resolveProfile } from './profile';
  */
 const sw = self as unknown as ServiceWorkerGlobalScopeLike;
 
-const VERSION = 'v1';
-
 const profile = resolveProfile(sw.registration.scope);
-const names = cacheNames(profile, VERSION);
 
 /** Injected at build time by workbox-build's injectManifest. */
 const MANIFEST = (self as unknown as ServiceWorkerGlobalScopeLike).__WB_MANIFEST;
 
 const PRECACHE_URLS = filterManifest(MANIFEST, profile);
+
+/**
+ * Cache-name version, derived from the injected manifest.
+ *
+ * This was the constant `'v1'`, which meant the cache names never changed, which meant the
+ * `activate` cleanup below — written to delete caches no longer named in `names` — could never
+ * delete anything. Asset filenames are content-hashed, so every deploy added a fresh set of chunks
+ * and kept every previous set forever, on the same device whose storage policy is careful enough to
+ * distinguish an evictable product photo from a receipt logo it must not lose (BAN-504).
+ *
+ * Derived from the manifest rather than from a build-time define because the worker is compiled
+ * separately by `injectManifest`, and because the manifest is the thing that actually changes when
+ * the assets do: same assets, same caches; new deploy, new caches, old ones swept on activate.
+ */
+const VERSION = manifestVersion(MANIFEST);
+
+const names = cacheNames(profile, VERSION);
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Install / activate
@@ -56,7 +71,8 @@ sw.addEventListener('install', (event) => {
         (async () => {
             const cache = await sw.caches.open(names.precache);
             // `reload` bypasses the HTTP cache: precaching a stale asset is worse than not
-            // precaching at all, because it survives until the next deploy.
+            // precaching at all. The cache it lands in is versioned by the manifest, so a deploy
+            // gets fresh cache names and `activate` sweeps the previous ones.
             await Promise.all(
                 PRECACHE_URLS.map(async (url) => {
                     try {
@@ -106,6 +122,19 @@ sw.addEventListener('activate', (event) => {
 });
 
 /**
+ * The cache key for a shell document: origin and path, without query or hash.
+ *
+ * `/pos/1?debug=1` and `/pos/1` are the same document — the shell is propless and the app reads the
+ * path at runtime — so keying by the full URL would accumulate a near-duplicate entry per distinct
+ * query string ever visited, and make `anyShellInScope` scan them all.
+ */
+function shellKey(url: URL | string): string {
+    const parsed = typeof url === 'string' ? new URL(url) : url;
+
+    return parsed.origin + parsed.pathname;
+}
+
+/**
  * Cache the real shell document of any window already in this worker's scope.
  *
  * The URL cannot be derived — `/pos/1` and `/pos/7` are different tills — so it is taken from the
@@ -123,7 +152,7 @@ async function cacheShellFromClients(): Promise<void> {
             .map(async (url) => {
                 try {
                     const response = await fetch(new Request(url.href, { cache: 'reload' }));
-                    if (response.ok) await cache.put(url.href, response);
+                    if (response.ok) await cache.put(shellKey(url), response);
                 } catch {
                     // Offline at activation: the next online navigation fills it.
                 }
@@ -219,7 +248,7 @@ async function handleNavigation(request: Request): Promise<Response> {
             // Keyed by the request's own URL, not by `profile.shellUrl`. The latter is a scope
             // prefix that no route serves, so it could only ever be a synthetic key — and one that
             // told you nothing about *which* till had been cached (BAN-504).
-            await cache.put(request.url, response.clone());
+            await cache.put(shellKey(request.url), response.clone());
 
             return response;
         }
@@ -227,7 +256,7 @@ async function handleNavigation(request: Request): Promise<Response> {
         // …and cache-fallback so a cold boot with a dead uplink still opens the till.
     }
 
-    const cached = (await cache.match(request.url)) ?? (await anyShellInScope(cache));
+    const cached = (await cache.match(shellKey(request.url))) ?? (await anyShellInScope(cache));
     if (cached) return cached;
 
     return new Response(OFFLINE_HTML, {

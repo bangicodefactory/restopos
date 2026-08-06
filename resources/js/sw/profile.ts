@@ -159,3 +159,24 @@ export function filterManifest(
         })
         .map((entry) => entry.url);
 }
+
+/**
+ * A short, stable digest of the manifest.
+ *
+ * djb2 — not a cryptographic hash, and it does not need to be. This only has to differ between
+ * builds; a collision would reuse a cache whose contents are content-hashed URLs anyway, so the
+ * worst case is a stale entry nobody can request.
+ */
+export function manifestVersion(manifest: ReadonlyArray<{ url: string; revision: string | null }>): string {
+    let hash = 5381;
+
+    for (const entry of manifest) {
+        const text = `${entry.url}|${entry.revision ?? ''}`;
+
+        for (let i = 0; i < text.length; i++) {
+            hash = ((hash << 5) + hash + text.charCodeAt(i)) >>> 0;
+        }
+    }
+
+    return `v${hash.toString(36)}`;
+}
