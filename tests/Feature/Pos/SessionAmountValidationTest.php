@@ -218,6 +218,58 @@ it('validates the back-office close the same way as the register', function (): 
     }
 });
 
+// ── never advise what you would refuse ───────────────────────────────────────
+
+it('does not tell a register to open on a float it will then reject', function (): void {
+    // A negative counted cash was *accepted* until this ticket, so a session closed before it is
+    // sitting on one right now. A register without cash control sends the expected float back
+    // verbatim, so it would be told to expect −50, send −50, and be refused — every attempt, until
+    // someone edited the database. The till could not trade at all.
+    //
+    // The general form of the rule, which is what this pins: an endpoint that tells a client what
+    // to send must not name something it will reject.
+    $fresh = PosFixtures::make(['has_cash_control' => false]);
+
+    PosSession::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $fresh->config->getKey(),
+        'company_id' => $fresh->company->getKey(),
+        'currency_id' => $fresh->currency->getKey(),
+        'name' => 'Bar/00001',
+        'state' => SessionState::Closed->value,
+        'opened_at' => now()->subDay(),
+        'closed_at' => now()->subHour(),
+        'business_date' => now()->subDay()->toDateString(),
+        'cash_balance_closing_counted' => '-50.00',
+    ]);
+
+    $advised = test()->withHeaders($fresh->headers())
+        ->getJson('/api/pos/sessions/current')->assertOk()->json('opening.expected_float');
+
+    expect((float) $advised)->toBe(0.0);
+
+    // …and the round trip the till actually performs goes through.
+    test()->withHeaders($fresh->headers())
+        ->postJson('/api/pos/sessions', ['opening_float' => number_format((float) $advised, 2, '.', '')])
+        ->assertCreated();
+});
+
+it('still carries a normal closing balance forward untouched', function (): void {
+    // The clamp must not flatten the ordinary case it sits in front of.
+    $fresh = PosFixtures::make(['has_cash_control' => false]);
+
+    $first = test()->withHeaders($fresh->headers())
+        ->postJson('/api/pos/sessions', ['opening_float' => '0'])->assertCreated()->json('id');
+
+    test()->withHeaders($fresh->headers())
+        ->postJson("/api/pos/sessions/{$first}/close", ['counted_cash' => '135.50'])->assertOk();
+
+    test()->withHeaders($fresh->headers())
+        ->getJson('/api/pos/sessions/current')
+        ->assertOk()
+        ->assertJsonPath('opening.expected_float', '135.5000');
+});
+
 // ── the readiness guard ──────────────────────────────────────────────────────
 
 it('reports a register whose company cannot be read, rather than passing it', function (): void {

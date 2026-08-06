@@ -1,6 +1,6 @@
 import { Decimal } from '@domain/money/decimal';
 import { useCan, useSessionStore } from '@shared/auth';
-import { Button, Spinner, cn } from '@shared/ui';
+import { Button, Spinner, cn, sanitizeMoneyInput } from '@shared/ui';
 import type { JSX } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -250,6 +250,7 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
     const t = useT();
     const money = useMoney();
     const can = useCan();
+    const catalog = useCatalog();
     const cashier = useSessionStore((state) => state.cashier);
     const session = usePosSessionStore((state) => state.session);
     const closingData = usePosSessionStore((state) => state.closingData);
@@ -331,15 +332,23 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                             <li key={row.payment_method_id} className="flex items-center gap-2">
                                 <span className="flex-1">{row.name}</span>
                                 <span className="tabular-nums text-slate-500">{money(row.expected_amount)}</span>
+                                {/* Sanitised, not raw: the venue is French-Moroccan and a decimal
+                                    keypad here produces `12,50`, which the server refuses outright
+                                    since BAN-507 — so an untouched close went through and an edited
+                                    one did not. `sanitizeMoneyInput` is what the rest of the app
+                                    already uses to make both separators mean the same amount. */}
                                 <input
                                     type="text"
                                     inputMode="decimal"
-                                    className="min-h-touch w-28 rounded-pos border border-slate-300 px-2 text-right"
+                                    className="min-h-touch w-28 rounded-pos border border-slate-300 px-2 text-right tabular-nums"
                                     value={byMethod[row.payment_method_id] ?? row.expected_amount}
                                     onChange={(event) =>
                                         setByMethod((current) => ({
                                             ...current,
-                                            [row.payment_method_id]: event.target.value,
+                                            [row.payment_method_id]: sanitizeMoneyInput(
+                                                event.target.value,
+                                                catalog.currencyFormat.decimalPlaces,
+                                            ),
                                         }))
                                     }
                                 />
