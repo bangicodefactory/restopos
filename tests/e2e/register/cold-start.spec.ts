@@ -27,7 +27,7 @@ test.describe('cold start', () => {
     //
     // Deleting the spec would hide that; weakening it to assert the error screen would enshrine it.
     // `fixme` keeps the suite green, keeps the expectation in the repo, and names the bug.
-    test.fixme('re-boots from IndexedDB with the network cut', async ({ page, context, request }) => {
+    test('re-boots from IndexedDB with the network cut', async ({ page, context, request }) => {
         await openTill(page, request);
         await expect(page.getByRole('button', { name: /Café expresso/ }).first()).toBeVisible();
 

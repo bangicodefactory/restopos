@@ -30,7 +30,7 @@ import { APP_VERSION, clearRuntime, configIdFromUrl, getRuntime, setRuntime, try
 import { remapPlaceholderCustomer } from './domain/customer-remap';
 import { applyServerAck, configureOrderActions, hydrateOrders, markSyncState } from './domain/order-actions';
 import { bindingsFromCatalog, createPrinterRouter } from './domain/printing';
-import { fetchCurrentSession } from './domain/session-actions';
+import { fetchCurrentSession, openSessionFromDb } from './domain/session-actions';
 import { useBootStore, useSyncStore } from './state/boot-store';
 import { unsyncedCount, useOrderStore } from './state/order-store';
 import { usePosSessionStore } from './state/session-store';
@@ -235,6 +235,13 @@ export async function hydrateLocal(): Promise<void> {
 
     const payload = await loadOrdersFromDb(runtime.db);
     hydrateOrders(payload);
+
+    // The open session, from the replica, before first paint. `fetchCurrentSession` will confirm it
+    // against the server later; offline that call falls back to this same row. Without it the till
+    // paints "open the session" and only corrects itself once the network answers — which offline
+    // is never (BAN-504).
+    const local = await openSessionFromDb();
+    if (local) usePosSessionStore.getState().setSession(local);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

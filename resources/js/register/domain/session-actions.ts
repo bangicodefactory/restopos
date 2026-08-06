@@ -38,18 +38,79 @@ function describe(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The open session: from the server when it can be reached, from the replica when it cannot.
+ *
+ * This used to be network-only, and on failure it set an error and left the session null — so a till
+ * that booted with the line down showed "open the session" and could not sell, however complete its
+ * local replica was. Booting offline is worth nothing if the till cannot then take an order
+ * (BAN-504).
+ *
+ * The successful response is written to Dexie so the next cold boot has something to read. That is
+ * the same shape as the rest of the replica: the server is authoritative when present, and the local
+ * copy is what the till trades on when it is not.
+ */
 export async function fetchCurrentSession(): Promise<PosSessionRow | null> {
-    const { api } = getRuntime();
+    const { api, db } = getRuntime();
     const store = usePosSessionStore.getState();
+
     try {
         const response = await api.get<SessionResponse>('pos/sessions/current');
         const session = response.data?.session ?? null;
+
         store.setSession(session);
+
+        // Written, never wiped. `pos_sessions` is a replicated table — bootstrap and delta own it,
+        // scoped to this config's open sessions — so clearing it on "no current session" would
+        // destroy rows the replication layer will not restore until a full re-bootstrap, rescue
+        // sessions among them. "No *current* session" is not "no sessions exist"; which of the
+        // replicated rows is current is `openSessionFromDb`'s question to answer.
+        if (session) await db.sessions.put(session);
+
         return session;
     } catch (error) {
+        const cached = await openSessionFromDb();
+
+        if (cached) {
+            // Offline with a session already open: trade on. No error — this is the designed path,
+            // not a degraded one, and an error banner here would tell a cashier something is wrong
+            // when nothing is.
+            store.setSession(cached);
+
+            return cached;
+        }
+
         store.setError(describe(error));
+
         return null;
     }
+}
+
+/**
+ * The session this till is trading on, from the replica.
+ *
+ * Deliberately the same predicate as the server's `PosConfig::currentSession()` — not closed **and
+ * not a rescue session** — because this stands in for that endpoint when it cannot be reached, and a
+ * fallback that answers a different question is worse than no fallback at all.
+ *
+ * The rescue exclusion is the load-bearing half. `PosSession::posLoadScope` replicates every open
+ * session for the config, and a rescue session is open by definition — it exists precisely because
+ * it is unreconciled. Without the filter a venue carrying one would boot offline onto it and
+ * attribute the day's orders to a session nobody is trading in, which is a money-attribution error
+ * that only appears offline.
+ *
+ * Newest first, because two sessions can legitimately be open at once — the rescue and the real one
+ * — and `.find()` over Dexie's primary-key order would take the older.
+ */
+export async function openSessionFromDb(): Promise<PosSessionRow | null> {
+    const { db } = getRuntime();
+    const rows = await db.sessions.toArray();
+
+    return (
+        rows
+            .filter((row) => row.state !== 'closed' && row.is_rescue !== true)
+            .sort((a, b) => b.id - a.id)[0] ?? null
+    );
 }
 
 export async function openSession(input: {
