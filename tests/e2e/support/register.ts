@@ -159,14 +159,18 @@ export async function resumeAfterReload(page: Page): Promise<void> {
 /**
  * Add a product to the current order by its visible name.
  *
- * Still by name: which product a spec adds is a domain choice a reader needs to see, and the tile's
- * name is stable text rather than a state-dependent label. `data-testid="product-tile"` scopes it to
- * the grid so the match cannot land on the same name rendered in the order panel.
+ * Still by name: which product a spec adds is a domain choice a reader needs to see, and a product's
+ * name is stable text rather than a state-dependent label.
+ *
+ * Matched against the name element rather than the tile's text, which also carries the price and a
+ * cart badge. Anchoring a regex at the start of the tile's whole text worked only because the name
+ * happens to be rendered first — a positional assumption inside the very element the hook exists to
+ * make position-free.
  */
 export async function addProduct(page: Page, name: string): Promise<void> {
     await page
         .getByTestId('product-tile')
-        .filter({ hasText: new RegExp(`^${escapeRegExp(name)}`) })
+        .filter({ has: page.getByTestId('product-name').getByText(name, { exact: true }) })
         .first()
         .click();
 }

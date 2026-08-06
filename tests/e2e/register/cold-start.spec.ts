@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { addProduct, openTill, orderLines, resumeAfterReload, till } from '../support/register';
+import {
+    addProduct,
+    openTill,
+    orderLines,
+    orderTotalValue,
+    resumeAfterReload,
+    till,
+} from '../support/register';
 
 /**
  * XCT-135 — a paired till boots to a working register, and boots again from local storage alone.
@@ -51,6 +58,10 @@ test.describe('cold start', () => {
         await addProduct(page, 'Café expresso');
 
         await expect(orderLines(page)).toHaveCount(1);
+
+        // The money, not just the row: a line priced at zero would pass a count assertion.
+        const total = await orderTotalValue(page);
+        expect(Number.parseFloat(total)).toBeGreaterThan(0);
 
         await page.reload();
         await resumeAfterReload(page);

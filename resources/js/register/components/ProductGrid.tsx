@@ -177,6 +177,7 @@ function ProductCard({
                 </>
             ) : null}
             <span
+                data-testid="product-name"
                 className={cn(
                     'relative line-clamp-3 text-sm font-semibold leading-tight',
                     image !== null ? 'text-white drop-shadow' : 'text-slate-900',
