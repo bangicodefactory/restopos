@@ -27,6 +27,36 @@ import {
 
 export type SessionResponse = { session: PosSessionRow | null; opening?: OpeningContext };
 
+/** The `{ error: { code, message, problems } }` body every POS endpoint refuses with. */
+type DomainErrorBody = {
+    error?: { message?: unknown; problems?: unknown };
+};
+
+/**
+ * The server's own words for a refusal, when it gave any.
+ *
+ * `classifyHttpError` looks for a **top-level** `message`, and every POS endpoint nests it one level
+ * down under `error` — so a 422 arrived at the till as the literal string "Validation failed". On a
+ * register refused for its configuration that is worse than silence: it tells a cashier something
+ * went wrong and hides the one fact that would let anyone fix it (REG-002).
+ *
+ * The problem list wins over the summary because it is the list a manager acts on; the summary is
+ * the same sentences with a preamble glued to the front.
+ */
+function domainMessage(body: unknown): string | null {
+    const domain = (body as DomainErrorBody | null | undefined)?.error;
+
+    if (!domain) return null;
+
+    const problems = (Array.isArray(domain.problems) ? domain.problems : [])
+        .map((problem) => (problem as { message?: unknown } | null)?.message)
+        .filter((message): message is string => typeof message === 'string' && message !== '');
+
+    if (problems.length > 0) return problems.join(' ');
+
+    return typeof domain.message === 'string' && domain.message !== '' ? domain.message : null;
+}
+
 function describe(error: unknown): string {
     if (error instanceof ApiError) {
         switch (error.sync.kind) {
@@ -35,9 +65,9 @@ function describe(error: unknown): string {
             case 'auth':
                 return 'auth';
             case 'validation':
-                return error.sync.message;
+                return domainMessage(error.body) ?? error.sync.message;
             default:
-                return error.message;
+                return domainMessage(error.body) ?? error.message;
         }
     }
     return error instanceof Error ? error.message : String(error);
