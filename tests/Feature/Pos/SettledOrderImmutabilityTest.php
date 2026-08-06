@@ -6,11 +6,13 @@ use App\Enums\OrderState;
 use App\Enums\SpecialKind;
 use App\Models\Audit\AuditLog;
 use App\Models\Catalog\Product;
+use App\Models\Catalog\ProductVariant;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\Payment;
 use App\Support\Audit\AuditEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Feature\PosFixtures;
@@ -39,7 +41,9 @@ uses(TestCase::class, RefreshDatabase::class);
  * `special_kind = tip` and which `TicketScreen` offers on past orders, and the invoice flag.
  */
 beforeEach(function (): void {
-    $this->fx = PosFixtures::make()->withSession();
+    // Tips after payment are enabled here because that is the venue this guard has to accommodate.
+    // A register with them off gets no tip exemption at all, which is its own case below.
+    $this->fx = PosFixtures::make(['enable_tips' => true, 'tip_after_payment' => true])->withSession();
 });
 
 function pushOrders(PosFixtures $fx, array $orders): TestResponse
@@ -534,4 +538,143 @@ it('records a refused cancel like any other settled write', function (): void {
     expect($log->changes['from']['new'])->toBe('paid')
         ->and($log->changes['to']['new'])->toBe('cancelled')
         ->and((int) $log->pos_device_id)->toBe((int) $this->fx->device->getKey());
+});
+
+it('refuses a tip on a register that does not tip after payment', function (): void {
+    // Two flags, not one. `enable_tips` decides whether the venue tips at all; `tip_after_payment`
+    // decides whether it does so once the sale is closed. A counter that tips into the change cup
+    // and a restaurant that adds it to the card slip are different venues, and leaving the door open
+    // for both hands the first one a hole it has no use for.
+    $fx = PosFixtures::make(['enable_tips' => true, 'tip_after_payment' => false])->withSession();
+    $tip = tipVariant($fx);
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tip,
+        'qty' => '1', 'price_unit' => '3.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+});
+
+it('refuses a tip on a register with tipping switched off entirely', function (): void {
+    $fx = PosFixtures::make(['enable_tips' => false, 'tip_after_payment' => true])->withSession();
+    $tip = tipVariant($fx);
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tip,
+        'qty' => '1', 'price_unit' => '3.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+});
+
+it('honours the register own tip product over anything merely flagged as one', function (): void {
+    // The fallback alone let *any* product flagged `special_kind = tip` in the catalogue be appended
+    // to a settled order. A venue with more than one is a venue where the guard picks the wrong one.
+    $ours = tipVariant($this->fx);
+    $theirs = tipVariant($this->fx);
+
+    $this->fx->config->forceFill(['tip_product_id' => ProductVariant::query()->whereKey($ours)->value('product_id')])->save();
+
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $theirs,
+        'qty' => '1', 'price_unit' => '3.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $ours,
+        'qty' => '1', 'price_unit' => '3.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.status', 'ok');
+});
+
+it('refuses a tip worth more than everything that was sold', function (): void {
+    // A ceiling, not a tipping policy. Without it the exemption lets a paired device add value to a
+    // settled order without limit — a EUR 10,000 tip on a EUR 20 order is refused here not because
+    // it is a bad tip but because nothing else would have stopped it.
+    $tip = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+
+    // Two units at 10.00 -> 24.20 with tax; the sold total the ceiling measures against.
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $tip,
+        'qty' => '1', 'price_unit' => '10000.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.code', 'order_settled');
+});
+
+it('measures an edited tip as a replacement, not as another one on top', function (): void {
+    // Raising a tip from 3 to 4 must not be scored as 7 and refused for the wrong reason.
+    $tip = tipVariant($this->fx);
+    $orderUuid = (string) Str::uuid();
+    $tipUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid, [[
+        'op' => 'create', 'uuid' => $tipUuid, 'variant_id' => $tip,
+        'qty' => '1', 'price_unit' => '20.00', 'price_type' => 'manual', 'discount' => '0',
+    ]])->assertOk()->assertJsonPath('results.0.lines.0.status', 'ok');
+
+    repushSettled($this->fx, $orderUuid, [['op' => 'update', 'uuid' => $tipUuid, 'price_unit' => '22.00']])
+        ->assertOk()
+        ->assertJsonPath('results.0.lines.0.status', 'ok');
+
+    expect((string) OrderLine::query()->where('uuid', $tipUuid)->value('price_unit'))->toBe('22.0000');
+});
+
+it('refuses a course rewritten after the order was paid', function (): void {
+    // Courses carry no money, which is exactly why they were the easy thing to leave out — and why
+    // leaving them out was wrong. A course is what the kitchen ticket is grouped by; rewriting one
+    // after payment changes the record of what was sent, on an order nobody should still be editing.
+    $orderUuid = (string) Str::uuid();
+    $courseUuid = (string) Str::uuid();
+
+    $command = $this->fx->orderCommand($orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+    ]]);
+    $command['courses'] = [['op' => 'create', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Entrees']];
+    pushOrders($this->fx, [$command])->assertOk();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $rename = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value]);
+    $rename['lines'] = [];
+    $rename['courses'] = [['op' => 'update', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Rewritten']];
+
+    pushOrders($this->fx, [$rename])
+        ->assertOk()
+        ->assertJsonPath('results.0.courses.0.code', 'order_settled');
+
+    expect(DB::table('restaurant_order_courses')->where('uuid', $courseUuid)->value('name'))->toBe('Entrees');
+});
+
+it('lets a settled order resend its courses unchanged', function (): void {
+    // The reprint again: the whole graph comes back, courses included.
+    $orderUuid = (string) Str::uuid();
+    $courseUuid = (string) Str::uuid();
+
+    $command = $this->fx->orderCommand($orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+    ]]);
+    $command['courses'] = [['op' => 'create', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Entrees']];
+    pushOrders($this->fx, [$command])->assertOk();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    $resend = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value]);
+    $resend['lines'] = [];
+    $resend['courses'] = [['op' => 'update', 'uuid' => $courseUuid, 'index' => 1, 'name' => 'Entrees']];
+
+    pushOrders($this->fx, [$resend])
+        ->assertOk()
+        ->assertJsonPath('results.0.courses.0.status', 'ok');
 });

@@ -123,6 +123,36 @@ final class SettledOrder
     }
 
     /**
+     * May tips reach an order that is already settled on this register?
+     *
+     * Two config flags, not one. `enable_tips` decides whether the venue tips at all;
+     * `tip_after_payment` decides whether it does so once the sale is closed — a counter that tips
+     * into the change cup and a restaurant that adds it to the card slip are different venues, and
+     * only the second one needs a door in this guard. Leaving the exemption on for both hands the
+     * first one a hole it has no use for.
+     */
+    public static function acceptsTipAfterPayment(bool $enableTips, bool $tipAfterPayment): bool
+    {
+        return $enableTips && $tipAfterPayment;
+    }
+
+    /**
+     * Would the tips on this order come to more than the goods on it?
+     *
+     * A ceiling, not a tipping policy. The exemption otherwise lets a paired device add value to a
+     * settled order without limit — a €10,000 "tip" on a €4 coffee is refused here not because it
+     * is a bad tip but because nothing else would have stopped it. Measured against what was
+     * actually sold, so it scales with the order rather than needing a number nobody will maintain.
+     *
+     * The real policy — caps, percentages, who may override them — belongs to the tips work
+     * (BAN-494). This is the bound that stops the door standing open until then.
+     */
+    public static function tipWithinCeiling(string $proposedTipTotal, string $soldTotal): bool
+    {
+        return bccomp($proposedTipTotal, $soldTotal, 4) <= 0;
+    }
+
+    /**
      * Is this the one product kind that may join an order after it is paid?
      *
      * Keyed on `products.special_kind` rather than on a name or a category, because those are

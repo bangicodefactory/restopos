@@ -664,7 +664,7 @@ final readonly class OrderSyncService
         $wasSettled = $previousState !== null && SettledOrder::isSettled($previousState);
 
         $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device, $wasSettled);
-        $courseResults = $this->applyCourseCommands($order, (array) ($command['courses'] ?? []));
+        $courseResults = $this->applyCourseCommands($config, $order, (array) ($command['courses'] ?? []), $employeeId, $device, $wasSettled);
         $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId, $wasSettled);
 
         if ($op === 'cancel' && $previousState !== null && SettledOrder::isSettled($previousState)) {
@@ -1021,7 +1021,7 @@ final readonly class OrderSyncService
             }
 
             if ($settled) {
-                $verdict = $this->settledLineVerdict($order, $op, $command, $existing[$uuid] ?? null);
+                $verdict = $this->settledLineVerdict($config, $order, $op, $command, $existing[$uuid] ?? null);
 
                 if ($verdict === SettledOrder::Reject) {
                     $results[] = $this->refuseSettledWrite($config, $order, $device, $employeeId, 'line', $op, $uuid, [
@@ -1061,36 +1061,66 @@ final readonly class OrderSyncService
      *
      * @param  array<string, mixed>  $command
      */
-    private function settledLineVerdict(Order $order, string $op, array $command, ?int $lineId): string
+    private function settledLineVerdict(PosConfig $config, Order $order, string $op, array $command, ?int $lineId): string
     {
+        // Whether this register tips after payment at all. A counter that tips into the change cup
+        // and a restaurant that adds it to the card slip are different venues, and only the second
+        // needs a door in this guard.
+        $tipsAllowed = SettledOrder::acceptsTipAfterPayment(
+            (bool) $config->enable_tips,
+            (bool) $config->tip_after_payment,
+        );
+
         if ($op === 'delete') {
             if ($lineId === null) {
                 return SettledOrder::Noop;   // already gone; the outbox is repeating itself
             }
 
             // A tip may be taken back off, which is the same gesture as applying one.
-            return $this->isTipLine($lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+            return $tipsAllowed && $this->isTipLine($config, $lineId) ? SettledOrder::Allow : SettledOrder::Reject;
         }
 
         if ($op === 'create' || $lineId === null) {
             $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
 
-            if (! SettledOrder::isTipKind($this->variantMeta($variantId)['special_kind'] ?? null)) {
+            if (! $tipsAllowed || ! $this->isTipVariant($config, $variantId)) {
                 return SettledOrder::Reject;
             }
 
-            return $this->tipAdds($command, null) ? SettledOrder::Allow : SettledOrder::Reject;
+            return $this->tipAdds($config, $order, $command, null) ? SettledOrder::Allow : SettledOrder::Reject;
         }
 
         if ($this->lineCommandChangesNothing($lineId, $command)) {
             return SettledOrder::Noop;
         }
 
-        if (! $this->isTipLine($lineId)) {
+        if (! $tipsAllowed || ! $this->isTipLine($config, $lineId)) {
             return SettledOrder::Reject;
         }
 
-        return $this->tipAdds($command, $lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+        return $this->tipAdds($config, $order, $command, $lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+    }
+
+    /**
+     * Is this variant the register's tip product?
+     *
+     * `tip_product_id` when the config names one, and only then falls back to `special_kind`. The
+     * fallback alone let *any* product flagged as a tip in the catalogue be appended to a settled
+     * order — a venue with several is a venue where the guard picks the wrong one.
+     */
+    private function isTipVariant(PosConfig $config, int $variantId): bool
+    {
+        $meta = $this->variantMeta($variantId);
+
+        if ($meta === null) {
+            return false;
+        }
+
+        if ($config->tip_product_id !== null) {
+            return (int) $meta['product_id'] === (int) $config->tip_product_id;
+        }
+
+        return SettledOrder::isTipKind($meta['special_kind'] ?? null);
     }
 
     /**
@@ -1105,7 +1135,7 @@ final readonly class OrderSyncService
      *
      * @param  array<string, mixed>  $command
      */
-    private function tipAdds(array $command, ?int $lineId): bool
+    private function tipAdds(PosConfig $config, Order $order, array $command, ?int $lineId): bool
     {
         $line = $lineId === null ? null : OrderLine::query()->find($lineId);
 
@@ -1121,11 +1151,67 @@ final readonly class OrderSyncService
             return $stored === null ? $default : (string) $stored;
         };
 
-        return SettledOrder::tipIsAdditive(
-            $pick(['qty', 'quantity'], $line?->getRawOriginal('quantity'), '1'),
-            $pick(['price_unit'], $line?->getRawOriginal('price_unit'), '0'),
-            $pick(['discount', 'discount_percent'], $line?->getRawOriginal('discount_percent'), '0'),
+        $quantity = $pick(['qty', 'quantity'], $line?->getRawOriginal('quantity'), '1');
+        $priceUnit = $pick(['price_unit'], $line?->getRawOriginal('price_unit'), '0');
+        $discount = $pick(['discount', 'discount_percent'], $line?->getRawOriginal('discount_percent'), '0');
+
+        if (! SettledOrder::tipIsAdditive($quantity, $priceUnit, $discount)) {
+            return false;
+        }
+
+        $proposed = bcmul(
+            $quantity,
+            bcmul($priceUnit, bcsub('1', bcdiv($discount, '100', 8), 8), 6),
+            4,
         );
+
+        return SettledOrder::tipWithinCeiling(
+            bcadd($proposed, $this->tipTotal($config, $order, $lineId), 4),
+            $this->soldTotal($config, $order),
+        );
+    }
+
+    /**
+     * What this order's other tip lines already come to, excluding the one being written.
+     *
+     * Excluded so an edit is measured as a replacement rather than an addition — otherwise raising
+     * a tip from €3 to €4 would be scored as €7 and refused for the wrong reason.
+     */
+    private function tipTotal(PosConfig $config, Order $order, ?int $excludingLineId): string
+    {
+        $total = '0';
+
+        /** @var list<OrderLine> $lines */
+        $lines = OrderLine::query()->where('pos_order_id', $order->getKey())->get()->all();
+
+        foreach ($lines as $line) {
+            if ((int) $line->getKey() === $excludingLineId || ! $this->isTipLine($config, (int) $line->getKey())) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) $line->price_subtotal_incl, 4);
+        }
+
+        return $total;
+    }
+
+    /** What was actually sold on this order — everything that is not a tip. */
+    private function soldTotal(PosConfig $config, Order $order): string
+    {
+        $total = '0';
+
+        /** @var list<OrderLine> $lines */
+        $lines = OrderLine::query()->where('pos_order_id', $order->getKey())->get()->all();
+
+        foreach ($lines as $line) {
+            if ($this->isTipLine($config, (int) $line->getKey())) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) $line->price_subtotal_incl, 4);
+        }
+
+        return $total;
     }
 
     /**
@@ -1198,14 +1284,23 @@ final readonly class OrderSyncService
         return true;
     }
 
-    private function isTipLine(int $lineId): bool
+    private function isTipLine(PosConfig $config, int $lineId): bool
     {
-        $kind = $this->connection->table('pos_order_lines')
+        $row = $this->connection->table('pos_order_lines')
             ->join('products', 'products.id', '=', 'pos_order_lines.product_id')
             ->where('pos_order_lines.id', $lineId)
-            ->value('products.special_kind');
+            ->select(['pos_order_lines.product_id', 'products.special_kind'])
+            ->first();
 
-        return SettledOrder::isTipKind($kind === null ? null : (string) $kind);
+        if ($row === null) {
+            return false;
+        }
+
+        if ($config->tip_product_id !== null) {
+            return (int) $row->product_id === (int) $config->tip_product_id;
+        }
+
+        return SettledOrder::isTipKind((string) $row->special_kind);
     }
 
     /**
@@ -1526,8 +1621,14 @@ final readonly class OrderSyncService
      * @param  array<int, array<string, mixed>>  $commands
      * @return list<array<string, mixed>>
      */
-    private function applyCourseCommands(Order $order, array $commands): array
-    {
+    private function applyCourseCommands(
+        PosConfig $config,
+        Order $order,
+        array $commands,
+        ?int $employeeId = null,
+        ?PosDevice $device = null,
+        bool $settled = false,
+    ): array {
         /** @var array<string, int> $existing */
         $existing = OrderCourse::query()
             ->where('pos_order_id', $order->getKey())
@@ -1553,6 +1654,29 @@ final readonly class OrderSyncService
             }
 
             $op = (string) ($command['op'] ?? 'create');
+
+            // Courses carry no money, which is exactly why they were the easy thing to leave out —
+            // and why leaving them out is wrong. A course is what the kitchen ticket is grouped by;
+            // rewriting one after the order is paid changes the record of what was sent and when,
+            // for an order nobody should still be editing. The rule is the same as for lines: a
+            // resend passes, a change does not.
+            if ($settled) {
+                $verdict = $this->settledCourseVerdict($op, $command, $existing[$uuid] ?? null);
+
+                if ($verdict === SettledOrder::Reject) {
+                    $results[] = $this->refuseSettledWrite($config, $order, $device, $employeeId, 'course', $op, $uuid, [
+                        'name' => $command['name'] ?? null,
+                    ]);
+
+                    continue;
+                }
+
+                if ($verdict === SettledOrder::Noop) {
+                    $results[] = ['uuid' => $uuid, 'id' => $existing[$uuid] ?? null, 'status' => 'ok', 'unchanged' => true];
+
+                    continue;
+                }
+            }
 
             if ($op === 'delete') {
                 if (isset($existing[$uuid])) {
@@ -1730,6 +1854,43 @@ final readonly class OrderSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * May this course command touch a settled order? (BAN-410)
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function settledCourseVerdict(string $op, array $command, ?int $courseId): string
+    {
+        if ($op === 'delete') {
+            return $courseId === null ? SettledOrder::Noop : SettledOrder::Reject;
+        }
+
+        if ($courseId === null) {
+            return SettledOrder::Reject;
+        }
+
+        $held = OrderCourse::query()->whereKey($courseId)->first();
+
+        if ($held === null) {
+            return SettledOrder::Reject;
+        }
+
+        $changes = AuditRecorder::diff(
+            [
+                'course_index' => $held->getRawOriginal('course_index'),
+                'name' => $held->getRawOriginal('name'),
+                'fired' => $held->getRawOriginal('fired'),
+            ],
+            array_filter([
+                'course_index' => $command['index'] ?? $command['course_index'] ?? null,
+                'name' => $command['name'] ?? null,
+                'fired' => $command['fired'] ?? null,
+            ], static fn (mixed $v): bool => $v !== null),
+        );
+
+        return $changes === [] ? SettledOrder::Noop : SettledOrder::Reject;
     }
 
     /**
