@@ -68,16 +68,17 @@ sw.addEventListener('install', (event) => {
                 }),
             );
 
-            // The shell document. Without it there is no offline cold boot.
-            try {
-                const shell = await fetch(new Request(profile.shellUrl, { cache: 'reload' }));
-                if (shell.ok) {
-                    const shellCache = await sw.caches.open(names.shell);
-                    await shellCache.put(profile.shellUrl, shell);
-                }
-            } catch {
-                // Installed while offline: the first successful navigation will fill it.
-            }
+            // The shell document is deliberately NOT fetched here, and this used to be the bug.
+            //
+            // `profile.shellUrl` is a scope *prefix* — `/pos/`, `/kitchen/`, `/menu/` — and every
+            // shell route is parameterised: `/pos/{config}`, `/kitchen/{token}`, `/menu/{token}`.
+            // So `fetch('/pos/')` is a 404, `response.ok` is false, and nothing was ever cached
+            // under a comment promising "without it there is no offline cold boot". A till that had
+            // been paired and traded all day still served the not-installed page the next morning
+            // (BAN-504).
+            //
+            // The real URL is only knowable from a window, so it is captured on `activate` and on
+            // every successful navigation instead.
         })(),
     );
     // NOTE: no skipWaiting() here. The page decides when it is safe to hand over (spec 03 §8.4);
@@ -94,9 +95,41 @@ sw.addEventListener('activate', (event) => {
                     .map((key) => sw.caches.delete(key)),
             );
             // clientsClaim() is deliberately NOT called: the handover is explicit.
+
+            // The first navigation of a fresh install is not controlled by this worker, so nothing
+            // would be cached until a *second* online load — which for a till means the morning
+            // after, offline, too late. Reading the open windows costs nothing and needs no
+            // control, so the shell is captured the moment this worker activates (BAN-504).
+            await cacheShellFromClients();
         })(),
     );
 });
+
+/**
+ * Cache the real shell document of any window already in this worker's scope.
+ *
+ * The URL cannot be derived — `/pos/1` and `/pos/7` are different tills — so it is taken from the
+ * window that is open right now. Failures are ignored: a worker that activates while offline simply
+ * fills the cache on the next successful navigation.
+ */
+async function cacheShellFromClients(): Promise<void> {
+    const windows = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const cache = await sw.caches.open(names.shell);
+
+    await Promise.all(
+        windows
+            .map((client) => new URL(client.url))
+            .filter((url) => isSameOrigin(url) && inScope(url))
+            .map(async (url) => {
+                try {
+                    const response = await fetch(new Request(url.href, { cache: 'reload' }));
+                    if (response.ok) await cache.put(url.href, response);
+                } catch {
+                    // Offline at activation: the next online navigation fills it.
+                }
+            }),
+    );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fetch routing
@@ -131,8 +164,13 @@ sw.addEventListener('fetch', (event) => {
     }
 
     // 2. Hashed build assets — immutable under their URL, so cache-first.
+    //
+    //    Both caches, and that is the fix for a bug that made the precache decorative: `install`
+    //    writes to `names.precache` and this rule only ever read `names.assets`, so every file the
+    //    worker carefully downloaded at install time sat in a cache nothing consulted. Offline, the
+    //    shell loaded and every one of its scripts 404'd into a blank screen (BAN-504).
     if (url.pathname.startsWith('/build/')) {
-        event.respondWith(cacheFirst(request, names.assets));
+        event.respondWith(cacheFirstIn(request, [names.precache, names.assets], names.assets));
         return;
     }
 
@@ -178,20 +216,69 @@ async function handleNavigation(request: Request): Promise<Response> {
         // Network-first for the shell so a deploy is picked up on the next launch when online…
         const response = await fetch(request);
         if (response.ok) {
-            await cache.put(profile.shellUrl, response.clone());
+            // Keyed by the request's own URL, not by `profile.shellUrl`. The latter is a scope
+            // prefix that no route serves, so it could only ever be a synthetic key — and one that
+            // told you nothing about *which* till had been cached (BAN-504).
+            await cache.put(request.url, response.clone());
+
             return response;
         }
     } catch {
         // …and cache-fallback so a cold boot with a dead uplink still opens the till.
     }
 
-    const cached = (await cache.match(profile.shellUrl)) ?? (await cache.match(request));
+    const cached = (await cache.match(request.url)) ?? (await anyShellInScope(cache));
     if (cached) return cached;
 
     return new Response(OFFLINE_HTML, {
         status: 200,
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
+}
+
+/**
+ * Any cached shell belonging to this scope.
+ *
+ * The fallback for a deep link: a till reopened offline at `/pos/1/payment` has no entry for that
+ * exact URL, but `/pos/1` is the same document — the router reads the path once React is up. Serving
+ * the sibling is right for a single-page app and is the difference between resuming a service and
+ * staring at the not-installed page.
+ */
+async function anyShellInScope(cache: Cache): Promise<Response | undefined> {
+    for (const key of await cache.keys()) {
+        const url = new URL(key.url);
+
+        if (isSameOrigin(url) && inScope(url)) {
+            const hit = await cache.match(key);
+            if (hit) return hit;
+        }
+    }
+
+    return undefined;
+}
+
+/**
+ * Cache-first across several caches, storing a network miss in `writeTo`.
+ *
+ * The precache is authoritative and immutable; `assets` is where anything fetched at runtime lands —
+ * a lazily-imported chunk, say, which no install-time manifest can enumerate ahead of the import
+ * that needs it.
+ */
+async function cacheFirstIn(request: Request, readFrom: string[], writeTo: string): Promise<Response> {
+    for (const name of readFrom) {
+        const cache = await sw.caches.open(name);
+        const hit = await cache.match(request);
+        if (hit) return hit;
+    }
+
+    const response = await fetch(request);
+
+    if (response.ok) {
+        const cache = await sw.caches.open(writeTo);
+        await cache.put(request, response.clone());
+    }
+
+    return response;
 }
 
 async function cacheFirst(request: Request, cacheName: string): Promise<Response> {
@@ -297,13 +384,26 @@ async function wakeClientsToSync(): Promise<void> {
         return;
     }
     // No window at all: opening one is the only way the outbox can drain, and it is exactly what
-    // the OS woke us up to do.
-    await sw.clients.openWindow(profile.shellUrl);
+    // the OS woke us up to do. A cached shell key is a real document URL; `profile.shellUrl` is a
+    // scope prefix that 404s, so it is only the last resort (BAN-504).
+    await sw.clients.openWindow(await lastKnownShellUrl());
 }
 
 async function notifyClients(message: unknown): Promise<void> {
     const clients = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of clients) client.postMessage(message);
+}
+
+/** The most recently cached shell document for this scope, or the bare prefix if there is none. */
+async function lastKnownShellUrl(): Promise<string> {
+    const cache = await sw.caches.open(names.shell);
+
+    for (const key of await cache.keys()) {
+        const url = new URL(key.url);
+        if (isSameOrigin(url) && inScope(url)) return key.url;
+    }
+
+    return profile.shellUrl;
 }
 
 const OFFLINE_HTML = `<!DOCTYPE html>

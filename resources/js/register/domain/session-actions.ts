@@ -38,18 +38,56 @@ function describe(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The open session: from the server when it can be reached, from the replica when it cannot.
+ *
+ * This used to be network-only, and on failure it set an error and left the session null — so a till
+ * that booted with the line down showed "open the session" and could not sell, however complete its
+ * local replica was. Booting offline is worth nothing if the till cannot then take an order
+ * (BAN-504).
+ *
+ * The successful response is written to Dexie so the next cold boot has something to read. That is
+ * the same shape as the rest of the replica: the server is authoritative when present, and the local
+ * copy is what the till trades on when it is not.
+ */
 export async function fetchCurrentSession(): Promise<PosSessionRow | null> {
-    const { api } = getRuntime();
+    const { api, db } = getRuntime();
     const store = usePosSessionStore.getState();
+
     try {
         const response = await api.get<SessionResponse>('pos/sessions/current');
         const session = response.data?.session ?? null;
+
         store.setSession(session);
+
+        if (session) await db.sessions.put(session);
+        else await db.sessions.clear();
+
         return session;
     } catch (error) {
+        const cached = await openSessionFromDb();
+
+        if (cached) {
+            // Offline with a session already open: trade on. No error — this is the designed path,
+            // not a degraded one, and an error banner here would tell a cashier something is wrong
+            // when nothing is.
+            store.setSession(cached);
+
+            return cached;
+        }
+
         store.setError(describe(error));
+
         return null;
     }
+}
+
+/** The open session held locally, if any. */
+export async function openSessionFromDb(): Promise<PosSessionRow | null> {
+    const { db } = getRuntime();
+    const rows = await db.sessions.toArray();
+
+    return rows.find((row) => row.state !== 'closed') ?? null;
 }
 
 export async function openSession(input: {

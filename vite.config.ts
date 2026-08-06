@@ -5,6 +5,8 @@ import laravel from 'laravel-vite-plugin';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+import { appOfEntry } from './resources/js/sw/profile';
+
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
 /**
@@ -117,8 +119,25 @@ export default defineConfig({
                  * `resources/js/sw/profile.ts` a simple, reliable prefix test.
                  */
                 entryFileNames(chunk): string {
-                    const app = /resources\/js\/([^/]+)\//.exec(chunk.facadeModuleId ?? '')?.[1];
+                    const app = appOfEntry(chunk.facadeModuleId);
+
                     return app ? `assets/${app}-[name]-[hash].js` : 'assets/[name]-[hash].js';
+                },
+                /**
+                 * Lazily-split chunks get the same app prefix as entries.
+                 *
+                 * Without it a route chunk is named after its component — `Index-<hash>.js`,
+                 * `Edit-<hash>.js` — with nothing to say which app it belongs to, so the service
+                 * worker either precaches every app's pages or none of them. Prefixing lets a till
+                 * carry its own code and the shared chunks, and skip the back office entirely
+                 * (BAN-504).
+                 */
+                chunkFileNames(chunk): string {
+                    const app = chunk.moduleIds.map(appOfEntry).find((name) => name !== null);
+
+                    // `shared`, `domain` and `react` stay unprefixed: every scope needs them, and an
+                    // unprefixed name is what marks a chunk as everyone's.
+                    return app && app !== 'shared' ? `assets/${app}-[name]-[hash].js` : 'assets/[name]-[hash].js';
                 },
                 // Keep the three PWA bundles separable so each scope precaches only its own code.
                 manualChunks(id: string): string | undefined {

@@ -27,6 +27,9 @@ export default defineConfig({
         environment: 'node',
         include: [
             'packages/domain/test/**/*.test.ts',
+            // The service worker was outside the include list, which is why a precache bug that
+            // blanked the offline till went unnoticed (BAN-504).
+            'resources/js/sw/**/*.test.ts',
             'resources/js/shared/**/*.test.ts',
             'resources/js/shared/**/*.test.tsx',
             'resources/js/register/**/*.test.ts',
