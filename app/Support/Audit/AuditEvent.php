@@ -43,6 +43,11 @@ final class AuditEvent
 
     public const OrderCancelled = 'order.cancelled';
 
+    /** Money given back, and money a device tried to give back that was not owed (BAN-406). */
+    public const RefundAccepted = 'order.refund.accepted';
+
+    public const RefundRefused = 'order.refund.refused';
+
     /** A device tried to change an order that was already paid (BAN-410). */
     public const SettledOrderWriteRejected = 'order.settled_write_rejected';
 

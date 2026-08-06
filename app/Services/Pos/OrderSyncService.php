@@ -32,6 +32,7 @@ use App\Support\Money\Decimal;
 use App\Support\Pos\SettledOrder;
 use App\Support\Tax\CashRounding;
 use App\Support\Tax\Dto\OrderResult;
+use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
@@ -71,6 +72,7 @@ final readonly class OrderSyncService
         private SequenceService $sequences,
         private SessionService $sessions,
         private PreparationService $preparation,
+        private RefundService $refunds,
         private OrderEditRecorder $edits,
         private AuditRecorder $audit,
         private Dispatcher $events,
@@ -119,7 +121,25 @@ final readonly class OrderSyncService
             $results[] = $this->processCommand($config, $device, $command, $employeeId, $customerIdMap);
         }
 
-        foreach ($orders as $command) {
+        // Refunds go last, for the same reason `partner.create` goes first: a refund cannot be
+        // validated until the order it refunds exists on the server, and both can be in one batch.
+        // A till that sells offline and refunds the same order before either has synced pushes them
+        // together; without this the refund arrives first as often as not, finds nothing to link to,
+        // and is refused (BAN-406).
+        $isRefund = static function (array $command): bool {
+            foreach ((array) ($command['lines'] ?? []) as $line) {
+                if (isset(((array) $line)['refunded_line_uuid'])) {
+                    return true;
+                }
+            }
+
+            return (bool) (((array) ($command['order'] ?? []))['is_refund'] ?? false);
+        };
+
+        $sales = array_values(array_filter($orders, static fn (array $c): bool => ! $isRefund($c)));
+        $refunds = array_values(array_filter($orders, $isRefund));
+
+        foreach ([...$sales, ...$refunds] as $command) {
             $results[] = $this->processOne($config, $device, $command, $employeeId, $customerIdMap);
         }
 
@@ -663,7 +683,32 @@ final readonly class OrderSyncService
         // when this arrived", and for a brand-new order the answer is no (BAN-410).
         $wasSettled = $previousState !== null && SettledOrder::isSettled($previousState);
 
-        $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device, $wasSettled);
+        $lineCommands = (array) ($command['lines'] ?? []);
+
+        // Spec 01 §1807 — a refund references exactly one original order. Checked across the batch
+        // rather than line by line, because the violation only exists when the lines are seen
+        // together: each one on its own is a perfectly ordinary refund. A mixed refund would post
+        // credits against an order the customer never bought from.
+        $refundPlan = $this->refundPreflight($config, $order, $device, $employeeId, $uuid, $lineCommands);
+
+        if ($refundPlan['rejection'] !== null) {
+            return $refundPlan['rejection'];
+        }
+
+        $lineResults = $this->applyLineCommands($config, $order, $lineCommands, $employeeId, $device, $wasSettled, $refundPlan['links']);
+
+        // Re-read after the write, not only before it. The preflight decides on a snapshot taken
+        // under a row lock, which is the right mechanism and holds on Postgres and MySQL — but it
+        // leaves a gap the moment refund lines reach the table by any route that did not go through
+        // it, and a forced race proved the gap is reachable. This is the invariant itself rather
+        // than a check that leads to it: after everything is written, no line may have been given
+        // back more than it sold. Throwing here rolls the whole order back, because a refund that
+        // half-applied is worse than one that did not apply at all.
+        $breach = $this->refunds->firstOverRefunded(array_values($refundPlan['links']));
+
+        if ($breach !== null) {
+            throw new DomainException("Refund would exceed the quantity sold on line {$breach}.");
+        }
         $courseResults = $this->applyCourseCommands($config, $order, (array) ($command['courses'] ?? []), $employeeId, $device, $wasSettled);
         $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId, $wasSettled);
 
@@ -992,6 +1037,7 @@ final readonly class OrderSyncService
         ?int $employeeId = null,
         ?PosDevice $device = null,
         bool $settled = false,
+        array $refundLinks = [],
     ): array {
         /** @var array<string, int> $existing uuid => id */
         $existing = OrderLine::query()
@@ -1043,8 +1089,8 @@ final readonly class OrderSyncService
 
             $results[] = match ($op) {
                 'delete' => $this->deleteLine($config, $order, $existing[$uuid] ?? null, $uuid, $employeeId, $device),
-                'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device),
-                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device),
+                'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device, $refundLinks[$uuid] ?? null),
+                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device, $refundLinks[$uuid] ?? null),
             };
         }
 
@@ -1367,6 +1413,7 @@ final readonly class OrderSyncService
         array &$existing,
         ?int $employeeId = null,
         ?PosDevice $device = null,
+        ?int $refundedLineId = null,
     ): array {
         $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
         $variant = $this->variantMeta($variantId);
@@ -1402,7 +1449,10 @@ final readonly class OrderSyncService
             'combo_id' => $command['combo_id'] ?? null,
             'combo_item_id' => $command['combo_item_id'] ?? null,
             'restaurant_course_id' => $this->courseIdFor($order, $command['course_uuid'] ?? null),
-            'refunded_order_line_id' => $this->lineIdByUuid($command['refunded_line_uuid'] ?? null),
+            // Resolved through the *original* order, not by bare uuid. This was silently null on
+            // every refund ever taken: the helper it used returns null unless handed an order, and
+            // it was called without one — so the link the cap counts against did not exist.
+            'refunded_order_line_id' => $refundedLineId,
             'skip_preparation' => (bool) ($command['skip_preparation'] ?? false),
         ]);
 
@@ -1410,9 +1460,184 @@ final readonly class OrderSyncService
 
         $this->syncLineAttributes((int) $line->getKey(), (int) $variant['product_id'], $command);
 
+        if ($refundedLineId !== null) {
+            $this->refunds->refreshRefundedQuantity($refundedLineId);
+            $this->recordRefund($config, $order, $line, $device, $employeeId);
+        }
+
         $this->edits->lineAdded($config, $order, $line, $employeeId, $device);
 
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
+    }
+
+    /**
+     * Validate every refund line on this order **before any of it is written**, and return the
+     * links the write pass will use.
+     *
+     * Order-level, not line-level, and that is the whole point. A per-line rejection is invisible:
+     * the client reads `results[].status` for the *order*, applies the ack, marks it synced and
+     * retires the outbox entry — so a refused refund line vanishes with the cashier told nothing
+     * and the order recorded as fully accepted. Refusing the order instead quarantines the entry
+     * and surfaces it to a manager. A refund that is visibly stuck beats one that is silently gone.
+     *
+     * The running tally is what makes two refund lines against the *same* original line in one push
+     * add up rather than each being measured against the same starting point.
+     *
+     * @param  array<int, array<string, mixed>>  $lineCommands
+     * @return array{rejection: array<string, mixed>|null, links: array<string, int>}
+     */
+    private function refundPreflight(
+        PosConfig $config,
+        Order $order,
+        ?PosDevice $device,
+        ?int $employeeId,
+        string $uuid,
+        array $lineCommands,
+    ): array {
+        $links = [];
+        $claimed = [];   // original line id => quantity claimed so far in this push
+
+        // Spec 01 §1807 — a refund references exactly one original order. Only visible when the
+        // lines are looked at together: each one alone is a perfectly ordinary refund.
+        $originalOrders = $this->refunds->originalOrderIds($lineCommands);
+
+        if (count($originalOrders) > 1) {
+            return [
+                'rejection' => $this->refuseRefund($config, $order, $device, $employeeId, $uuid, [
+                    'code' => 'refund_spans_orders',
+                    'message' => 'A refund may reference only one original order.',
+                ], []),
+                'links' => [],
+            ];
+        }
+
+        foreach ($lineCommands as $command) {
+            $command = (array) $command;
+            $lineUuid = (string) ($command['uuid'] ?? '');
+            $quantity = $command['qty'] ?? $command['quantity'] ?? null;
+
+            if ($lineUuid === '' || ! $this->refunds->isRefundLine($quantity)) {
+                continue;
+            }
+
+            // An update to a refund line already on the server keeps its own link.
+            $existing = OrderLine::query()
+                ->where('uuid', $lineUuid)
+                ->where('pos_order_id', $order->getKey())
+                ->first();
+
+            $originalLineId = $existing?->refunded_order_line_id === null
+                ? $this->refunds->targetLineId($order, $command)
+                : (int) $existing->refunded_order_line_id;
+
+            if ($originalLineId === null) {
+                // Required, not optional. Without the link the cap has nothing to count against, so
+                // omitting the field would be a way to refund without limit.
+                return [
+                    'rejection' => $this->refuseRefund($config, $order, $device, $employeeId, $lineUuid, [
+                        'code' => 'refund_unlinked',
+                        'message' => 'A refund line must reference a line on the original order.',
+                    ], $command),
+                    'links' => [],
+                ];
+            }
+
+            $original = OrderLine::query()->find($originalLineId);
+
+            if ($original === null) {
+                return [
+                    'rejection' => $this->refuseRefund($config, $order, $device, $employeeId, $lineUuid, [
+                        'code' => 'refund_unlinked',
+                        'message' => 'The line being refunded no longer exists.',
+                    ], $command),
+                    'links' => [],
+                ];
+            }
+
+            $alreadyRefunded = $this->refunds->alreadyRefunded($originalLineId, $existing === null ? null : (int) $existing->getKey());
+            $remaining = $this->refunds->remaining($original, $alreadyRefunded);
+            $requested = bcmul((string) $quantity, '-1', 6);
+            $claimed[$originalLineId] = bcadd($claimed[$originalLineId] ?? '0', $requested, 6);
+
+            if (bccomp($claimed[$originalLineId], $remaining, 6) > 0) {
+                return [
+                    'rejection' => $this->refuseRefund($config, $order, $device, $employeeId, $lineUuid, [
+                        'code' => 'refund_exceeds_sold',
+                        'message' => "Only {$remaining} of that line remains refundable.",
+                    ], $command),
+                    'links' => [],
+                ];
+            }
+
+            $links[$lineUuid] = $originalLineId;
+        }
+
+        return ['rejection' => null, 'links' => $links];
+    }
+
+    /**
+     * Record a refused refund on the trail, and shape the order-level rejection.
+     *
+     * @param  array{code: string, message: string}  $verdict
+     * @param  array<string, mixed>  $command
+     * @return array<string, mixed>
+     */
+    private function refuseRefund(
+        PosConfig $config,
+        Order $order,
+        ?PosDevice $device,
+        ?int $employeeId,
+        string $uuid,
+        array $verdict,
+        array $command,
+    ): array {
+        $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::Rejected, $order->uuid, [
+            'reason' => $verdict['code'],
+            'line_uuid' => $uuid,
+        ]);
+
+        $this->audit->record(
+            event: AuditEvent::RefundRefused,
+            subject: $order,
+            companyId: (int) $order->company_id,
+            severity: AuditSeverity::Critical,
+            message: $verdict['message'],
+            changes: array_map(
+                static fn (mixed $value): array => ['old' => null, 'new' => $value],
+                array_filter([
+                    'code' => $verdict['code'],
+                    'line_uuid' => $uuid,
+                    'refunded_line_uuid' => $command['refunded_line_uuid'] ?? null,
+                    'quantity' => $command['qty'] ?? $command['quantity'] ?? null,
+                ], static fn (mixed $v): bool => $v !== null),
+            ),
+            config: $config,
+            session: $order->pos_session_id,
+            employeeId: $employeeId,
+            device: $device,
+        );
+
+        return $this->rejected((string) $order->uuid, $verdict['code'], $verdict['message']);
+    }
+
+    /** Record an accepted refund. Money leaving the drawer is worth a row of its own. */
+    private function recordRefund(PosConfig $config, Order $order, OrderLine $line, ?PosDevice $device, ?int $employeeId): void
+    {
+        $this->audit->record(
+            event: AuditEvent::RefundAccepted,
+            subject: $order,
+            companyId: (int) $order->company_id,
+            severity: AuditSeverity::Notice,
+            message: "Refunded {$line->quantity} × {$line->full_product_name}",
+            changes: [
+                'quantity' => ['old' => null, 'new' => (string) $line->quantity],
+                'refunded_order_line_id' => ['old' => null, 'new' => (int) $line->refunded_order_line_id],
+            ],
+            config: $config,
+            session: $order->pos_session_id,
+            employeeId: $employeeId,
+            device: $device,
+        );
     }
 
     /**
@@ -1427,6 +1652,7 @@ final readonly class OrderSyncService
         string $uuid,
         ?int $employeeId = null,
         ?PosDevice $device = null,
+        ?int $refundedLineId = null,
     ): array {
         /** @var OrderLine|null $line */
         $line = OrderLine::query()->find($id);
@@ -1468,6 +1694,12 @@ final readonly class OrderSyncService
             }
         }
 
+        // The link is server-owned: a client may edit a refund's quantity (the preflight has already
+        // capped it) but never what it points at.
+        if ($refundedLineId !== null && $line->refunded_order_line_id === null) {
+            $update['refunded_order_line_id'] = $refundedLineId;
+        }
+
         // `is_edited` used to be set on every update command, which meant every line on every order
         // — the register re-pushes a draft on each change and again at payment, so an untouched line
         // was flagged as edited within seconds of being rung up. The flag is what a back-office
@@ -1491,6 +1723,12 @@ final readonly class OrderSyncService
         }
 
         $line->forceFill($update)->save();
+
+        if ($line->refunded_order_line_id !== null) {
+            // A draft refund can be edited, so the cap has to hold here too — otherwise a device
+            // creates a refund of one unit, has it accepted, and then edits it to ten.
+            $this->refunds->refreshRefundedQuantity((int) $line->refunded_order_line_id);
+        }
 
         // A resent line carries its options; re-sync them (replace-on-write) so an edit that
         // adds or clears an option is reflected. A note-only update omits the keys and no-ops.

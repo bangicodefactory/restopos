@@ -94,6 +94,31 @@ it('rejects a client payment that asserts is_change with a positive amount', fun
 it('never books change on a refund order (negative total is not an overpayment)', function (): void {
     // A refund has a negative total and no tender; changeDue reads positive there, so without the
     // tender guard it would book phantom change — and reject the refund when no cash method exists.
+    // Sold first: since BAN-406 a negative line must name the line it refunds, so a refund with
+    // nothing behind it is refused outright — which is also the only shape the till can produce.
+    $soldUuid = (string) Str::uuid();
+    $soldLine = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [[
+            'uuid' => $soldUuid,
+            'op' => 'upsert',
+            'order' => [
+                'session_id' => $this->fx->session->getKey(),
+                'state' => OrderState::Paid->value,
+                'access_token' => (string) Str::uuid(),
+            ],
+            'lines' => [[
+                'op' => 'create', 'uuid' => $soldLine,
+                'variant_id' => $this->fx->variant->getKey(), 'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+            ]],
+            'payments' => [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '12.10',
+            ]],
+        ]],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
     $uuid = (string) Str::uuid();
 
     $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
@@ -104,11 +129,13 @@ it('never books change on a refund order (negative total is not an overpayment)'
                 'session_id' => $this->fx->session->getKey(),
                 'state' => OrderState::Draft->value,
                 'is_refund' => true,
+                'refunded_order_uuid' => $soldUuid,
                 'access_token' => (string) Str::uuid(),
             ],
             'lines' => [[
                 'op' => 'create', 'uuid' => (string) Str::uuid(),
                 'variant_id' => $this->fx->variant->getKey(), 'qty' => '-1', 'price_unit' => '10.00', 'discount' => '0',
+                'refunded_line_uuid' => $soldLine,
             ]],
             'payments' => [],
         ]],

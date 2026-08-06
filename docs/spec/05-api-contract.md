@@ -1112,7 +1112,7 @@ Endpoints the front-ends should **not** expect. Each is a deliberate gap, not an
 
 | Area | Status |
 |---|---|
-| Refund creation endpoint | Refunds sync as ordinary orders with negative quantities and `is_refund`/`refunded_order_id`. The server-side refundable-quantity cap under a row lock (spec 03 §3.7) is not enforced yet. |
+| Refund creation endpoint | Refunds sync as ordinary orders with negative quantities and `is_refund`/`refunded_order_id`. The refundable-quantity cap (spec 03 §3.7) **is** enforced as of BAN-406: every negative line must name the line it refunds (`refunded_line_uuid`), the total is capped under a row lock on the original line and re-checked after the write, and a refund may reference exactly one original order. Rejections come back at **order** level — `refund_unlinked`, `refund_exceeds_sold`, `refund_spans_orders` — because a per-line rejection is invisible to the client, which reads the order's status, applies the ack and retires the outbox entry. |
 | Invoicing (`pos_invoices`) | No endpoint. `to_invoice` is stored and ignored. |
 | Loyalty | No endpoint. `enable_loyalty` is stored and ignored. |
 | Split bill | No dedicated endpoint; a split is two synced orders today. `enable_split_bill` is only a capability flag. |
