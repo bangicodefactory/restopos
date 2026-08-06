@@ -659,3 +659,90 @@ it('bounds the detail a till can attach to an event', function (): void {
         // …and the field that matters still made it through.
         ->and($log->changes['reason']['new'])->toBe('no_sale');
 });
+
+// ---------------------------------------------------------------- signs, and the refund case
+
+it('points the impact the right way when a refund line is removed', function (): void {
+    // A refund line carries a negative extended amount, so taking one off the ticket puts money
+    // *back*. The first cut of this hardcoded a minus sign, which reported removing a −€20 refund
+    // as another €20 taken off — in the one column a fraud report ranks by, on the one kind of
+    // order fraud actually lives in.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        line($this->fx, $lineUuid, ['qty' => '-2']),
+    ], ['is_refund' => true])]])->assertOk();
+
+    // Adding the refund line takes €20 off the ticket…
+    expect((string) editLogs(OrderEditAction::LineAdded)->first()->amount_impact)->toBe('-20.0000');
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        ['op' => 'delete', 'uuid' => $lineUuid],
+    ])]])->assertOk();
+
+    // …and removing it puts the €20 back.
+    expect((string) editLogs(OrderEditAction::LineRemoved)->first()->amount_impact)->toBe('20.0000');
+});
+
+it('points the impact the right way when a refund order is cancelled', function (): void {
+    $orderUuid = (string) Str::uuid();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        line($this->fx, (string) Str::uuid(), ['qty' => '-2']),
+    ], ['is_refund' => true])]])->assertOk();
+
+    OrderEditLog::query()->delete();
+
+    $cancel = $this->fx->orderCommand($orderUuid, []);
+    $cancel['op'] = 'cancel';
+    $cancel['lines'] = [];
+
+    push($this->fx, ['orders' => [$cancel]])->assertOk();
+
+    $total = (string) Order::query()->where('uuid', $orderUuid)->value('amount_total');
+    $impact = (string) editLogs(OrderEditAction::OrderCancelled)->first()->amount_impact;
+
+    expect(bccomp($total, '0', 4))->toBeLessThan(0)
+        ->and(bccomp($impact, '0', 4))->toBeGreaterThan(0);
+});
+
+it('logs a change to the option surcharge', function (): void {
+    // `price_extra` was compared but not tracked: raising it flipped `is_edited` and wrote no row,
+    // so a manager opening the flagged order found nothing that explained the flag.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        line($this->fx, $lineUuid, ['qty' => '1', 'price_extra' => '0']),
+    ])]])->assertOk();
+
+    OrderEditLog::query()->delete();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        ['op' => 'update', 'uuid' => $lineUuid, 'price_extra' => '5.00'],
+    ])]])->assertOk();
+
+    $row = editLogs(OrderEditAction::PriceChanged)->first();
+
+    expect($row)->not->toBeNull()
+        ->and($row->new_value)->toBe('5')
+        ->and((string) $row->amount_impact)->toBe('5.0000');
+});
+
+it('does not reject an order over a quantity bcmath cannot read', function (): void {
+    // `is_numeric('1e2')` is true and `bccomp('1e2', …)` throws a ValueError. Thrown from inside the
+    // ingest transaction, that means a client sending exponent notation does not get a warning about
+    // a bad value — it gets its **order rejected**, by the audit trail. A trail that can refuse a
+    // sale is worse than no trail.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [line($this->fx, $lineUuid)])]])->assertOk();
+
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
+        ['op' => 'update', 'uuid' => $lineUuid, 'qty' => '1e2'],
+    ])]])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
+});

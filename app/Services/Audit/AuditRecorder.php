@@ -140,7 +140,7 @@ final readonly class AuditRecorder
      */
     private static function same(mixed $old, mixed $new): bool
     {
-        if (is_numeric($old) && is_numeric($new)) {
+        if (self::bcSafe($old) && self::bcSafe($new)) {
             return bccomp((string) $old, (string) $new, 6) === 0;
         }
 
@@ -149,6 +149,24 @@ final readonly class AuditRecorder
         }
 
         return (string) ($old ?? '') === (string) ($new ?? '');
+    }
+
+    /**
+     * Is this something `bccomp` will actually accept?
+     *
+     * `is_numeric()` is the obvious test and it is wrong here: it accepts `'1e2'` and `' 3'`, and
+     * bcmath throws a `ValueError` on both. Thrown from inside the ingest transaction that means a
+     * client sending a quantity in exponent notation does not get a bad-value warning — it gets its
+     * order **rejected**, and the audit trail is what rejected it. (`TrimStrings` happens to cover
+     * the whitespace case; nothing covers the exponent one.)
+     *
+     * Anything that fails here falls through to the string comparison below, which is the correct
+     * outcome anyway: a value bcmath cannot read is not a number we can meaningfully diff.
+     */
+    public static function bcSafe(mixed $value): bool
+    {
+        return (is_string($value) || is_int($value) || is_float($value))
+            && preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', (string) $value) === 1;
     }
 
     private function companyOf(Model $subject): ?int

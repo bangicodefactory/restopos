@@ -42,6 +42,10 @@ final readonly class OrderEditRecorder
     private const Tracked = [
         'quantity' => OrderEditAction::QtyIncreased,   // direction resolved per row
         'price_unit' => OrderEditAction::PriceChanged,
+        // The option surcharge ("extra cheese, +2.00") is as much a price change to the ticket as
+        // the base price is. It was compared but not tracked, so raising it flipped `is_edited`
+        // and wrote no row — a manager opening the flagged order found nothing that explained it.
+        'price_extra' => OrderEditAction::PriceChanged,
         'discount_percent' => OrderEditAction::DiscountChanged,
         'customer_note' => OrderEditAction::NoteChanged,
     ];
@@ -135,7 +139,11 @@ final readonly class OrderEditRecorder
 
         $this->write($order, $line, $line->uuid, OrderEditAction::LineRemoved, [
             'old_value' => $this->trim((string) $line->quantity),
-            'amount_impact' => '-'.ltrim($this->extended($line), '-'),
+            // Negated, not forced negative. A refund line carries a *negative* extended amount, so
+            // taking one off the ticket puts money back — and a hardcoded minus reported that as
+            // another twenty euros removed. `amount_impact` is what a fraud report ranks by, so the
+            // one place the sign is inverted is the one place it must not be.
+            'amount_impact' => bcmul($this->extended($line), '-1', 4),
         ], $employeeId, $device);
     }
 
@@ -153,7 +161,7 @@ final readonly class OrderEditRecorder
             return;
         }
 
-        if ($oldAmount !== null && $newAmount !== null && bccomp($oldAmount, $newAmount, 4) === 0) {
+        if ($oldAmount !== null && $newAmount !== null && bccomp($this->num($oldAmount), $this->num($newAmount), 4) === 0) {
             return;
         }
 
@@ -161,7 +169,7 @@ final readonly class OrderEditRecorder
             'product_name' => $label,
             'old_value' => $oldAmount === null ? null : $this->trim($oldAmount),
             'new_value' => $newAmount === null ? null : $this->trim($newAmount),
-            'amount_impact' => bcsub($newAmount ?? '0', $oldAmount ?? '0', 4),
+            'amount_impact' => bcsub($this->num($newAmount), $this->num($oldAmount), 4),
         ], $employeeId, $device);
     }
 
@@ -178,7 +186,9 @@ final readonly class OrderEditRecorder
 
         $this->write($order, null, null, OrderEditAction::OrderCancelled, [
             'old_value' => $this->trim((string) $order->amount_total),
-            'amount_impact' => '-'.ltrim((string) $order->amount_total, '-'),
+            // Negated for the same reason as a removed line: cancelling a refund order hands money
+            // back to the venue, not away from it.
+            'amount_impact' => bcmul($this->num($order->amount_total), '-1', 4),
         ], $employeeId, $device);
     }
 
@@ -194,9 +204,27 @@ final readonly class OrderEditRecorder
             return $default;
         }
 
-        return bccomp((string) $new, (string) $old, 6) < 0
+        return bccomp($this->num($new), $this->num($old), 6) < 0
             ? OrderEditAction::QtyDecreased
             : OrderEditAction::QtyIncreased;
+    }
+
+    /**
+     * A value bcmath will accept, or `'0'`.
+     *
+     * Everything on the `new` side of a row comes straight off the wire, and bcmath is stricter than
+     * `is_numeric`: `'1e2'` passes the latter and makes the former throw a `ValueError`. Thrown from
+     * inside the ingest transaction that does not produce a warning about a bad quantity — it
+     * **rejects the order**, and the audit trail is what rejected it. A till whose sale is refused
+     * because the fraud log could not parse a number has traded the wrong thing away.
+     *
+     * A garbage value is therefore recorded as an edit (it is one) with an impact of zero, rather
+     * than guessed at. `old_value` / `new_value` still carry what was actually sent, so the row says
+     * what happened even when the arithmetic cannot.
+     */
+    private function num(mixed $value): string
+    {
+        return AuditRecorder::bcSafe($value) ? (string) $value : '0';
     }
 
     /**
@@ -210,25 +238,26 @@ final readonly class OrderEditRecorder
     private function impactOf(string $field, OrderLine $line, array $before, mixed $old, mixed $new): string
     {
         $unit = $this->unitPrice(
-            (string) ($before['price_unit'] ?? $line->price_unit),
-            (string) ($before['price_extra'] ?? $line->price_extra),
-            (string) ($before['discount_percent'] ?? $line->discount_percent),
+            $this->num($before['price_unit'] ?? $line->price_unit),
+            $this->num($before['price_extra'] ?? $line->price_extra),
+            $this->num($before['discount_percent'] ?? $line->discount_percent),
         );
-        $qty = (string) ($before['quantity'] ?? $line->quantity);
+        $qty = $this->num($before['quantity'] ?? $line->quantity);
 
         return match ($field) {
             // (new − old) at the price the line was carrying.
-            'quantity' => bcmul(bcsub((string) $new, (string) $old, 6), $unit, 4),
+            'quantity' => bcmul(bcsub($this->num($new), $this->num($old), 6), $unit, 4),
 
-            // A price move applies to every unit on the line.
-            'price_unit' => bcmul(bcsub((string) $new, (string) $old, 6), $qty, 4),
+            // A price move applies to every unit on the line. `price_extra` is the same arithmetic
+            // on the same line, which is why they share a branch.
+            'price_unit', 'price_extra' => bcmul(bcsub($this->num($new), $this->num($old), 6), $qty, 4),
 
             // A discount *increase* removes revenue, hence the negation.
             'discount_percent' => bcmul(
-                bcmul(bcdiv(bcsub((string) $old, (string) $new, 6), '100', 8), $qty, 6),
+                bcmul(bcdiv(bcsub($this->num($old), $this->num($new), 6), '100', 8), $qty, 6),
                 $this->unitPrice(
-                    (string) ($before['price_unit'] ?? $line->price_unit),
-                    (string) ($before['price_extra'] ?? $line->price_extra),
+                    $this->num($before['price_unit'] ?? $line->price_unit),
+                    $this->num($before['price_extra'] ?? $line->price_extra),
                     '0',
                 ),
                 4,
@@ -243,17 +272,17 @@ final readonly class OrderEditRecorder
     private function extended(OrderLine $line): string
     {
         return bcmul(
-            (string) $line->quantity,
-            $this->unitPrice((string) $line->price_unit, (string) $line->price_extra, (string) $line->discount_percent),
+            $this->num($line->quantity),
+            $this->unitPrice($this->num($line->price_unit), $this->num($line->price_extra), $this->num($line->discount_percent)),
             4,
         );
     }
 
     private function unitPrice(string $priceUnit, string $priceExtra, string $discountPercent): string
     {
-        $gross = bcadd($priceUnit, $priceExtra === '' ? '0' : $priceExtra, 6);
+        $gross = bcadd($priceUnit, $priceExtra, 6);
 
-        return bcmul($gross, bcsub('1', bcdiv($discountPercent === '' ? '0' : $discountPercent, '100', 8), 8), 6);
+        return bcmul($gross, bcsub('1', bcdiv($discountPercent, '100', 8), 8), 6);
     }
 
     /**
