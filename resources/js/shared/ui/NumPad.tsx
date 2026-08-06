@@ -133,7 +133,18 @@ export function NumPad({
     return (
         <div className={cn('grid gap-2', sideKeys ? 'grid-cols-4' : 'grid-cols-3', className)}>
             {KEYS.map((key) => (
-                <Button key={key} size="xl" variant="secondary" disabled={disabled} onClick={() => press(key)}>
+                <Button
+                    key={key}
+                    size="xl"
+                    variant="secondary"
+                    disabled={disabled}
+                    onClick={() => press(key)}
+                    // Addressed by value rather than by visible text: a spec typing a PIN should not
+                    // depend on the glyph, and `getByRole('button', { name: '1' })` also matches a
+                    // table numbered 1 elsewhere on screen (BAN-505).
+                    data-testid="numpad-key"
+                    data-key={key}
+                >
                     {key}
                 </Button>
             ))}
@@ -175,6 +186,9 @@ export function NumPad({
                     disabled={disabled}
                     className="col-span-2"
                     onClick={() => onConfirm(valueRef.current)}
+                    // The label varies by caller — "Ouvrir la caisse" on login, "Déverrouiller" on
+                    // the lock screen, "OK" elsewhere — so the hook is what a spec addresses.
+                    data-testid="numpad-confirm"
                 >
                     {confirmLabel}
                 </Button>

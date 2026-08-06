@@ -87,7 +87,7 @@ export async function openTill(page: Page, request: APIRequestContext): Promise<
     );
 
     await page.goto(registerUrl());
-    await page.getByRole('textbox').first().fill(code as string);
+    await page.getByTestId('pairing-code').fill(code as string);
     await page.getByRole('button', { name: 'Appairer' }).click();
 
     await signIn(page);
@@ -95,16 +95,44 @@ export async function openTill(page: Page, request: APIRequestContext): Promise<
 
 /** Employee sign-in: pick the name, tap the PIN, open the till. */
 export async function signIn(page: Page): Promise<void> {
+    // The employee is chosen by name on purpose — that is the text a human reads off the screen,
+    // and asserting it is asserting something real. Everything structural below goes through a test
+    // id (BAN-505).
     const employee = page.getByRole('button', { name: employeeName() });
     await expect(employee).toBeVisible({ timeout: 30_000 });
     await employee.click();
 
-    for (const digit of pin().split('')) {
-        await page.getByRole('button', { name: digit, exact: true }).click();
-    }
+    await typePin(page, pin());
+    await page.getByTestId('numpad-confirm').click();
 
-    await page.getByRole('button', { name: 'Ouvrir la caisse' }).click();
-    await expect(page.getByRole('button', { name: '+ Nouvelle commande' })).toBeVisible({ timeout: 30_000 });
+    await expect(till(page)).toBeVisible({ timeout: 30_000 });
+}
+
+/** Tap a code into whichever numpad is on screen. */
+export async function typePin(page: Page, code: string): Promise<void> {
+    for (const digit of code.split('')) {
+        await page.getByTestId('numpad-key').and(page.locator(`[data-key="${digit}"]`)).click();
+    }
+}
+
+/** The product grid's "new order" button — the marker that the till is open for business. */
+export function till(page: Page) {
+    return page.getByRole('button', { name: '+ Nouvelle commande' });
+}
+
+/** A table on the floor plan, addressed by its number rather than its localised label. */
+export function tableTile(page: Page, tableNumber: number | string) {
+    return page.getByTestId('table-tile').and(page.locator(`[data-table-number="${tableNumber}"]`));
+}
+
+/** The fire button for one course. */
+export function courseFire(page: Page, index: number) {
+    return page.getByTestId('course-fire').and(page.locator(`[data-course-index="${index}"]`));
+}
+
+/** The order's running total, as the raw value rather than a formatted string. */
+export async function orderTotalValue(page: Page): Promise<string> {
+    return (await orderTotal(page).getAttribute('data-order-total')) ?? '';
 }
 
 /**
@@ -128,14 +156,29 @@ export async function resumeAfterReload(page: Page): Promise<void> {
     await expect(till).toBeVisible({ timeout: 30_000 });
 }
 
-/** Add a product to the current order by its visible name. */
+/**
+ * Add a product to the current order by its visible name.
+ *
+ * Still by name: which product a spec adds is a domain choice a reader needs to see, and the tile's
+ * name is stable text rather than a state-dependent label. `data-testid="product-tile"` scopes it to
+ * the grid so the match cannot land on the same name rendered in the order panel.
+ */
 export async function addProduct(page: Page, name: string): Promise<void> {
-    await page.getByRole('button', { name: new RegExp(`^${escapeRegExp(name)}`) }).first().click();
+    await page
+        .getByTestId('product-tile')
+        .filter({ hasText: new RegExp(`^${escapeRegExp(name)}`) })
+        .first()
+        .click();
 }
 
-/** The payment button doubles as the order's running total, which is the cheapest thing to assert. */
+/** The payment button, which doubles as the order's running total. */
 export function orderTotal(page: Page) {
-    return page.getByRole('button', { name: /Paiement/ });
+    return page.getByTestId('order-total');
+}
+
+/** The lines currently on the order. */
+export function orderLines(page: Page) {
+    return page.getByTestId('order-line');
 }
 
 export async function xsrf(request: APIRequestContext): Promise<string> {

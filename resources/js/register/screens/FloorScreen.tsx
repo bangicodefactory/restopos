@@ -208,6 +208,11 @@ function TableTile({
         <button
             type="button"
             onClick={onTap}
+            // A table's only accessible name is "<number> <n> places" — localised, and it changes
+            // with the cover count. Specs address it by these instead (BAN-505).
+            data-testid="table-tile"
+            data-table-number={table.table_number}
+            data-occupied={occupied ? 'true' : 'false'}
             style={{
                 position: 'absolute',
                 left: table.position_h,

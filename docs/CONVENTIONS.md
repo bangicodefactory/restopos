@@ -107,3 +107,33 @@ Shared aliases (configured in `vite.config.ts` and `tsconfig.json`):
   (not one per table) with the domain prefix in the filename, e.g.
   `2025_01_01_000300_create_catalog_tables.php`.
 - Every migration file lists at the top, in a comment, the tables it creates.
+
+## Test hooks (`data-testid`)
+
+E2E specs address **structure** by test id and **content** by what a human reads. The split is the
+whole convention:
+
+- **Test id** for anything a spec has to *find*: a tile, a row, a keypad key, a submit button. These
+  are structural identity, and their visible labels are localised and state-dependent.
+- **Role and text** for anything a spec *asserts*: a product name, a total, a warning. A cashier
+  reads those, so a test that reads them is testing something real.
+
+Selecting structure by label is what made the register suite unbuildable. Concrete examples, all of
+them real:
+
+- a table's accessible name is `"1 2 places"` — the number *and* its cover count, both translated
+- the kitchen fire button reads `"Envoyer (1)"` with one course and `"Lancer le service 1"` with two
+- `getByRole('button', { name: '1' })` matches a keypad key **and** table number 1
+
+Rules:
+
+- Name the id for the thing, not the screen: `table-tile`, `order-line`, `numpad-key`.
+- Put the identifying value in its own `data-*` attribute rather than in the id, so a spec can
+  address one instance: `data-table-number`, `data-course-index`, `data-key`, `data-line-uuid`.
+- Expose a raw value next to a formatted one when a spec would otherwise parse currency or a date:
+  `data-order-total` carries `24.2000` beside the rendered `24,20 €`.
+- Add them when you build the component. Retrofitting means guessing which label was stable, and
+  the guess is wrong on the state you did not have on screen at the time.
+
+The helpers in `tests/e2e/support/register.ts` wrap these, so specs read `tableTile(page, 2)` rather
+than repeating locator plumbing.

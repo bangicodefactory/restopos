@@ -271,6 +271,11 @@ export function OrderPanel({
                         disabled={lines.length === 0}
                         onClick={() => (payNeedsPrompt ? openDialog('sendBeforePay', {}) : onPay())}
                         className={restaurant ? '' : 'col-span-2'}
+                        // Doubles as the order's running total, which is the cheapest thing for a
+                        // spec to assert — and `data-order-total` carries the raw value, so an
+                        // assertion need not parse a localised, currency-formatted string.
+                        data-testid="order-total"
+                        data-order-total={totals.roundedTotal}
                     >
                         {t('reg.order.pay')} · {money(totals.roundedTotal)}
                     </Button>
@@ -297,7 +302,16 @@ function CourseHeader({ course, onFire }: { course: CourseRow; onFire: () => voi
             {course.fired ? (
                 <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs text-ok-fg">{t('reg.order.fired')}</span>
             ) : (
-                <button type="button" className="min-h-touch text-brand-700 underline" onClick={onFire}>
+                <button
+                    type="button"
+                    className="min-h-touch text-brand-700 underline"
+                    onClick={onFire}
+                    // The label is "Lancer le service N" here but the whole-order button reads
+                    // "Envoyer (N)", and which one exists depends on how many courses there are —
+                    // so a spec written against either label is wrong half the time (BAN-505).
+                    data-testid="course-fire"
+                    data-course-index={course.index}
+                >
                     {t('reg.order.fireCourse', { index: course.index })}
                 </button>
             )}
@@ -335,6 +349,9 @@ function LineRow({
 
     return (
         <li
+            data-testid="order-line"
+            data-line-uuid={line.uuid}
+            data-product-id={line.product_id}
             className={cn(
                 'flex items-start gap-2 border-b border-slate-100 px-3 py-2',
                 selected && 'bg-brand-50 ring-1 ring-inset ring-brand-300',

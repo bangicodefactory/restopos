@@ -129,6 +129,8 @@ function ProductCard({
         <button
             type="button"
             onClick={() => onPick(product)}
+            data-testid="product-tile"
+            data-product-id={product.id}
             onPointerDown={() => {
                 if (!onLongPress) return;
                 timer = setTimeout(() => onLongPress(product), 550);
