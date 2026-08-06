@@ -1454,6 +1454,14 @@ export function applyServerAck(
         sequence_number?: number | null;
         /** Server-minted (BAN-496); the local one is a placeholder until the ack lands. */
         access_token?: string | null;
+        /**
+         * The number the server assigned, which may differ from the one this till proposed.
+         *
+         * The till mints its own from a local counter, offline, where nothing can be checked — so
+         * a till paired into a session that already holds `001` proposes a number that is taken.
+         * The server reassigns, and the customer is called by *its* answer (BAN-506).
+         */
+        tracking_number?: string | null;
         state?: string;
         amounts?: Partial<
             Pick<
@@ -1483,6 +1491,10 @@ export function applyServerAck(
         // The server mints the access token, so adopt it — otherwise the local placeholder sticks
         // around as the wrong answer to "which channel is this order broadcast on?" (BAN-496).
         if (ack.access_token != null) order.access_token = ack.access_token;
+        // Adopted for the same reason as the token above: the kitchen prints this and the counter
+        // calls it, so a till still showing its own guess would be calling a number nobody else
+        // has (BAN-506).
+        if (ack.tracking_number != null) order.tracking_number = ack.tracking_number;
         if (ack.amounts) Object.assign(order, ack.amounts);
         order.syncState = 'synced';
         order.syncError = null;

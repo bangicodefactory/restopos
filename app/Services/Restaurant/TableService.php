@@ -13,6 +13,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Restaurant\OrderCourse;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Kitchen\PreparationService;
+use App\Services\Pos\SequenceService;
 use DomainException;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
@@ -36,6 +37,7 @@ final readonly class TableService
     public function __construct(
         private ConnectionInterface $connection,
         private PreparationService $preparation,
+        private SequenceService $sequences,
         private Dispatcher $events,
     ) {}
 
@@ -131,6 +133,11 @@ final readonly class TableService
                 'name' => null,
                 'sequence_number' => null,
                 'access_token' => (string) Str::uuid(),
+                // A fresh number, not the one in the restore payload. The merge soft-deleted the
+                // source, and a soft-deleted row keeps its number under
+                // `pos_orders_session_tracking_unique` — so restoring the original number collides
+                // with the row it was copied from and fails the unmerge outright (BAN-506).
+                'tracking_number' => $this->sequences->availableTrackingNumber($target->session),
                 'state' => OrderState::Draft->value,
                 'restaurant_table_id' => $record->source_table_id,
                 'ordered_at' => now(),

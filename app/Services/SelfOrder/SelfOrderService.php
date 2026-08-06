@@ -29,12 +29,14 @@ use App\Services\Pos\BootstrapService;
 use App\Services\Pos\ComboCartPricer;
 use App\Services\Pos\OrderSyncService;
 use App\Services\Pos\PricingService;
+use App\Services\Pos\SequenceService;
 use App\Services\Pos\SessionService;
 use DomainException;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * The public self-order surface (spec 02 SLF-001…SLF-129).
@@ -57,6 +59,7 @@ final readonly class SelfOrderService
         private PricingService $pricing,
         private ComboCartPricer $comboPricer,
         private SessionService $sessions,
+        private SequenceService $sequences,
         private PreparationService $preparation,
         private PaymentProvider $payments,
         private Dispatcher $events,
@@ -613,40 +616,16 @@ final readonly class SelfOrderService
      * person. Now the lowest free number in the session, so the first collision is at 999 orders
      * rather than 37 — and it still reads like a ticket number rather than a database id.
      */
+    /**
+     * A free tracking number for a kiosk or mobile cart.
+     *
+     * Delegates to `SequenceService`, which the register ingest path also uses. This logic lived
+     * here alone until BAN-506, and that was the bug: the same collision on the register's side had
+     * no handling at all, so a till paired mid-session lost every sale.
+     */
     private function trackingNumber(OrderSource $source, PosSession $session): string
     {
-        $prefix = $source->trackingPrefix();
-
-        $taken = $this->connection->table('pos_orders')
-            ->where('pos_session_id', $session->getKey())
-            ->whereNotNull('tracking_number')
-            ->pluck('tracking_number')
-            ->all();
-
-        $used = [];
-
-        foreach ($taken as $number) {
-            $number = (string) $number;
-            // A prefix strip, not `ltrim`: ltrim takes a *character list*, so it would eat repeated
-            // leading characters and misbehave the day a prefix becomes more than one letter.
-            //
-            // Keyed on the bare number, so kiosk `K001` also reserves mobile `S001`. That is
-            // deliberate — the counter calls "001", and two customers hearing their own number is
-            // the whole failure being fixed.
-            $used[$prefix !== '' && str_starts_with($number, $prefix) ? substr($number, \strlen($prefix)) : $number] = true;
-        }
-
-        for ($n = 1; $n <= 999; $n++) {
-            $candidate = str_pad((string) $n, 3, '0', STR_PAD_LEFT);
-
-            if (! isset($used[$candidate])) {
-                return $prefix.$candidate;
-            }
-        }
-
-        // 999 live orders in one session is not a service, it is a data problem — but a duplicate
-        // number is still better than refusing the sale.
-        return $prefix.str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT);
+        return $this->sequences->availableTrackingNumber($session, null, $source->trackingPrefix());
     }
 
     /**
@@ -688,7 +667,10 @@ final readonly class SelfOrderService
 
         $failed = (string) ($result['results'][0]['error']['message'] ?? '');
 
-        if ($failed !== '' && str_contains($failed, 'pos_orders_session_tracking_unique')) {
+        // Matched the index name only, which SQLite never emits — so this retry had never fired.
+        // `SequenceService` owns the test now, and the ingest path retries for itself, so this is
+        // belt-and-braces rather than the only line of defence (BAN-506).
+        if ($failed !== '' && SequenceService::isTrackingCollision(new RuntimeException($failed))) {
             return $ingest();
         }
 

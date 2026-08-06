@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { addProduct, courseFire, openTill, orderLines, till } from '../support/register';
+import { addProduct, courseFire, openTill, orderLines, seatFreeTable, till } from '../support/register';
 
 /**
  * XCT-135 — two courses, fired one at a time.
@@ -14,7 +14,8 @@ test.describe('two-course fire', () => {
     test('fires each course separately', async ({ page, request }) => {
         await openTill(page, request);
 
-        await page.getByRole('button', { name: '+ Nouvelle commande' }).click();
+        // Courses exist on a table order; a direct sale has none.
+        await seatFreeTable(page);
 
         // Starter.
         await addProduct(page, 'Soupe à l’oignon gratinée');
@@ -43,7 +44,7 @@ test.describe('two-course fire', () => {
     test('keeps the courses distinct on the order', async ({ page, request }) => {
         await openTill(page, request);
 
-        await page.getByRole('button', { name: '+ Nouvelle commande' }).click();
+        await seatFreeTable(page);
         await addProduct(page, 'Soupe à l’oignon gratinée');
 
         await page.getByRole('button', { name: 'Nouveau service' }).click();

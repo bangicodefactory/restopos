@@ -173,6 +173,8 @@ export type SyncRecordResult = {
         sequence_number: number;
         /** Server-minted (BAN-496). The client's local value is a placeholder until this lands. */
         access_token: string;
+        /** Assigned by the server; may differ from the number the till proposed (BAN-506). */
+        tracking_number: string | null;
         state: string;
         amount_untaxed: Money;
         amount_tax: Money;
