@@ -704,6 +704,9 @@ final readonly class OrderSyncService
         // than a check that leads to it: after everything is written, no line may have been given
         // back more than it sold. Throwing here rolls the whole order back, because a refund that
         // half-applied is worse than one that did not apply at all.
+        // Derived once for the whole push rather than per line as each one lands.
+        $this->refunds->refreshMany(array_values($refundPlan['links']));
+
         $breach = $this->refunds->firstOverRefunded(array_values($refundPlan['links']));
 
         if ($breach !== null) {
@@ -1467,7 +1470,6 @@ final readonly class OrderSyncService
         $this->syncLineAttributes((int) $line->getKey(), (int) $variant['product_id'], $command);
 
         if ($refundedLineId !== null) {
-            $this->refunds->refreshRefundedQuantity($refundedLineId);
             $this->recordRefund($config, $order, $line, $device, $employeeId);
         }
 
@@ -1503,6 +1505,10 @@ final readonly class OrderSyncService
         $links = [];
         $claimed = [];   // original line id => quantity claimed so far in this push
 
+        // Every fact this loop needs, fetched once for the whole push. The lock is taken here, over
+        // all the originals at once — the serialisation is unchanged, only the number of statements.
+        $context = $this->refunds->preflightContext($order, $lineCommands);
+
         // Spec 01 §1807 — a refund references exactly one original order. Only visible when the
         // lines are looked at together: each one alone is a perfectly ordinary refund.
         $originalOrders = $this->refunds->originalOrderIds($lineCommands);
@@ -1527,13 +1533,10 @@ final readonly class OrderSyncService
             }
 
             // An update to a refund line already on the server keeps its own link.
-            $existing = OrderLine::query()
-                ->where('uuid', $lineUuid)
-                ->where('pos_order_id', $order->getKey())
-                ->first();
+            $existing = $context['existing'][$lineUuid] ?? null;
 
             $originalLineId = $existing?->refunded_order_line_id === null
-                ? $this->refunds->targetLineId($order, $command)
+                ? ($context['targets'][(string) ($command['refunded_line_uuid'] ?? '')] ?? null)
                 : (int) $existing->refunded_order_line_id;
 
             if ($originalLineId === null) {
@@ -1548,9 +1551,7 @@ final readonly class OrderSyncService
                 ];
             }
 
-            $original = OrderLine::query()->find($originalLineId);
-
-            if ($original === null) {
+            if (! isset($context['sold'][$originalLineId])) {
                 return [
                     'rejection' => $this->refuseRefund($config, $order, $device, $employeeId, $lineUuid, [
                         'code' => 'refund_unlinked',
@@ -1560,8 +1561,16 @@ final readonly class OrderSyncService
                 ];
             }
 
-            $alreadyRefunded = $this->refunds->alreadyRefunded($originalLineId, $existing === null ? null : (int) $existing->getKey());
-            $remaining = $this->refunds->remaining($original, $alreadyRefunded);
+            // What everyone has given back, less what this order itself already contributes, so an
+            // edit is measured as a replacement rather than as an addition on top of itself.
+            $alreadyRefunded = bcsub(
+                $context['refunded'][$originalLineId] ?? '0',
+                $context['ownContribution'][$originalLineId] ?? '0',
+                6,
+            );
+
+            $remaining = bcsub($context['sold'][$originalLineId], $alreadyRefunded, 6);
+            $remaining = bccomp($remaining, '0', 6) < 0 ? '0' : $remaining;
             $requested = bcmul((string) $quantity, '-1', 6);
             $claimed[$originalLineId] = bcadd($claimed[$originalLineId] ?? '0', $requested, 6);
 

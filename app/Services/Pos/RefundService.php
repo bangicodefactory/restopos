@@ -47,31 +47,6 @@ final readonly class RefundService
     }
 
     /**
-     * Resolve the line this refund points at — within the original order, and only there.
-     *
-     * Scoped through `refunded_order_id`, which `ingest` has already resolved and which the company
-     * scope has already constrained. A lookup by bare uuid would let a device refund against any
-     * line whose uuid it had merely observed, in any venue.
-     *
-     * @param  array<string, mixed>  $command
-     */
-    public function targetLineId(Order $refund, array $command): ?int
-    {
-        $uuid = $command['refunded_line_uuid'] ?? null;
-
-        if (! is_string($uuid) || $uuid === '' || $refund->refunded_order_id === null) {
-            return null;
-        }
-
-        $id = OrderLine::query()
-            ->where('uuid', $uuid)
-            ->where('pos_order_id', $refund->refunded_order_id)
-            ->value('id');
-
-        return $id === null ? null : (int) $id;
-    }
-
-    /**
      * How much of this line has already been given back.
      *
      * Locked, because the read and the insert that follows it are the whole race: two tills each
@@ -117,14 +92,6 @@ final readonly class RefundService
         }
 
         return $total;
-    }
-
-    /** What is left to give back on this line, never below zero. */
-    public function remaining(OrderLine $original, string $alreadyRefunded): string
-    {
-        $remaining = bcsub((string) $original->quantity, $alreadyRefunded, 6);
-
-        return bccomp($remaining, '0', 6) < 0 ? '0' : $remaining;
     }
 
     /**
@@ -173,6 +140,172 @@ final readonly class RefundService
     }
 
     /**
+     * Everything the preflight needs about a whole push, in four queries rather than four per line.
+     *
+     * The per-line version cost ten queries a line — resolve the link, load the existing line, load
+     * the original, take the lock, sum the prior refunds — which a "refund everything" on a long
+     * restaurant tab turns into hundreds. Nothing about the rules changes here; the same facts are
+     * fetched once for the whole batch and read out of memory.
+     *
+     * The lock still covers every original in one statement, so the serialisation the cap depends on
+     * is unchanged: a competing transaction blocks on the first of these rows it needs.
+     *
+     * @param  array<int, array<string, mixed>>  $lineCommands
+     * @return array{
+     *     existing: array<string, OrderLine>,
+     *     targets: array<string, int>,
+     *     sold: array<int, string>,
+     *     refunded: array<int, string>,
+     *     ownContribution: array<int, string>,
+     * }
+     */
+    public function preflightContext(Order $refund, array $lineCommands): array
+    {
+        $lineUuids = [];
+        $targetUuids = [];
+
+        foreach ($lineCommands as $command) {
+            $command = (array) $command;
+
+            if (! $this->isRefundLine($command['qty'] ?? $command['quantity'] ?? null)) {
+                continue;
+            }
+
+            if (is_string($command['uuid'] ?? null) && $command['uuid'] !== '') {
+                $lineUuids[] = (string) $command['uuid'];
+            }
+
+            if (is_string($command['refunded_line_uuid'] ?? null) && $command['refunded_line_uuid'] !== '') {
+                $targetUuids[] = (string) $command['refunded_line_uuid'];
+            }
+        }
+
+        if ($lineUuids === [] && $targetUuids === []) {
+            return ['existing' => [], 'targets' => [], 'sold' => [], 'refunded' => [], 'ownContribution' => []];
+        }
+
+        /** @var array<string, OrderLine> $existing this refund's lines already on the server */
+        $existing = OrderLine::query()
+            ->where('pos_order_id', $refund->getKey())
+            ->whereIn('uuid', $lineUuids === [] ? [''] : $lineUuids)
+            ->get()
+            ->keyBy('uuid')
+            ->all();
+
+        // Resolved *within* the original order, exactly as the per-line lookup did — a line uuid
+        // from anywhere else resolves to nothing.
+        $targets = $refund->refunded_order_id === null || $targetUuids === []
+            ? []
+            : OrderLine::query()
+                ->where('pos_order_id', $refund->refunded_order_id)
+                ->whereIn('uuid', $targetUuids)
+                ->pluck('id', 'uuid')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all();
+
+        $originalIds = array_values(array_unique([
+            ...array_values($targets),
+            ...array_values(array_filter(array_map(
+                static fn (OrderLine $line): ?int => $line->refunded_order_line_id === null
+                    ? null
+                    : (int) $line->refunded_order_line_id,
+                $existing,
+            ))),
+        ]));
+
+        if ($originalIds === []) {
+            return ['existing' => $existing, 'targets' => $targets, 'sold' => [], 'refunded' => [], 'ownContribution' => []];
+        }
+
+        // One lock statement over every original this push touches. This is the serialisation the
+        // whole cap rests on, and it is exactly as strong as the per-line version was.
+        $sold = OrderLine::query()
+            ->whereKey($originalIds)
+            ->lockForUpdate()
+            ->pluck('quantity', 'id')
+            ->map(static fn (mixed $q): string => (string) $q)
+            ->all();
+
+        $refunded = $this->refundedTotals($originalIds);
+
+        // What *this* order already contributes, so an edit is measured as a replacement rather
+        // than as an addition on top of itself.
+        $ownContribution = [];
+
+        foreach ($existing as $line) {
+            if ($line->refunded_order_line_id === null) {
+                continue;
+            }
+
+            $key = (int) $line->refunded_order_line_id;
+            $ownContribution[$key] = bcadd(
+                $ownContribution[$key] ?? '0',
+                bcmul((string) $line->quantity, '-1', 6),
+                6,
+            );
+        }
+
+        return [
+            'existing' => $existing,
+            'targets' => $targets,
+            'sold' => $sold,
+            'refunded' => $refunded,
+            'ownContribution' => $ownContribution,
+        ];
+    }
+
+    /**
+     * Units already given back, per original line, honouring every way a refund is withdrawn.
+     *
+     * @param  list<int>  $originalLineIds
+     * @return array<int, string>
+     */
+    public function refundedTotals(array $originalLineIds): array
+    {
+        if ($originalLineIds === []) {
+            return [];
+        }
+
+        $rows = $this->connection->table('pos_order_lines')
+            ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+            ->whereIn('pos_order_lines.refunded_order_line_id', $originalLineIds)
+            ->where('pos_orders.state', '!=', OrderState::Cancelled->value)
+            ->whereNull('pos_orders.deleted_at')
+            ->whereNull('pos_order_lines.deleted_at')
+            ->groupBy('pos_order_lines.refunded_order_line_id')
+            ->selectRaw('pos_order_lines.refunded_order_line_id as original_id, SUM(pos_order_lines.quantity) as total')
+            ->pluck('total', 'original_id');
+
+        $totals = [];
+
+        foreach ($rows as $originalId => $total) {
+            $totals[(int) $originalId] = bcmul((string) $total, '-1', 6);
+        }
+
+        return $totals;
+    }
+
+    /**
+     * Re-derive `refunded_quantity` on several originals at once.
+     *
+     * @param  list<int>  $originalLineIds
+     */
+    public function refreshMany(array $originalLineIds): void
+    {
+        $ids = array_values(array_unique($originalLineIds));
+
+        if ($ids === []) {
+            return;
+        }
+
+        $totals = $this->refundedTotals($ids);
+
+        foreach ($ids as $id) {
+            OrderLine::query()->whereKey($id)->update(['refunded_quantity' => $totals[$id] ?? '0']);
+        }
+    }
+
+    /**
      * The first original line, if any, that has now been refunded past what it sold.
      *
      * Checked *after* the write. The lock in {@see alreadyRefunded()} serialises two transactions
@@ -192,18 +325,9 @@ final readonly class RefundService
             return null;
         }
 
-        // One grouped query rather than two per line. A "refund everything" on a long restaurant tab
-        // is the case that made this worth doing.
-        $refunded = $this->connection->table('pos_order_lines')
-            ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
-            ->whereIn('pos_order_lines.refunded_order_line_id', $ids)
-            ->where('pos_orders.state', '!=', OrderState::Cancelled->value)
-            ->whereNull('pos_orders.deleted_at')
-            ->whereNull('pos_order_lines.deleted_at')
-            ->groupBy('pos_order_lines.refunded_order_line_id')
-            ->selectRaw('pos_order_lines.refunded_order_line_id as original_id, SUM(pos_order_lines.quantity) as total')
-            ->pluck('total', 'original_id');
-
+        // Two grouped queries for the whole push rather than two per line. A "refund everything" on
+        // a long restaurant tab is the case that made this worth doing.
+        $refunded = $this->refundedTotals($ids);
         $sold = OrderLine::query()->whereKey($ids)->pluck('quantity', 'id');
 
         foreach ($ids as $originalLineId) {
@@ -211,9 +335,7 @@ final readonly class RefundService
                 continue;
             }
 
-            $given = bcmul((string) ($refunded[$originalLineId] ?? '0'), '-1', 6);
-
-            if (bccomp($given, (string) $sold[$originalLineId], 6) > 0) {
+            if (bccomp($refunded[$originalLineId] ?? '0', (string) $sold[$originalLineId], 6) > 0) {
                 return $originalLineId;
             }
         }
