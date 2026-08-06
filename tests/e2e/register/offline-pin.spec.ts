@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { openTill, pin } from '../support/register';
+import { openTill, pin, till, typePin } from '../support/register';
 
 /**
  * XCT-135 — a cashier can sign in with the venue's uplink down.
@@ -21,10 +21,10 @@ test.describe('offline PIN login', () => {
         await context.setOffline(true);
 
         await typePin(page, pin());
-        await page.getByRole('button', { name: 'Déverrouiller' }).click();
+        await page.getByTestId('numpad-confirm').click();
 
         // Back on the till with no server in reach: the verifier was checked on-device.
-        await expect(page.getByRole('button', { name: '+ Nouvelle commande' })).toBeVisible({ timeout: 30_000 });
+        await expect(till(page)).toBeVisible({ timeout: 30_000 });
         await expect(page.getByRole('button', { name: /Café expresso/ }).first()).toBeVisible();
 
         await context.setOffline(false);
@@ -41,20 +41,15 @@ test.describe('offline PIN login', () => {
         // A PIN that is not this employee's. Offline must not degrade to "let them in and sort it
         // out later" — that is a drawer anyone can open by waiting for the Wi-Fi to drop.
         await typePin(page, wrongPin());
-        await page.getByRole('button', { name: 'Déverrouiller' }).click();
+        await page.getByTestId('numpad-confirm').click();
 
         await expect(page.getByRole('heading', { name: 'Caisse verrouillée' })).toBeVisible();
-        await expect(page.getByRole('button', { name: '+ Nouvelle commande' })).toBeHidden();
+        await expect(till(page)).toBeHidden();
 
         await context.setOffline(false);
     });
 });
 
-async function typePin(page: import('@playwright/test').Page, code: string): Promise<void> {
-    for (const digit of code.split('')) {
-        await page.getByRole('button', { name: digit, exact: true }).click();
-    }
-}
 
 /** Any four digits that are not the real PIN. */
 function wrongPin(): string {

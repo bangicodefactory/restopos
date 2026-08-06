@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { addProduct, openTill, orderTotal, resumeAfterReload } from '../support/register';
+import {
+    addProduct,
+    openTill,
+    orderLines,
+    orderTotalValue,
+    resumeAfterReload,
+    till,
+} from '../support/register';
 
 /**
  * XCT-135 — a paired till boots to a working register, and boots again from local storage alone.
@@ -14,7 +21,7 @@ test.describe('cold start', () => {
 
         // The catalogue is the proof that bootstrap completed — the shell renders long before it.
         await expect(page.getByRole('button', { name: /Café expresso/ }).first()).toBeVisible();
-        await expect(page.getByRole('button', { name: '+ Nouvelle commande' })).toBeVisible();
+        await expect(till(page)).toBeVisible();
     });
 
     // KNOWN GAP, not a flake. Written as the criterion asks and left failing on purpose.
@@ -47,11 +54,14 @@ test.describe('cold start', () => {
     test('keeps an unsent order across a reload', async ({ page, request }) => {
         await openTill(page, request);
 
-        await page.getByRole('button', { name: '+ Nouvelle commande' }).click();
+        await till(page).click();
         await addProduct(page, 'Café expresso');
 
-        // The order panel shows the line and a non-zero payment button.
-        await expect(orderTotal(page)).not.toHaveText(/0,00/);
+        await expect(orderLines(page)).toHaveCount(1);
+
+        // The money, not just the row: a line priced at zero would pass a count assertion.
+        const total = await orderTotalValue(page);
+        expect(Number.parseFloat(total)).toBeGreaterThan(0);
 
         await page.reload();
         await resumeAfterReload(page);

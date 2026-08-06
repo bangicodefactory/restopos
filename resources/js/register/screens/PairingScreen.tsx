@@ -48,6 +48,7 @@ export function PairingScreen(): JSX.Element {
             <label className="grid gap-1">
                 <span className="font-semibold">{t('reg.boot.pairingCode')}</span>
                 <input
+                    data-testid="pairing-code"
                     type="text"
                     autoFocus
                     inputMode="text"
@@ -64,6 +65,7 @@ export function PairingScreen(): JSX.Element {
             <label className="grid gap-1">
                 <span className="font-semibold">{t('reg.boot.deviceName')}</span>
                 <input
+                    data-testid="pairing-name"
                     type="text"
                     className="min-h-touch-lg rounded-pos border border-slate-300 px-3"
                     value={name}

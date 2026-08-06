@@ -129,6 +129,8 @@ function ProductCard({
         <button
             type="button"
             onClick={() => onPick(product)}
+            data-testid="product-tile"
+            data-product-id={product.id}
             onPointerDown={() => {
                 if (!onLongPress) return;
                 timer = setTimeout(() => onLongPress(product), 550);
@@ -175,6 +177,7 @@ function ProductCard({
                 </>
             ) : null}
             <span
+                data-testid="product-name"
                 className={cn(
                     'relative line-clamp-3 text-sm font-semibold leading-tight',
                     image !== null ? 'text-white drop-shadow' : 'text-slate-900',

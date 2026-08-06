@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { addProduct, openTill, resumeAfterReload } from '../support/register';
+import {
+    addProduct,
+    openTill,
+    orderLines,
+    orderTotalValue,
+    resumeAfterReload,
+    tableTile,
+} from '../support/register';
 
 /**
  * XCT-135 — an order moved between tables stays moved, including across a reload.
@@ -11,43 +18,50 @@ import { addProduct, openTill, resumeAfterReload } from '../support/register';
  * sitting there now.
  */
 test.describe('table transfer', () => {
-    // NOT YET RUNNING, and the reason is a gap in the app rather than in the flow being tested.
+    // STILL NOT RUNNING — but for a different reason than before, and that difference is the point
+    // of BAN-505. It is no longer blocked on selectors: the spec now finds tables by number, seats
+    // one, adds a line and reaches the "choose the destination table" prompt. It is blocked on
+    // BAN-506, a real defect this exercise uncovered: a till paired into a session that already
+    // holds its tracking number has every order rejected with `ingest_failed`, so the order has no
+    // server id and the transfer cannot be performed.
     //
-    // The floor plan renders tables as buttons whose only accessible name is "1 2 places" — the
-    // number and the cover count, both localised, both dependent on layout state. Every other spec
-    // in this suite anchors on a stable French label ("Verrouiller", "Nouveau service"); a table has
-    // none. Pinning it by position instead would encode the seeded floor plan into the spec, so it
-    // would pass here and mean nothing anywhere else.
-    //
-    // The fix is a `data-testid` on the table tile — the register currently has exactly one test
-    // hook in the whole app (`data-order-uuid`, which is what makes the KDS specs possible). Filed
-    // rather than bodged, because a spec that selects the wrong tile still goes green.
+    // Left as the spec it should be, rather than weakened to assert the broken behaviour.
     test.fixme('moves an order to another table and keeps it there across a reload', async ({ page, request }) => {
         await openTill(page, request);
 
         await page.getByRole('button', { name: 'Tables' }).click();
 
-        // A table's accessible name carries its cover count ("1 2 places"), so the anchor is the
-        // leading number rather than an exact match.
-        const tableOne = page.getByRole('button', { name: /^1\s/ }).first();
-        const tableTwo = page.getByRole('button', { name: /^2\s/ }).first();
+        // Addressed by number, not by position and not by the localised "1 2 places" label — which
+        // is what kept this spec unrunnable until the tiles carried a test id (BAN-505).
+        const one = tableTile(page, 1);
+        const two = tableTile(page, 2);
 
-        await expect(tableOne).toBeVisible({ timeout: 30_000 });
+        await expect(one).toBeVisible({ timeout: 30_000 });
 
         // Seat table 1 and put something on the tab.
-        await tableOne.click();
+        await one.click();
         await addProduct(page, 'Café expresso');
-        await expect(page.getByText('2,20 €').first()).toBeVisible();
+        await expect(orderLines(page)).toHaveCount(1);
+
+        const total = await orderTotalValue(page);
+        expect(total).not.toBe('0');
 
         // Move it.
         await page.getByRole('button', { name: 'Transférer' }).click();
-        await tableTwo.click();
+        await two.click();
 
         await page.reload();
         await resumeAfterReload(page);
 
-        // The tab is on table 2 — and, just as importantly, no longer on table 1.
         await page.getByRole('button', { name: 'Tables' }).click();
-        await expect(page.getByText('2,20 €').first()).toBeVisible({ timeout: 30_000 });
+
+        // The tab is on table 2 — and, just as importantly, no longer on table 1. Both assertions
+        // matter: a transfer that copies rather than moves would satisfy only the first.
+        await expect(tableTile(page, 2)).toHaveAttribute('data-occupied', 'true', { timeout: 30_000 });
+        await expect(tableTile(page, 1)).toHaveAttribute('data-occupied', 'false');
+
+        // …and the money went with it.
+        await tableTile(page, 2).click();
+        expect(await orderTotalValue(page)).toBe(total);
     });
 });

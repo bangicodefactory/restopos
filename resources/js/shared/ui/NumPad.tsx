@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -130,43 +130,43 @@ export function NumPad({
         [],
     );
 
+    /**
+     * One key, always carrying its hook.
+     *
+     * Every button goes through here rather than being spelled out, because the hook and the key set
+     * are two halves that have to agree: when only the `KEYS` loop carried `data-key`, the `0` — laid
+     * out separately — had none, and a spec typing a PIN containing a zero failed on a locator that
+     * matched nothing. Every seeded PIN happens to avoid zero, so the suite stayed green while the
+     * helper was broken (BAN-505).
+     */
+    const padKey = (value: string, label: ReactNode = value, className?: string): JSX.Element => (
+        <Button
+            size="xl"
+            variant={value === 'C' ? 'ghost' : 'secondary'}
+            disabled={disabled}
+            onClick={() => press(value)}
+            data-testid="numpad-key"
+            data-key={value}
+            {...(value === '⌫' ? { 'aria-label': 'Backspace' } : {})}
+            {...(className === undefined ? {} : { className })}
+        >
+            {label}
+        </Button>
+    );
+
     return (
         <div className={cn('grid gap-2', sideKeys ? 'grid-cols-4' : 'grid-cols-3', className)}>
-            {KEYS.map((key) => (
-                <Button key={key} size="xl" variant="secondary" disabled={disabled} onClick={() => press(key)}>
-                    {key}
-                </Button>
-            ))}
+            {KEYS.map((key) => <Fragment key={key}>{padKey(key)}</Fragment>)}
 
-            {allowNegative ? (
-                <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('±')}>
-                    +/−
-                </Button>
-            ) : (
-                <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('.')}>
-                    .
-                </Button>
-            )}
+            {allowNegative ? padKey('±', '+/−') : padKey('.')}
 
-            <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('0')}>
-                0
-            </Button>
+            {padKey('0')}
 
-            {allowNegative ? (
-                <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('.')}>
-                    .
-                </Button>
-            ) : (
-                <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('⌫')} aria-label="Backspace">
-                    ⌫
-                </Button>
-            )}
+            {allowNegative ? padKey('.') : padKey('⌫')}
 
             {sideKeys ? <div className="row-span-4 grid gap-2">{sideKeys}</div> : null}
 
-            <Button size="xl" variant="ghost" disabled={disabled} onClick={() => press('C')} className="col-span-1">
-                C
-            </Button>
+            {padKey('C', 'C', 'col-span-1')}
 
             {onConfirm ? (
                 <Button
@@ -175,13 +175,14 @@ export function NumPad({
                     disabled={disabled}
                     className="col-span-2"
                     onClick={() => onConfirm(valueRef.current)}
+                    // The label varies by caller — "Ouvrir la caisse" on login, "Déverrouiller" on
+                    // the lock screen, "OK" elsewhere — so the hook is what a spec addresses.
+                    data-testid="numpad-confirm"
                 >
                     {confirmLabel}
                 </Button>
             ) : (
-                <Button size="xl" variant="secondary" disabled={disabled} onClick={() => press('⌫')} className="col-span-2">
-                    ⌫
-                </Button>
+                padKey('⌫', '⌫', 'col-span-2')
             )}
         </div>
     );

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { addProduct, openTill } from '../support/register';
+import { addProduct, courseFire, openTill, orderLines, till } from '../support/register';
 
 /**
  * XCT-135 — two courses, fired one at a time.
@@ -28,8 +28,8 @@ test.describe('two-course fire', () => {
         // A second course makes each one separately fireable — that is the feature: the starter
         // goes now, the main goes when the table is ready. With a single course there is only the
         // send-all button, which is why these appear after `Nouveau service` and not before.
-        const fireFirst = page.getByRole('button', { name: 'Lancer le service 1' });
-        const fireSecond = page.getByRole('button', { name: 'Lancer le service 2' });
+        const fireFirst = courseFire(page, 1);
+        const fireSecond = courseFire(page, 2);
 
         await expect(fireFirst).toBeVisible({ timeout: 30_000 });
         await expect(fireSecond).toBeVisible();
@@ -49,7 +49,10 @@ test.describe('two-course fire', () => {
         await page.getByRole('button', { name: 'Nouveau service' }).click();
         await addProduct(page, 'Café expresso');
 
-        // Both items are on the one order — a new course must not start a new ticket.
+        // Both items are on the one order — a new course must not start a new ticket. The names are
+        // asserted as *text* on purpose: that is what a cashier reads. The count comes from the test
+        // id, because "how many lines" is structure.
+        await expect(orderLines(page)).toHaveCount(2);
         await expect(page.getByText('Soupe à l’oignon gratinée').first()).toBeVisible();
         await expect(page.getByText('Café expresso').first()).toBeVisible();
     });
