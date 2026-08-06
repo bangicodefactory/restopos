@@ -43,6 +43,9 @@ final class AuditEvent
 
     public const OrderCancelled = 'order.cancelled';
 
+    /** A device tried to change an order that was already paid (BAN-410). */
+    public const SettledOrderWriteRejected = 'order.settled_write_rejected';
+
     // ----------------------------------------------------------------- people
     /** A manager PIN authorising an action the cashier could not take alone (REG-045). */
     public const EmployeeOverride = 'employee.override';

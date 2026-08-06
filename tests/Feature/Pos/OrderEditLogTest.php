@@ -310,21 +310,26 @@ it('flags the order as having lost a line', function (): void {
     expect((bool) Order::query()->where('uuid', $orderUuid)->value('has_deleted_line'))->toBeTrue();
 });
 
-it('records a payment whose amount was restated after the fact', function (): void {
-    // The classic skim: ring up €40 cash, print, then quietly restate it as €30 and pocket the
-    // difference. The order still balances and the session still reconciles against what was
-    // declared — nothing else in the system notices.
+it('records a payment whose amount was restated', function (): void {
+    // The classic skim: ring up €40 cash, then quietly restate it as €30 and pocket the difference.
+    // The order still balances and the session still reconciles against what was declared — nothing
+    // else in the system notices.
+    //
+    // Done here on a **draft** order, because BAN-410 now refuses the same move once the order is
+    // settled; the settled case is covered in `SettledOrderImmutabilityTest`, where the refusal is
+    // what gets recorded. This is the window that legitimately remains: correcting a tender before
+    // the sale is validated.
     $orderUuid = (string) Str::uuid();
     $paymentUuid = (string) Str::uuid();
 
-    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value], [
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [], [], [
         ['op' => 'create', 'uuid' => $paymentUuid, 'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '40.00'],
     ])]])->assertOk();
 
     OrderEditLog::query()->delete();
     AuditLog::query()->delete();
 
-    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value], [
+    push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [], [], [
         ['op' => 'update', 'uuid' => $paymentUuid, 'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '30.00'],
     ])]])->assertOk();
 

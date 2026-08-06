@@ -29,6 +29,7 @@ use App\Services\Audit\OrderEditRecorder;
 use App\Services\Kitchen\PreparationService;
 use App\Support\Audit\AuditEvent;
 use App\Support\Money\Decimal;
+use App\Support\Pos\SettledOrder;
 use App\Support\Tax\CashRounding;
 use App\Support\Tax\Dto\OrderResult;
 use Illuminate\Contracts\Config\Repository as Config;
@@ -641,9 +642,16 @@ final readonly class OrderSyncService
         }
 
         // 4 — child commands, with create↔update rewriting.
-        $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device);
+        // **Before** this push, not after. `createOrder` and `updateOrder` have already run, so by
+        // now an order being paid *by this very command* reads as settled — and its own lines and
+        // payments, which arrive in the same command, would be refused as post-settlement edits.
+        // That is the whole normal payment flow. The question is only ever "was it already settled
+        // when this arrived", and for a brand-new order the answer is no (BAN-410).
+        $wasSettled = $previousState !== null && SettledOrder::isSettled($previousState);
+
+        $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device, $wasSettled);
         $courseResults = $this->applyCourseCommands($order, (array) ($command['courses'] ?? []));
-        $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId);
+        $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId, $wasSettled);
 
         if ($op === 'cancel') {
             $order->forceFill([
@@ -835,6 +843,16 @@ final readonly class OrderSyncService
         // `001`, and the order was rejected. Fixing only the create path left this open, and it is
         // the path a register uses most: every draft is pushed again when it is paid (BAN-506).
 
+        // Once the order is settled the writable set narrows to what genuinely still happens after
+        // payment: a tip, the invoice flag, and the contact details a receipt is sent to. Everything
+        // else is *dropped rather than rejected* — a stale `restaurant_table_id` riding along on a
+        // tip push must not cost the tip (BAN-410).
+        $settled = SettledOrder::isSettled($this->stateValue($order->state));
+
+        if ($settled) {
+            $writable = array_values(array_intersect($writable, SettledOrder::WritableFields));
+        }
+
         $update = ['pos_session_id' => $session->getKey()];
 
         foreach ($writable as $field) {
@@ -843,13 +861,15 @@ final readonly class OrderSyncService
             }
         }
 
-        foreach ([['table_id', 'restaurant_table_id'], ['preset_id', 'pos_preset_id']] as [$client, $column]) {
-            if (array_key_exists($client, $attributes)) {
-                $update[$column] = $attributes[$client];
+        if (! $settled) {
+            foreach ([['table_id', 'restaurant_table_id'], ['preset_id', 'pos_preset_id']] as [$client, $column]) {
+                if (array_key_exists($client, $attributes)) {
+                    $update[$column] = $attributes[$client];
+                }
             }
         }
 
-        if ($employeeId !== null && ! isset($update['employee_id'])) {
+        if (! $settled && $employeeId !== null && ! isset($update['employee_id'])) {
             $update['employee_id'] = $order->employee_id ?? $employeeId;
         }
 
@@ -951,6 +971,7 @@ final readonly class OrderSyncService
         array $commands,
         ?int $employeeId = null,
         ?PosDevice $device = null,
+        bool $settled = false,
     ): array {
         /** @var array<string, int> $existing uuid => id */
         $existing = OrderLine::query()
@@ -979,6 +1000,27 @@ final readonly class OrderSyncService
                 $op = 'create';
             }
 
+            if ($settled) {
+                $verdict = $this->settledLineVerdict($order, $op, $command, $existing[$uuid] ?? null);
+
+                if ($verdict === SettledOrder::Reject) {
+                    $results[] = $this->refuseSettledWrite($config, $order, $device, $employeeId, 'line', $op, $uuid, [
+                        'qty' => $command['qty'] ?? $command['quantity'] ?? null,
+                        'price_unit' => $command['price_unit'] ?? null,
+                    ]);
+
+                    continue;
+                }
+
+                if ($verdict === SettledOrder::Noop) {
+                    // A resend, not an edit. Answered as applied so the outbox retires the entry —
+                    // it *is* applied, there was simply nothing to do.
+                    $results[] = ['uuid' => $uuid, 'id' => $existing[$uuid] ?? null, 'status' => 'ok', 'unchanged' => true];
+
+                    continue;
+                }
+            }
+
             $results[] = match ($op) {
                 'delete' => $this->deleteLine($config, $order, $existing[$uuid] ?? null, $uuid, $employeeId, $device),
                 'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device),
@@ -987,6 +1029,173 @@ final readonly class OrderSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * May this line command touch an order that is already settled? (BAN-410)
+     *
+     * Three answers, and the middle one is the reason this is not a one-line check. `Noop` covers
+     * the resend: the register pushes a settled order's whole graph again on every reprint, and
+     * refusing those would tell a cashier a completed sale failed to sync. Only a command that
+     * would actually move something is refused.
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function settledLineVerdict(Order $order, string $op, array $command, ?int $lineId): string
+    {
+        if ($op === 'delete') {
+            if ($lineId === null) {
+                return SettledOrder::Noop;   // already gone; the outbox is repeating itself
+            }
+
+            // A tip may be taken back off, which is the same gesture as applying one.
+            return $this->isTipLine($lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+        }
+
+        if ($op === 'create' || $lineId === null) {
+            $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
+
+            return SettledOrder::isTipKind($this->variantMeta($variantId)['special_kind'] ?? null)
+                ? SettledOrder::Allow
+                : SettledOrder::Reject;
+        }
+
+        if ($this->lineCommandChangesNothing($lineId, $command)) {
+            return SettledOrder::Noop;
+        }
+
+        return $this->isTipLine($lineId) ? SettledOrder::Allow : SettledOrder::Reject;
+    }
+
+    /**
+     * Would applying this command leave the line exactly as it is?
+     *
+     * Compared field by field against what the column holds, numerically — the register sends `'2'`
+     * where the `decimal:3` column reads back `'2.000'`, and a string comparison would call every
+     * reprint an edit. The attribute selections are compared too, because `lineCommand` sends them
+     * on every push and they are a real edit when they differ.
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function lineCommandChangesNothing(int $lineId, array $command): bool
+    {
+        /** @var OrderLine|null $line */
+        $line = OrderLine::query()->find($lineId);
+
+        if ($line === null) {
+            return false;
+        }
+
+        $map = [
+            'qty' => 'quantity', 'quantity' => 'quantity',
+            'price_unit' => 'price_unit', 'price_extra' => 'price_extra',
+            'discount' => 'discount_percent', 'discount_percent' => 'discount_percent',
+            'customer_note' => 'customer_note', 'full_product_name' => 'full_product_name',
+            'skip_preparation' => 'skip_preparation',
+        ];
+
+        $before = [];
+        $after = [];
+
+        foreach ($map as $from => $column) {
+            if (! array_key_exists($from, $command)) {
+                continue;
+            }
+
+            $before[$column] = $line->getRawOriginal($column);
+            $after[$column] = $command[$from];
+        }
+
+        if (AuditRecorder::diff($before, $after) !== []) {
+            return false;
+        }
+
+        if (array_key_exists('note', $command) || array_key_exists('internal_note', $command)) {
+            $note = $this->normaliseNote($command['note'] ?? $command['internal_note']);
+
+            if (json_encode($note) !== json_encode($this->normaliseNote($line->internal_note))) {
+                return false;
+            }
+        }
+
+        if (array_key_exists('attribute_line_value_ids', $command)) {
+            $sent = array_values(array_unique(array_map('intval', (array) $command['attribute_line_value_ids'])));
+            sort($sent);
+
+            $held = $this->connection->table('pos_order_line_attribute_value')
+                ->where('pos_order_line_id', $lineId)
+                ->pluck('product_attribute_line_value_id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all();
+            sort($held);
+
+            if ($sent !== $held) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function isTipLine(int $lineId): bool
+    {
+        $kind = $this->connection->table('pos_order_lines')
+            ->join('products', 'products.id', '=', 'pos_order_lines.product_id')
+            ->where('pos_order_lines.id', $lineId)
+            ->value('products.special_kind');
+
+        return SettledOrder::isTipKind($kind === null ? null : (string) $kind);
+    }
+
+    /**
+     * Refuse a write to a settled order, and put the attempt on the record.
+     *
+     * The audit row is the point as much as the refusal is. A device that keeps trying to restate a
+     * payment after the receipt printed is the signal; a rejection the client swallows silently is
+     * not evidence of anything.
+     *
+     * @param  array<string, mixed>  $attempted
+     * @return array<string, mixed>
+     */
+    private function refuseSettledWrite(
+        PosConfig $config,
+        Order $order,
+        ?PosDevice $device,
+        ?int $employeeId,
+        string $kind,
+        string $op,
+        string $uuid,
+        array $attempted = [],
+    ): array {
+        $this->recordConflict($config, $device, SyncConflictType::StaleWrite, SyncResolution::Rejected, $order->uuid, [
+            'reason' => 'order_settled',
+            'target' => $kind,
+            'target_uuid' => $uuid,
+            'op' => $op,
+        ]);
+
+        $this->audit->record(
+            event: AuditEvent::SettledOrderWriteRejected,
+            subject: $order,
+            companyId: (int) $order->company_id,
+            severity: AuditSeverity::Critical,
+            message: "Refused a {$op} on a {$kind} of settled order {$order->name}",
+            changes: array_map(
+                static fn (mixed $value): array => ['old' => null, 'new' => $value],
+                array_filter([...$attempted, 'target_uuid' => $uuid, 'op' => $op], static fn (mixed $v): bool => $v !== null),
+            ),
+            config: $config,
+            session: $order->pos_session_id,
+            employeeId: $employeeId,
+            device: $device,
+        );
+
+        return [
+            'uuid' => $uuid,
+            'status' => 'rejected',
+            'code' => 'order_settled',
+            'message' => 'That order is already settled.',
+        ];
     }
 
     /**
@@ -1330,6 +1539,7 @@ final readonly class OrderSyncService
         ?PosDevice $device,
         array $commands,
         ?int $employeeId = null,
+        bool $settled = false,
     ): array {
         /** @var array<string, int> $existing */
         $existing = OrderPayment::query()
@@ -1357,6 +1567,28 @@ final readonly class OrderSyncService
             }
 
             $op = (string) ($command['op'] ?? 'create');
+
+            // No payment on a settled order moves. This is the one the fraud is actually built on:
+            // ring up €40 cash, print the receipt, then quietly restate it as €30. The order still
+            // balances and the session still reconciles against what was declared, so nothing else
+            // in the system has any reason to notice (BAN-410).
+            if ($settled) {
+                $verdict = $this->settledPaymentVerdict($op, $command, $existing[$uuid] ?? null);
+
+                if ($verdict === SettledOrder::Reject) {
+                    $results[] = $this->refuseSettledWrite($config, $order, $device, $employeeId, 'payment', $op, $uuid, [
+                        'amount' => $command['amount'] ?? null,
+                    ]);
+
+                    continue;
+                }
+
+                if ($verdict === SettledOrder::Noop) {
+                    $results[] = ['uuid' => $uuid, 'id' => $existing[$uuid] ?? null, 'status' => 'ok', 'unchanged' => true];
+
+                    continue;
+                }
+            }
 
             if ($op === 'delete') {
                 if (isset($existing[$uuid])) {
@@ -1437,6 +1669,48 @@ final readonly class OrderSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * May this payment command touch a settled order? (BAN-410)
+     *
+     * Nothing about a payment may move, so the only permitted answer is `Noop` — the resend of an
+     * unchanged row that every reprint produces.
+     *
+     * @param  array<string, mixed>  $command
+     */
+    private function settledPaymentVerdict(string $op, array $command, ?int $paymentId): string
+    {
+        if ($op === 'delete') {
+            return $paymentId === null ? SettledOrder::Noop : SettledOrder::Reject;
+        }
+
+        if ($paymentId === null) {
+            return SettledOrder::Reject;   // a new tender after the fact
+        }
+
+        $held = OrderPayment::query()->whereKey($paymentId)->first();
+
+        if ($held === null) {
+            return SettledOrder::Reject;
+        }
+
+        $changes = AuditRecorder::diff(
+            [
+                'amount' => $held->getRawOriginal('amount'),
+                'payment_method_id' => $held->getRawOriginal('payment_method_id'),
+                'is_change' => $held->getRawOriginal('is_change'),
+                'is_refund' => $held->getRawOriginal('is_refund'),
+            ],
+            array_filter([
+                'amount' => $command['amount'] ?? null,
+                'payment_method_id' => $command['payment_method_id'] ?? null,
+                'is_change' => $command['is_change'] ?? null,
+                'is_refund' => $command['is_refund'] ?? null,
+            ], static fn (mixed $v): bool => $v !== null),
+        );
+
+        return $changes === [] ? SettledOrder::Noop : SettledOrder::Reject;
     }
 
     /**
@@ -2022,6 +2296,9 @@ final readonly class OrderSyncService
                 'products.uom_id',
                 'products.list_price as product_price',
                 'products.standard_price as product_cost',
+                // Needed by the settled-order guard (BAN-410): a tip is the one line that may be
+                // added to an order after it is paid.
+                'products.special_kind',
             ])
             ->first();
 
@@ -2041,6 +2318,7 @@ final readonly class OrderSyncService
             'list_price' => (string) ($row->variant_price ?? $row->product_price),
             'standard_price' => (string) ($row->variant_cost ?: $row->product_cost),
             'pos_category_id' => $categoryId === null ? null : (int) $categoryId,
+            'special_kind' => (string) $row->special_kind,
         ];
     }
 

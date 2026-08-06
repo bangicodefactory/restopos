@@ -926,10 +926,27 @@ export function addPayment(orderUuid: string, paymentMethodId: number, amount: s
     return uuid;
 }
 
+/**
+ * Is this order's tender closed to further edits? (BAN-410, REG-218)
+ *
+ * Two triggers, and the print is the one that matters. Once a receipt is in the customer's hand the
+ * paper and the database have to agree — restating a €40 cash tender as €30 afterwards is the skim
+ * the server-side guard exists for, and leaving the buttons live on the till invites it.
+ *
+ * The server refuses these regardless; this is so the cashier is told *before* tapping, rather than
+ * watching a sale come back rejected.
+ */
+export function paymentsFrozen(order: OrderRow | null | undefined): boolean {
+    if (!order) return false;
+
+    return order.print_count > 0 || order.state === 'paid' || order.state === 'done';
+}
+
 export function setPaymentAmount(paymentUuid: string, amount: string): void {
     const state = snapshot();
     const payment = state.payments[paymentUuid];
     if (!payment) return;
+    if (paymentsFrozen(state.orders[payment.order_uuid])) return;
     mutate((draft) => {
         const target = draft.payments[paymentUuid];
         if (!target) return;
@@ -963,6 +980,7 @@ export function removePayment(paymentUuid: string): void {
     const state = snapshot();
     const payment = state.payments[paymentUuid];
     if (!payment) return;
+    if (paymentsFrozen(state.orders[payment.order_uuid])) return;
     mutate((draft) => {
         delete draft.payments[paymentUuid];
         const bucket = draft.paymentsByOrder[payment.order_uuid];

@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import {
     addPayment,
     commitPaidOrder,
+    paymentsFrozen,
     removePayment,
     setPaymentAmount,
     setPaymentStatus,
@@ -82,6 +83,11 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     );
 
     const paidInFull = settlesOrder(totals.due, payments, catalog.paymentMethods, cashRounding);
+
+    // Once the receipt is printed, the paper and the database have to agree. Restating a €40 cash
+    // tender as €30 afterwards is the skim the server refuses (BAN-410); the buttons go with it, so
+    // the cashier is told before tapping rather than watching a sale come back rejected.
+    const frozen = paymentsFrozen(order);
 
     // REG-201 — a single configured method needs no tap.
     useEffect(() => {
@@ -236,6 +242,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                                 setSelectedPayment(payment.uuid);
                                 setBuffer('');
                             }}
+                            frozen={frozen}
                             onRemove={() => {
                                 removePayment(payment.uuid);
                                 if (selectedPayment === payment.uuid) setSelectedPayment(null);
@@ -259,7 +266,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                             key={`${amount}-${index}`}
                             size="md"
                             variant="secondary"
-                            disabled={selectedPayment === null}
+                            disabled={selectedPayment === null || frozen}
                             onClick={() => applyBuffer(amount)}
                         >
                             {money(amount)}
@@ -272,7 +279,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                     onChange={applyBuffer}
                     mode="price"
                     scannerGuardMs={0}
-                    disabled={selectedPayment === null}
+                    disabled={selectedPayment === null || frozen}
                 />
 
                 <Button
@@ -314,6 +321,7 @@ function PaymentLine({
     onRemove,
     onTerminal,
     terminal,
+    frozen,
 }: {
     payment: PaymentRow;
     label: string;
@@ -323,6 +331,7 @@ function PaymentLine({
     onRemove: () => void;
     onTerminal: (status: PaymentRow['payment_status']) => void;
     terminal: boolean;
+    frozen: boolean;
 }): JSX.Element {
     const t = useT();
     const pending = payment.payment_status === 'pending';
@@ -361,14 +370,17 @@ function PaymentLine({
                 </div>
             ) : null}
 
-            <button
-                type="button"
-                aria-label={t('reg.pay.removeLine')}
-                className="min-h-touch min-w-touch rounded-pos text-lg text-danger"
-                onClick={onRemove}
-            >
-                ×
-            </button>
+            {frozen ? null : (
+                <button
+                    type="button"
+                    aria-label={t('reg.pay.removeLine')}
+                    data-testid="payment-remove"
+                    className="min-h-touch min-w-touch rounded-pos text-lg text-danger"
+                    onClick={onRemove}
+                >
+                    ×
+                </button>
+            )}
         </li>
     );
 }
