@@ -435,3 +435,65 @@ it('refuses an unlinked negative line reached by editing a positive one', functi
 
     expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('quantity'))->toBe('1.000');
 });
+
+it('measures an edit against its own line only, not the whole refund order', function (): void {
+    // The subtlest invariant in the batched preflight, and it is only correct by construction.
+    //
+    // The cap subtracts "what this order already contributes" so an edit reads as a replacement
+    // rather than as an addition on top of itself. If that subtraction covered every line of the
+    // refund order, a second line against the same original would go invisible and the edit would
+    // be measured against nothing. It does not, because the context is built from the uuids *in
+    // this push* — so only the line being re-stated is discounted.
+    //
+    // Nothing about that is obvious from reading the code, and a future refactor that widens the
+    // lookup to "all lines on this order" would reopen an over-refund while every other test here
+    // stayed green. This is the one that would fail.
+    [$originalUuid, $lineUuid] = capSell($this->fx, '2');
+
+    $refundUuid = (string) Str::uuid();
+    $lineA = (string) Str::uuid();
+    $lineB = (string) Str::uuid();
+
+    // Two refund lines of one unit each: exactly the two units sold.
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [
+        ['op' => 'create', 'uuid' => $lineA, 'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '-1', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid],
+        ['op' => 'create', 'uuid' => $lineB, 'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '-1', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(refundedUnits($lineUuid))->toBe('-2');
+
+    // Raising A to 2 would make three units against two sold — line B is still holding one.
+    capSync($this->fx, [$this->fx->orderCommand($refundUuid, [
+        ['op' => 'update', 'uuid' => $lineA, 'qty' => '-2'],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid])])
+        ->assertOk()
+        ->assertJsonPath('results.0.error.code', 'refund_exceeds_sold');
+
+    expect(refundedUnits($lineUuid))->toBe('-2');
+});
+
+it('lets a retried create of a refund line through as a replacement', function (): void {
+    // The outbox re-sends, and `applyLineCommands` rewrites a create for a uuid it already holds
+    // into an update. The preflight sees the same uuid in `existing`, so the resend is measured
+    // against itself rather than stacked on top of itself — otherwise every retry of a full refund
+    // would come back `refund_exceeds_sold` and quarantine a completed credit.
+    [$originalUuid, $lineUuid] = capSell($this->fx, '2');
+
+    $refundUuid = (string) Str::uuid();
+    $refundLine = (string) Str::uuid();
+
+    $push = $this->fx->orderCommand($refundUuid, [
+        ['op' => 'create', 'uuid' => $refundLine, 'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '-2', 'price_unit' => '10.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid],
+    ], ['is_refund' => true, 'refunded_order_uuid' => $originalUuid]);
+
+    foreach (range(1, 3) as $ignored) {
+        capSync($this->fx, [$push])->assertOk()->assertJsonPath('results.0.status', 'ok');
+    }
+
+    expect(refundedUnits($lineUuid))->toBe('-2')
+        ->and((string) OrderLine::query()->where('uuid', $lineUuid)->value('refunded_quantity'))->toBe('2.000');
+});
