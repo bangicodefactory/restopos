@@ -60,8 +60,12 @@ export async function fetchCurrentSession(): Promise<PosSessionRow | null> {
 
         store.setSession(session);
 
+        // Written, never wiped. `pos_sessions` is a replicated table — bootstrap and delta own it,
+        // scoped to this config's open sessions — so clearing it on "no current session" would
+        // destroy rows the replication layer will not restore until a full re-bootstrap, rescue
+        // sessions among them. "No *current* session" is not "no sessions exist"; which of the
+        // replicated rows is current is `openSessionFromDb`'s question to answer.
         if (session) await db.sessions.put(session);
-        else await db.sessions.clear();
 
         return session;
     } catch (error) {
@@ -82,12 +86,31 @@ export async function fetchCurrentSession(): Promise<PosSessionRow | null> {
     }
 }
 
-/** The open session held locally, if any. */
+/**
+ * The session this till is trading on, from the replica.
+ *
+ * Deliberately the same predicate as the server's `PosConfig::currentSession()` — not closed **and
+ * not a rescue session** — because this stands in for that endpoint when it cannot be reached, and a
+ * fallback that answers a different question is worse than no fallback at all.
+ *
+ * The rescue exclusion is the load-bearing half. `PosSession::posLoadScope` replicates every open
+ * session for the config, and a rescue session is open by definition — it exists precisely because
+ * it is unreconciled. Without the filter a venue carrying one would boot offline onto it and
+ * attribute the day's orders to a session nobody is trading in, which is a money-attribution error
+ * that only appears offline.
+ *
+ * Newest first, because two sessions can legitimately be open at once — the rescue and the real one
+ * — and `.find()` over Dexie's primary-key order would take the older.
+ */
 export async function openSessionFromDb(): Promise<PosSessionRow | null> {
     const { db } = getRuntime();
     const rows = await db.sessions.toArray();
 
-    return rows.find((row) => row.state !== 'closed') ?? null;
+    return (
+        rows
+            .filter((row) => row.state !== 'closed' && row.is_rescue !== true)
+            .sort((a, b) => b.id - a.id)[0] ?? null
+    );
 }
 
 export async function openSession(input: {

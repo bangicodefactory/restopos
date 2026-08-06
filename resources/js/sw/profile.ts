@@ -114,6 +114,21 @@ export function appOfEntry(facadeModuleId: string | null | undefined): string | 
 }
 
 /**
+ * Every app that `vite.config.ts` builds, as a chunk prefix.
+ *
+ * Hand-maintained, and safely so — which is the whole reason the filter excludes rather than
+ * includes. An app missing from this list has its chunks precached by every scope: a bigger cache on
+ * a staff device. The same omission in an include list left a chunk *out*, and a missing chunk is a
+ * till that will not start (BAN-504). When the failure mode of forgetting is "wastes disk" rather
+ * than "cannot open for service", a list is an acceptable thing to maintain.
+ *
+ * `backoffice` has no service worker of its own — it is not an offline app — but its chunks are in
+ * the shared manifest, and fifty page chunks are not something a phone should download to show a
+ * menu.
+ */
+const APP_PREFIXES = ['register-', 'kitchen-', 'selforder-', 'backoffice-'] as const;
+
+/**
  * Filter the injected precache manifest down to what this scope needs.
  *
  * **Exclude, not include.** This used to keep only entries matching a hand-written list of chunk-name
@@ -133,10 +148,7 @@ export function filterManifest(
 ): string[] {
     if (profile.name === 'unknown') return [];
 
-    const foreign = Object.values(PROFILES)
-        .map((other) => other.appPrefix)
-        .concat('backoffice-')
-        .filter((prefix) => prefix !== profile.appPrefix);
+    const foreign = APP_PREFIXES.filter((prefix) => prefix !== profile.appPrefix);
 
     return manifest
         .filter((entry) => {
