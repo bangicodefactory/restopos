@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Pos;
 
+use App\Enums\AuditSeverity;
 use App\Enums\CashMovementType;
 use App\Enums\OrderSource;
 use App\Enums\OrderState;
@@ -14,6 +15,7 @@ use App\Enums\SyncResolution;
 use App\Events\Pos\OrderStateChanged;
 use App\Events\Pos\OrderSynced;
 use App\Exceptions\Pos\ChangeWithoutCashException;
+use App\Models\Audit\AuditLog;
 use App\Models\Identity\Customer;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
@@ -22,7 +24,10 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
 use App\Models\Restaurant\OrderCourse;
+use App\Services\Audit\AuditRecorder;
+use App\Services\Audit\OrderEditRecorder;
 use App\Services\Kitchen\PreparationService;
+use App\Support\Audit\AuditEvent;
 use App\Support\Money\Decimal;
 use App\Support\Tax\CashRounding;
 use App\Support\Tax\Dto\OrderResult;
@@ -65,6 +70,8 @@ final readonly class OrderSyncService
         private SequenceService $sequences,
         private SessionService $sessions,
         private PreparationService $preparation,
+        private OrderEditRecorder $edits,
+        private AuditRecorder $audit,
         private Dispatcher $events,
         private LoggerInterface $logger,
         private Config $config,
@@ -236,6 +243,7 @@ final readonly class OrderSyncService
                     return $this->applyPartnerCreate($config, $uuid, $payload, $customerIdMap);
                 }),
                 'prep.sent' => $this->connection->transaction(fn (): array => $this->applyPrepSent($config, $uuid, $payload)),
+                'audit.batch' => $this->connection->transaction(fn (): array => $this->applyAuditBatch($config, $device, $uuid, $payload, $employeeId)),
                 default => $this->rejected($uuid, 'unsupported_command', "Unsupported command kind: {$kind}"),
             };
         } catch (Throwable $e) {
@@ -284,6 +292,169 @@ final readonly class OrderSyncService
         );
 
         return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null];
+    }
+
+    /**
+     * The events a till is allowed to put on the trail, and what each one is worth.
+     *
+     * A whitelist, not a passthrough. The device bearer token lives on the till — the machine the
+     * trail is partly evidence *about* — so a client that could write arbitrary `audit_logs.event`
+     * strings could forge a `session.closed` or a `cash.move.deleted` into the record, and the one
+     * artefact that is supposed to be trustworthy would be the one anyone with a paired device
+     * could edit.
+     */
+    private const ClientAuditEvents = [
+        'cash.drawer.opened' => AuditEvent::CashDrawerOpened,
+    ];
+
+    /**
+     * `audit.batch` — events the till observed that the server has no other way to learn (BAN-413).
+     *
+     * The drawer is why this exists. It opens by an ESC/POS pulse sent straight from the browser to
+     * the printer, so nothing about it reaches the server on its own: the one money-adjacent action
+     * with no row of any kind to show for it, and "the drawer was opened at 23:40 with no sale
+     * attached" is near the top of the list of things a manager wants to be able to ask.
+     *
+     * It rides the sync envelope rather than an endpoint of its own for the reason the outbox exists
+     * at all — the interesting drawer opens are not the ones that happen while the network is up.
+     *
+     * Idempotency is **per event, not per batch**: the outbox coalesces and redelivers, so two
+     * deliveries of one batch must not become two openings, and a batch that grew between attempts
+     * must not lose its new events. Each event carries its own uuid, which becomes the row's, and
+     * `audit_logs.uuid` is unique — the index is the real guard behind the check below.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function applyAuditBatch(PosConfig $config, ?PosDevice $device, string $uuid, array $payload, ?int $employeeId): array
+    {
+        $events = array_values((array) ($payload['events'] ?? []));
+        $written = 0;
+        $skipped = 0;
+
+        foreach ($events as $entry) {
+            $entry = (array) $entry;
+            $eventUuid = (string) ($entry['uuid'] ?? '');
+            $name = (string) ($entry['event'] ?? '');
+
+            if ($eventUuid === '' || ! isset(self::ClientAuditEvents[$name])) {
+                $skipped++;
+
+                continue;
+            }
+
+            if (AuditLog::query()->where('uuid', $eventUuid)->exists()) {
+                $skipped++;
+
+                continue;
+            }
+
+            $session = isset($entry['session_id'])
+                ? PosSession::query()->where('pos_config_id', $config->getKey())->whereKey((int) $entry['session_id'])->first()
+                : null;
+
+            // Bounded: `detail` is client-supplied and lands in a `json` column with no length of
+            // its own, so an unbounded copy is a paired device's licence to fill the disk. Eight
+            // scalar keys is far more than any event here carries.
+            /** @var array<string, string|int|bool|null> $detail */
+            $detail = array_slice(
+                array_filter(
+                    (array) ($entry['detail'] ?? []),
+                    static fn (mixed $v): bool => is_scalar($v) || $v === null,
+                ),
+                0,
+                8,
+                preserve_keys: true,
+            );
+            $detail = array_map(
+                static fn (mixed $v): mixed => is_string($v) ? mb_substr($v, 0, 120) : $v,
+                $detail,
+            );
+            $reason = (string) ($detail['reason'] ?? '');
+
+            $this->audit->record(
+                event: self::ClientAuditEvents[$name],
+                // Hung off the session when there is one, so a shift reads as a sequence; off the
+                // register otherwise, because a drawer can be opened before a session exists.
+                subject: $session ?? $config,
+                companyId: (int) $config->company_id,
+                // A no-sale is the one worth surfacing: a drawer opened with no order behind it.
+                severity: $reason === 'no_sale' ? AuditSeverity::Warning : AuditSeverity::Info,
+                message: trim("{$name} {$reason}"),
+                changes: array_map(
+                    static fn (mixed $value): array => ['old' => null, 'new' => $value],
+                    array_filter([
+                        ...$detail,
+                        'order_uuid' => $entry['order_uuid'] ?? null,
+                    ], static fn (mixed $v): bool => $v !== null),
+                ),
+                config: $config,
+                session: $session,
+                employeeId: isset($entry['employee_id']) ? (int) $entry['employee_id'] : $employeeId,
+                device: $device,
+                uuid: $eventUuid,
+            );
+
+            $written++;
+        }
+
+        return ['uuid' => $uuid, 'status' => 'ok', 'server_rev' => null, 'written' => $written, 'skipped' => $skipped];
+    }
+
+    /**
+     * Put the manager overrides granted on this order onto the trail (REG-045, BAN-413).
+     *
+     * The client half of this shipped a long time ago: `approval.ts` verifies the PIN, writes an
+     * `ApprovalRow` to Dexie and says in its own docblock that the approval "is recorded and
+     * synced". It was recorded. `persistence.ts` sent `approvals: []` — a hardcoded empty array —
+     * so it was never synced, and the record of who authorised a discount lived on the granting
+     * till and nowhere else. Clearing that device's storage, or simply swapping the tablet, erased
+     * the one fact the PIN exists to capture.
+     *
+     * `verified` is carried through rather than flattened: an override granted offline was checked
+     * against a cached PIN hash, and a report that cannot tell those apart is one a determined
+     * cashier can hide in.
+     *
+     * @param  array<int, array<string, mixed>>  $approvals
+     */
+    private function recordApprovals(PosConfig $config, PosSession $session, ?PosDevice $device, Order $order, array $approvals): void
+    {
+        foreach ($approvals as $approval) {
+            $approval = (array) $approval;
+            $approvalUuid = (string) ($approval['uuid'] ?? '');
+            $ability = (string) ($approval['ability'] ?? '');
+
+            if ($approvalUuid === '' || $ability === '') {
+                continue;
+            }
+
+            // The same order is pushed many times over — on every edit and again at payment — and
+            // carries its approvals each time. Without this the trail would count one override once
+            // per push, which reads as a manager overriding the same discount forty times.
+            if (AuditLog::query()->where('uuid', $approvalUuid)->exists()) {
+                continue;
+            }
+
+            $verified = (string) ($approval['verified'] ?? 'offline');
+
+            $this->audit->record(
+                event: AuditEvent::EmployeeOverride,
+                subject: $order,
+                companyId: (int) $order->company_id,
+                // An offline grant could not be checked against anything but a cached hash.
+                severity: $verified === 'online' ? AuditSeverity::Notice : AuditSeverity::Warning,
+                message: "Manager override for {$ability} ({$verified})",
+                changes: [
+                    'ability' => ['old' => null, 'new' => $ability],
+                    'verified' => ['old' => null, 'new' => $verified],
+                ],
+                config: $config,
+                session: $session,
+                employeeId: isset($approval['manager_employee_id']) ? (int) $approval['manager_employee_id'] : null,
+                device: $device,
+                uuid: $approvalUuid,
+            );
+        }
     }
 
     /**
@@ -470,9 +641,9 @@ final readonly class OrderSyncService
         }
 
         // 4 — child commands, with create↔update rewriting.
-        $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []));
+        $lineResults = $this->applyLineCommands($config, $order, (array) ($command['lines'] ?? []), $employeeId, $device);
         $courseResults = $this->applyCourseCommands($order, (array) ($command['courses'] ?? []));
-        $paymentResults = $this->applyPaymentCommands($order, $session, $device, (array) ($command['payments'] ?? []));
+        $paymentResults = $this->applyPaymentCommands($config, $order, $session, $device, (array) ($command['payments'] ?? []), $employeeId);
 
         if ($op === 'cancel') {
             $order->forceFill([
@@ -481,8 +652,28 @@ final readonly class OrderSyncService
                 'cancel_reason' => (string) ($attributes['cancel_reason'] ?? 'Cancelled on device'),
             ])->save();
 
+            // Recorded on both trails, and on purpose. The edit log is where a manager reads a
+            // shift; `audit_logs` is where an auditor reads a company, and it is not gated on
+            // `order_edit_tracking` — a venue that turns edit tracking off still has cancelled
+            // tickets recorded, because a cancel after the food left the pass is not an edit.
+            $this->edits->orderCancelled($config, $order, $employeeId, $device);
+
+            $this->audit->record(
+                event: AuditEvent::OrderCancelled,
+                subject: $order,
+                severity: AuditSeverity::Notice,
+                message: (string) ($attributes['cancel_reason'] ?? 'Cancelled on device'),
+                changes: ['state' => ['old' => $previousState, 'new' => OrderState::Cancelled->value]],
+                config: $config,
+                session: $session,
+                employeeId: $employeeId,
+                device: $device,
+            );
+
             $this->withdrawFromKitchen($config, $device, $order);
         }
+
+        $this->recordApprovals($config, $session, $device, $order, (array) ($command['approvals'] ?? []));
 
         // 5 — recompute every monetary field. This is the authoritative pass.
         $computed = $this->recompute($config, $order);
@@ -754,8 +945,13 @@ final readonly class OrderSyncService
      * @param  array<int, array<string, mixed>>  $commands
      * @return list<array<string, mixed>>
      */
-    private function applyLineCommands(PosConfig $config, Order $order, array $commands): array
-    {
+    private function applyLineCommands(
+        PosConfig $config,
+        Order $order,
+        array $commands,
+        ?int $employeeId = null,
+        ?PosDevice $device = null,
+    ): array {
         /** @var array<string, int> $existing uuid => id */
         $existing = OrderLine::query()
             ->where('pos_order_id', $order->getKey())
@@ -784,9 +980,9 @@ final readonly class OrderSyncService
             }
 
             $results[] = match ($op) {
-                'delete' => $this->deleteLine($existing[$uuid] ?? null, $uuid),
-                'update' => $this->updateLine($existing[$uuid], $command, $uuid),
-                default => $this->createLine($config, $order, $command, $uuid, $existing),
+                'delete' => $this->deleteLine($config, $order, $existing[$uuid] ?? null, $uuid, $employeeId, $device),
+                'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device),
+                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device),
             };
         }
 
@@ -798,8 +994,15 @@ final readonly class OrderSyncService
      * @param  array<string, int>  $existing
      * @return array<string, mixed>
      */
-    private function createLine(PosConfig $config, Order $order, array $command, string $uuid, array &$existing): array
-    {
+    private function createLine(
+        PosConfig $config,
+        Order $order,
+        array $command,
+        string $uuid,
+        array &$existing,
+        ?int $employeeId = null,
+        ?PosDevice $device = null,
+    ): array {
         $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
         $variant = $this->variantMeta($variantId);
 
@@ -842,6 +1045,8 @@ final readonly class OrderSyncService
 
         $this->syncLineAttributes((int) $line->getKey(), (int) $variant['product_id'], $command);
 
+        $this->edits->lineAdded($config, $order, $line, $employeeId, $device);
+
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
     }
 
@@ -849,14 +1054,33 @@ final readonly class OrderSyncService
      * @param  array<string, mixed>  $command
      * @return array<string, mixed>
      */
-    private function updateLine(int $id, array $command, string $uuid): array
-    {
+    private function updateLine(
+        PosConfig $config,
+        Order $order,
+        int $id,
+        array $command,
+        string $uuid,
+        ?int $employeeId = null,
+        ?PosDevice $device = null,
+    ): array {
         /** @var OrderLine|null $line */
         $line = OrderLine::query()->find($id);
 
         if ($line === null) {
             return ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'line_vanished'];
         }
+
+        // Snapshot before `forceFill`, or there is nothing left to compare against. Read through
+        // `getRawOriginal` rather than the casts so the values are the strings the column holds —
+        // the decimal cast formats to a fixed scale, and comparing a formatted value against the
+        // client's raw one is how a resend starts looking like an edit.
+        $before = [
+            'quantity' => $line->getRawOriginal('quantity'),
+            'price_unit' => $line->getRawOriginal('price_unit'),
+            'price_extra' => $line->getRawOriginal('price_extra'),
+            'discount_percent' => $line->getRawOriginal('discount_percent'),
+            'customer_note' => $line->getRawOriginal('customer_note'),
+        ];
 
         $map = [
             'qty' => 'quantity',
@@ -871,12 +1095,23 @@ final readonly class OrderSyncService
             'skip_preparation' => 'skip_preparation',
         ];
 
-        $update = ['is_edited' => true];
+        $update = [];
 
         foreach ($map as $from => $to) {
             if (array_key_exists($from, $command)) {
                 $update[$to] = $command[$from];
             }
+        }
+
+        // `is_edited` used to be set on every update command, which meant every line on every order
+        // — the register re-pushes a draft on each change and again at payment, so an untouched line
+        // was flagged as edited within seconds of being rung up. The flag is what a back-office
+        // "which orders were edited" view filters on (BOF-139); one that matches everything answers
+        // nothing. Set it only when a tracked field actually moved.
+        $changed = AuditRecorder::diff($before, array_intersect_key($update, $before));
+
+        if ($changed !== []) {
+            $update['is_edited'] = true;
         }
 
         if (array_key_exists('note', $command) || array_key_exists('internal_note', $command)) {
@@ -895,6 +1130,12 @@ final readonly class OrderSyncService
         // A resent line carries its options; re-sync them (replace-on-write) so an edit that
         // adds or clears an option is reflected. A note-only update omits the keys and no-ops.
         $this->syncLineAttributes((int) $line->getKey(), (int) $line->product_id, $command);
+
+        if ($changed !== []) {
+            $this->edits->lineChanged($config, $order, $line, $before, $update, $employeeId, $device);
+
+            $order->forceFill(['is_edited' => true])->save();
+        }
 
         return ['uuid' => $uuid, 'id' => (int) $line->getKey(), 'status' => 'ok'];
     }
@@ -980,13 +1221,33 @@ final readonly class OrderSyncService
     }
 
     /** @return array<string, mixed> */
-    private function deleteLine(?int $id, string $uuid): array
-    {
+    private function deleteLine(
+        PosConfig $config,
+        Order $order,
+        ?int $id,
+        string $uuid,
+        ?int $employeeId = null,
+        ?PosDevice $device = null,
+    ): array {
         if ($id === null) {
             return ['uuid' => $uuid, 'status' => 'ok', 'deleted' => true, 'code' => 'already_absent'];
         }
 
+        // Loaded, not just deleted by key. What the line *was* is the whole content of the log row —
+        // which product, how many, what it was worth — and a moment after the delete there is
+        // nowhere left to read it from.
+        /** @var OrderLine|null $line */
+        $line = OrderLine::query()->find($id);
+
+        if ($line !== null) {
+            $this->edits->lineRemoved($config, $order, $line, $employeeId, $device);
+        }
+
         OrderLine::query()->whereKey($id)->delete();
+
+        // `has_deleted_line` survives the line it describes; it is what a back-office list filters
+        // on to find the orders worth opening (REG-123).
+        $order->forceFill(['has_deleted_line' => true, 'is_edited' => true])->save();
 
         return ['uuid' => $uuid, 'id' => $id, 'status' => 'ok', 'deleted' => true];
     }
@@ -1062,8 +1323,14 @@ final readonly class OrderSyncService
      * @param  array<int, array<string, mixed>>  $commands
      * @return list<array<string, mixed>>
      */
-    private function applyPaymentCommands(Order $order, PosSession $session, ?PosDevice $device, array $commands): array
-    {
+    private function applyPaymentCommands(
+        PosConfig $config,
+        Order $order,
+        PosSession $session,
+        ?PosDevice $device,
+        array $commands,
+        ?int $employeeId = null,
+    ): array {
         /** @var array<string, int> $existing */
         $existing = OrderPayment::query()
             ->where('pos_order_id', $order->getKey())
@@ -1093,6 +1360,13 @@ final readonly class OrderSyncService
 
             if ($op === 'delete') {
                 if (isset($existing[$uuid])) {
+                    /** @var OrderPayment|null $doomed */
+                    $doomed = OrderPayment::query()->find($existing[$uuid]);
+
+                    if ($doomed !== null) {
+                        $this->recordPaymentChange($config, $order, $session, $device, $employeeId, $doomed, null);
+                    }
+
                     OrderPayment::query()->whereKey($existing[$uuid])->delete();
                 }
                 $results[] = ['uuid' => $uuid, 'status' => 'ok', 'deleted' => true];
@@ -1125,6 +1399,9 @@ final readonly class OrderSyncService
                 continue;
             }
 
+            /** @var OrderPayment|null $wasPaid */
+            $wasPaid = isset($existing[$uuid]) ? OrderPayment::query()->find($existing[$uuid]) : null;
+
             /** @var OrderPayment $payment */
             $payment = OrderPayment::query()->updateOrCreate(['uuid' => $uuid], [
                 'pos_order_id' => $order->getKey(),
@@ -1154,10 +1431,67 @@ final readonly class OrderSyncService
 
             $existing[$uuid] = (int) $payment->getKey();
 
+            $this->recordPaymentChange($config, $order, $session, $device, $employeeId, $wasPaid, $payment);
+
             $results[] = ['uuid' => $uuid, 'id' => (int) $payment->getKey(), 'status' => 'ok'];
         }
 
         return $results;
+    }
+
+    /**
+     * Record a payment appearing, vanishing or changing amount — on both trails.
+     *
+     * Odoo calls this `_create_pm_change_log` and writes it to the chatter. It matters because a
+     * payment edited after the receipt printed is the classic skim: ring up €40 cash, print, then
+     * quietly restate it as €30 and pocket the difference. The order total still balances, the
+     * session still reconciles against what was declared, and nothing else in the system notices.
+     *
+     * A no-op resend writes nothing — `paymentChanged` compares the amounts, and the `audit_logs`
+     * row is only raised when this is an amount change on a payment that already existed. Creating
+     * the first payment on a draft is just a sale.
+     */
+    private function recordPaymentChange(
+        PosConfig $config,
+        Order $order,
+        PosSession $session,
+        ?PosDevice $device,
+        ?int $employeeId,
+        ?OrderPayment $before,
+        ?OrderPayment $after,
+    ): void {
+        $old = $before === null ? null : (string) $before->getRawOriginal('amount');
+        $new = $after === null ? null : (string) $after->getRawOriginal('amount');
+
+        if ($old !== null && $new !== null && bccomp($old, $new, 4) === 0) {
+            return;
+        }
+
+        $this->edits->paymentChanged(
+            $config,
+            $order,
+            $old,
+            $new,
+            $before?->label ?? $after?->label,
+            $employeeId,
+            $device,
+        );
+
+        if ($before === null) {
+            return;
+        }
+
+        $this->audit->record(
+            event: AuditEvent::OrderPaymentChanged,
+            subject: $order,
+            severity: AuditSeverity::Warning,
+            message: $new === null ? 'Payment removed' : 'Payment amount changed',
+            changes: ['amount' => ['old' => $old, 'new' => $new]],
+            config: $config,
+            session: $session,
+            employeeId: $employeeId,
+            device: $device,
+        );
     }
 
     // ------------------------------------------------------------ recompute

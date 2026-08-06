@@ -66,8 +66,15 @@ return new class extends Migration
             $table->string('new_value', 96)->nullable();
             $table->decimal('amount_impact', 16, 4)->default(0);
             $table->foreignId('employee_id')->nullable()->constrained('employees')->nullOnDelete();
+            // Which till the edit came from (BAN-413). Employees share PINs across the counter far
+            // more often than anyone admits, so on a two-till venue the employee alone does not
+            // identify who was standing there — the device is what separates them.
+            $table->foreignId('pos_device_id')->nullable()->constrained('pos_devices')->nullOnDelete();
             $table->timestamp('occurred_at', 3)->index();
             $table->timestamps();
+
+            // The manager's fraud report: this order's edits, newest first.
+            $table->index(['pos_order_id', 'occurred_at'], 'pos_order_edit_logs_order_index');
         });
 
         $this->applyChecks('pos_order_edit_logs', ['action' => OrderEditAction::values()]);

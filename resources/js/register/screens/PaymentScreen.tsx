@@ -99,10 +99,16 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
             const method = catalog.paymentMethods.find((candidate) => candidate.id === methodId);
             if (method?.is_cash_count) {
                 const runtime = tryRuntime();
-                if (runtime) void openDrawer(runtime.printer);
+                if (runtime) {
+                    void openDrawer(runtime.printer, 'cash_payment', {
+                        sessionId: order?.pos_session_id ?? null,
+                        orderUuid,
+                        employeeId: order?.employee_id ?? null,
+                    });
+                }
             }
         },
-        [catalog.paymentMethods, orderUuid, prefillFor],
+        [catalog.paymentMethods, order?.employee_id, order?.pos_session_id, orderUuid, prefillFor],
     );
 
     const applyBuffer = useCallback(

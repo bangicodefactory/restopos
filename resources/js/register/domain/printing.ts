@@ -1,5 +1,6 @@
 import type { EscPosDoc, PrinterProfileId } from '@domain/escpos/index';
-import type { PosPrinterRow } from '@domain/types';
+import type { AuditBatchPayload } from '@domain/sync/wire';
+import { asUuid, type PosPrinterRow } from '@domain/types';
 import {
     PrinterRouter,
     type PrintOutcome,
@@ -145,7 +146,49 @@ function printResolved(router: PrinterRouter, doc: EscPosDoc, request: PrintRequ
     });
 }
 
-/** REG-206 — open the drawer on a cash payment, and on a manager no-sale. */
-export async function openDrawer(router: PrinterRouter): Promise<void> {
+/** Why the drawer opened. `no_sale` is the one a manager goes looking for. */
+export type DrawerReason = 'cash_payment' | 'no_sale' | 'cash_move' | 'unknown';
+
+/**
+ * REG-206 — open the drawer on a cash payment, and on a manager no-sale.
+ *
+ * The pulse goes straight from this browser to the printer, so without the queued report below the
+ * server never learns the drawer opened at all — the one money-adjacent action leaving no row of any
+ * kind (BAN-413). The report is queued rather than posted because the drawer opens whether or not
+ * there is a network, and an opening during an outage is not the one you would want to lose.
+ *
+ * Reporting lives *here*, not at the call sites, on purpose: a caller that forgets is a silent hole
+ * in the trail, and holes in a fraud trail are found by the person exploiting them before they are
+ * found by anyone else.
+ */
+export async function openDrawer(
+    router: PrinterRouter,
+    reason: DrawerReason = 'unknown',
+    context: { sessionId?: number | null; orderUuid?: string | null; employeeId?: number | null } = {},
+): Promise<void> {
+    const runtime = tryRuntime();
+
+    if (runtime) {
+        const batch: AuditBatchPayload = {
+            events: [
+                {
+                    // The event's own uuid, not the batch's: the outbox redelivers, and each event
+                    // has to dedupe on itself or a resent batch reports openings that never happened.
+                    uuid: asUuid(crypto.randomUUID()),
+                    event: 'cash.drawer.opened',
+                    at: new Date().toISOString(),
+                    session_id: context.sessionId ?? null,
+                    order_uuid: context.orderUuid === null || context.orderUuid === undefined ? null : asUuid(context.orderUuid),
+                    employee_id: context.employeeId ?? null,
+                    detail: { reason },
+                },
+            ],
+        };
+
+        // Never let the report cost the pulse. A trail that can stop a cashier opening the till has
+        // traded a working register for better paperwork, which is the wrong way round.
+        void Promise.resolve(runtime.syncer.enqueueCommand('audit.batch', batch)).catch(() => undefined);
+    }
+
     await router.openDrawer();
 }

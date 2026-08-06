@@ -9,6 +9,7 @@ use App\Models\Concerns\HasUuid;
 use App\Models\Identity\Employee;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
+use App\Models\Pos\PosDevice;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -39,6 +40,7 @@ class OrderEditLog extends Model
         'new_value',
         'amount_impact',
         'employee_id',
+        'pos_device_id',
         'occurred_at',
     ];
 
@@ -67,6 +69,12 @@ class OrderEditLog extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'employee_id');
+    }
+
+    /** @return BelongsTo<PosDevice, $this> */
+    public function device(): BelongsTo
+    {
+        return $this->belongsTo(PosDevice::class, 'pos_device_id');
     }
 
     /** @param  Builder<static>  $query */

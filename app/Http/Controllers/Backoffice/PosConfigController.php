@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
+use App\Enums\AuditSeverity;
 use App\Enums\DeviceType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
@@ -15,7 +16,9 @@ use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
 use App\Models\Pricing\FiscalPosition;
 use App\Models\Pricing\Pricelist;
+use App\Services\Audit\AuditRecorder;
 use App\Services\Device\DevicePairingService;
+use App\Support\Audit\AuditEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -32,7 +35,10 @@ use Inertia\Response;
  */
 final class PosConfigController extends Controller
 {
-    public function __construct(private readonly DevicePairingService $pairing) {}
+    public function __construct(
+        private readonly DevicePairingService $pairing,
+        private readonly AuditRecorder $audit,
+    ) {}
 
     public function index(): Response
     {
@@ -142,7 +148,26 @@ final class PosConfigController extends Controller
             }
         }
 
+        // Snapshot before the write, and diff after — a register's settings are where the money
+        // rules live (`amount_authorized_diff` is the variance a manager may wave through,
+        // `has_cash_control` decides whether the drawer is counted at all). "Who turned cash
+        // control off, and when" is a question an auditor asks and nothing could answer (BAN-413).
+        $before = array_intersect_key($config->getOriginal(), $data);
+
         $config->forceFill($data)->save();
+
+        $changes = AuditRecorder::diff($before, $data);
+
+        if ($changes !== []) {
+            $this->audit->record(
+                event: AuditEvent::ConfigChanged,
+                subject: $config,
+                severity: AuditSeverity::Notice,
+                message: "Register {$config->name} settings changed",
+                changes: $changes,
+                config: $config,
+            );
+        }
 
         // Every client-visible edit invalidates every register's cache.
         $config->bumpRevision();

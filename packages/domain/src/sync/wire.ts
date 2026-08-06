@@ -131,6 +131,37 @@ export type GenericCommand = {
     at: Iso;
 };
 
+/**
+ * Events the till observes that the server otherwise never learns about (BAN-413).
+ *
+ * The drawer is the reason this exists: it opens by an ESC/POS pulse sent straight from this browser
+ * to the printer, so without a report of it nothing about the one money-adjacent action with no row
+ * of its own ever reaches the server. Batched through the outbox, because the interesting openings
+ * are not the ones that happen while the network is up.
+ *
+ * The server accepts only the event names below — a device token is held by the till, and a till
+ * that could write arbitrary `audit_logs.event` strings could forge a session close into the trail
+ * that is supposed to be evidence against it.
+ */
+export type ClientAuditEvent =
+    | 'cash.drawer.opened'
+    | 'employee.logged_in'
+    | 'employee.override';
+
+export type AuditBatchPayload = {
+    events: Array<{
+        /** Per-event, not per-batch: the outbox redelivers, and each event dedupes on its own. */
+        uuid: Uuid;
+        event: ClientAuditEvent;
+        at: Iso;
+        session_id?: number | null;
+        order_uuid?: Uuid | null;
+        employee_id?: number | null;
+        /** Free-form context, stored as the row's `changes` diff. */
+        detail?: Record<string, string | number | boolean | null>;
+    }>;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Push results
 // ─────────────────────────────────────────────────────────────────────────────

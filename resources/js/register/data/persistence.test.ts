@@ -86,3 +86,78 @@ it('is a no-op when nothing is dirty', async () => {
     expect(await db.orders.count()).toBe(0);
     expect(useOrderStore.getState().orders).toEqual({});
 });
+
+/**
+ * BAN-413 — the manager override has to leave the till it was granted on.
+ *
+ * `approval.ts` verifies the PIN, writes an `ApprovalRow` to Dexie, and says in its own docblock
+ * that the approval "is recorded and synced". It was recorded. This file sent `approvals: []` —
+ * a hardcoded empty array — so the record of who authorised a discount lived on the granting device
+ * and nowhere else. Clear that tablet's storage, or simply replace it, and the one fact the PIN
+ * exists to capture is gone.
+ */
+type PushedCommand = { uuid: string; approvals: Array<{ uuid: string }> };
+
+it('sends the approvals stored against the order, not an empty array', async () => {
+    const enqueueOrder = vi.fn(async (_command: PushedCommand) => undefined);
+    const syncer = { enqueueOrder } as unknown as OutboxSyncer;
+    const persistence = createPersistence(db, syncer);
+    configureOrderActions({ persist: persistence.persist, enqueue: persistence.enqueue, onChange: () => {} });
+
+    const orderUuid = await createOrder({ tableId: 1 });
+    addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+    await db.approvals.put({
+        uuid: 'approval-1',
+        order_uuid: orderUuid,
+        ability: 'order.discount',
+        manager_employee_id: 7,
+        verified: 'online',
+        at: new Date().toISOString(),
+        context: {},
+    } as never);
+
+    persistence.enqueue(orderUuid);
+
+    // Reading the approvals makes this leg async, and `addLine` has its own enqueue in flight — so
+    // assert that *a* push carried the approval rather than that the last one did. Call ordering
+    // between two independent Dexie reads is not a property worth pinning.
+    const withApproval = (): PushedCommand | undefined =>
+        enqueueOrder.mock.calls
+            .map((call) => call[0])
+            .find((command) => command.approvals.length > 0);
+
+    await vi.waitFor(() => expect(withApproval()).toBeDefined());
+
+    expect(withApproval()?.approvals[0]).toMatchObject({
+        uuid: 'approval-1',
+        ability: 'order.discount',
+        manager_employee_id: 7,
+        verified: 'online',
+    });
+});
+
+it('still pushes the order when the approvals read fails', async () => {
+    // The trail must not be able to hold up a sale. A broken Dexie read costs the approval record,
+    // not the order.
+    const enqueueOrder = vi.fn(async (_command: PushedCommand) => undefined);
+    const syncer = { enqueueOrder } as unknown as OutboxSyncer;
+    const persistence = createPersistence(db, syncer);
+    configureOrderActions({ persist: persistence.persist, enqueue: persistence.enqueue, onChange: () => {} });
+
+    const orderUuid = await createOrder({ tableId: 1 });
+    addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+    vi.spyOn(db.approvals, 'where').mockImplementation(() => {
+        throw new Error('storage gone');
+    });
+
+    persistence.enqueue(orderUuid);
+
+    await vi.waitFor(() => expect(enqueueOrder).toHaveBeenCalled());
+
+    const command = enqueueOrder.mock.calls.at(-1)?.[0];
+
+    expect(command?.uuid).toBe(orderUuid);
+    expect(command?.approvals).toEqual([]);
+});
