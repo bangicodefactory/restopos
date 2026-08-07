@@ -571,6 +571,16 @@ Everything the closing popup needs:
 
 `expected_cash` = opening float + cash-counted payments + cash in/out movements.
 
+An `expected_amount` can be **negative**: a payment method whose refunds outrun its takings owes the
+customer, which happens as soon as someone returns with a receipt from a previous session. The
+closing screen pre-fills the counted amount from it, so the counted amount is signed too.
+
+### Money amounts on these endpoints
+
+Every cash amount — `opening_float`, `counted_cash`, `counted_by_method.*`, `denominations.*.denomination_value`, a cash movement's `amount` — is validated as `decimal:0,4` and answers `422` otherwise. Not `numeric`: `is_numeric("1e2")` is true and `bccomp("1e2", …)` throws, so exponent notation used to reach bcmath and return `500`.
+
+Amounts describing **physical cash** (`opening_float`, `counted_cash`, `denomination_value`) additionally reject negatives — a drawer holds no negative notes and a banknote has no negative face value. `counted_by_method.*` and a cash movement's `amount` stay signed, for the reasons above and because `cashMove` applies its own sign from the movement type.
+
 ### `POST /api/pos/sessions/{session}/close`
 
 ```jsonc

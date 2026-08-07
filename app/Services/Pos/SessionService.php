@@ -681,7 +681,17 @@ final readonly class SessionService
             ->orderByDesc('closed_at')
             ->first();
 
-        return (string) ($last?->cash_balance_closing_counted ?? '0');
+        $counted = (string) ($last?->cash_balance_closing_counted ?? '0');
+
+        // Never advise a float the open would refuse. `counted_cash` only rejects negatives as of
+        // BAN-507, so a session closed before that is sitting on one right now — and a register
+        // without cash control sends this value back verbatim, so it would be told to expect −50,
+        // send −50, and be refused. Every attempt, until someone edited the database.
+        //
+        // The clamp is the general form of that: an endpoint that tells a client what to send must
+        // not name something it will then reject.
+        // `cash_balance_closing_counted` is a `decimal:4` cast, so it is always bc-safe here.
+        return bccomp($counted, '0', 4) < 0 ? '0' : $counted;
     }
 
     /**
