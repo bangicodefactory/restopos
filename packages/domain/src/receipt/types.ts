@@ -1,5 +1,5 @@
 import type { Codepage, ReceiptWidth } from '../escpos/doc';
-import type { Money } from '../types';
+import type { Iso, Money } from '../types';
 
 /**
  * The receipt builder's input.
@@ -142,6 +142,10 @@ export type ReceiptLabels = {
     cancelled: string;
     quantity: string;
     price: string;
+    cashIn: string;
+    cashOut: string;
+    reason: string;
+    cashMoveSlip: string;
 };
 
 export const DEFAULT_LABELS: ReceiptLabels = {
@@ -174,6 +178,29 @@ export const DEFAULT_LABELS: ReceiptLabels = {
     cancelled: 'CANCELLED',
     quantity: 'Qty',
     price: 'Price',
+    cashIn: 'CASH IN',
+    cashOut: 'CASH OUT',
+    reason: 'Reason',
+    cashMoveSlip: 'Drawer movement',
+};
+
+/**
+ * A drawer movement slip (REG-013).
+ *
+ * Not a receipt: nothing was sold. It is the piece of paper that explains why the drawer is light
+ * — the float taken to the bank, the window cleaner paid in cash — and it is signed by whoever
+ * took the money out, which is why `cashierName` is on it rather than optional decoration.
+ */
+export type CashMoveView = {
+    uuid: string;
+    /** `cash_in` or `cash_out`. The slip that matters is the one for money leaving. */
+    kind: 'cash_in' | 'cash_out';
+    /** Always a positive magnitude; the direction is `kind`. */
+    amount: Money;
+    reason: string | null;
+    cashierName: string | null;
+    movedAt: Iso;
+    sessionName: string | null;
 };
 
 /** Kitchen ticket input — no prices, ever (spec 01 §5.7). */

@@ -9,6 +9,8 @@ import { requestApproval, type ApprovalGrant } from '../domain/approval';
 import {
     closeSession,
     confirmOpeningControl,
+    deleteCashMovement,
+    fetchCashMovements,
     fetchClosingData,
     fetchCurrentSession,
     openSession,
@@ -246,6 +248,85 @@ function OpenPane({ onDone }: { onDone: () => void }): JSX.Element {
     );
 }
 
+/**
+ * The drawer ledger, in the pane where the drawer is counted (REG-012).
+ *
+ * Every movement with its reason and who made it, because "the drawer is 40 short" and "Karim took
+ * 40 to the bank at 15:20 and here is the slip" are the same fact told with and without the ledger
+ * — and only one of them ends the conversation.
+ */
+function CashMovementList({ sessionId }: { sessionId: number }): JSX.Element | null {
+    const t = useT();
+    const money = useMoney();
+    const can = useCan();
+    const movements = usePosSessionStore((state) => state.movements);
+    const busy = usePosSessionStore((state) => state.busy);
+
+    if (movements.length === 0) return null;
+
+    // The ability governs whether the button is *offered*; the server verifies a manager PIN before
+    // it acts either way. A cashier who cannot delete should not be shown a button that will refuse
+    // them, and a manager should not have to guess that one exists.
+    const mayDelete = can('cash.in_out.delete');
+
+    return (
+        <section>
+            <h2 className="mb-2 font-semibold">{t('reg.session.movements')}</h2>
+            <ul data-testid="cash-movements" className="divide-y divide-slate-100 rounded-pos bg-slate-50">
+                {movements.map((movement) => {
+                    const out = Decimal.of(movement.amount).signum() < 0;
+
+                    return (
+                        <li key={movement.uuid} className="flex items-center gap-2 p-2">
+                            <div className="min-w-0 flex-1">
+                                <p className="truncate">
+                                    {movement.reason ?? t(out ? 'reg.session.cashOut' : 'reg.session.cashIn')}
+                                </p>
+                                <p className="text-sm text-slate-500">
+                                    {[movement.employee_name, formatClock(movement.moved_at)]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                </p>
+                            </div>
+                            <span className={cn('tabular-nums font-semibold', out ? 'text-danger' : 'text-ok')}>
+                                {money(Decimal.of(movement.amount).withScale(2).toString())}
+                            </span>
+                            {mayDelete ? (
+                                <Button
+                                    variant="ghost"
+                                    disabled={busy}
+                                    onClick={async () => {
+                                        const grant = await requestApproval('cash.in_out.delete');
+                                        if (!grant) return;
+                                        await deleteCashMovement({
+                                            sessionId,
+                                            movementUuid: movement.uuid,
+                                            managerEmployeeId: grant.managerEmployeeId,
+                                            managerPin: grant.pin,
+                                        });
+                                    }}
+                                >
+                                    {t('reg.session.removeMovement')}
+                                </Button>
+                            ) : null}
+                        </li>
+                    );
+                })}
+            </ul>
+        </section>
+    );
+}
+
+/** `15:20` from an ISO timestamp, or nothing when the server sent none. */
+function formatClock(iso: string | null): string {
+    if (!iso) return '';
+    const at = new Date(iso);
+
+    return Number.isNaN(at.getTime())
+        ? ''
+        : `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
 function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
     const t = useT();
     const money = useMoney();
@@ -263,7 +344,9 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
     const [force, setForce] = useState(false);
 
     useEffect(() => {
-        if (session) void fetchClosingData(session.id);
+        if (!session) return;
+        void fetchClosingData(session.id);
+        void fetchCashMovements(session.id);
     }, [session]);
 
     const drafts = useMemo(() => (orders ? draftOrders(useOrderStore.getState()).length : 0), [orders]);
@@ -322,6 +405,8 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                     <dd className="tabular-nums">{money(difference.withScale(2).toString())}</dd>
                 </div>
             </dl>
+
+            <CashMovementList sessionId={session.id} />
 
             <section>
                 <h2 className="mb-2 font-semibold">{t('reg.pay.methods')}</h2>

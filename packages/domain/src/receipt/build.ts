@@ -2,7 +2,7 @@ import { EscPosBuilder } from '../escpos/builder';
 import type { EscPosDoc } from '../escpos/doc';
 import { Decimal } from '../money/decimal';
 import { formatDateTime, formatMoney, formatPercent, formatQuantity } from './format';
-import type { PrepTicketView, ReceiptConfigView, ReceiptOrderView } from './types';
+import type { CashMoveView, PrepTicketView, ReceiptConfigView, ReceiptOrderView } from './types';
 
 /**
  * The receipt templates (spec 03 §7.1).
@@ -173,6 +173,70 @@ export function buildBillDoc(order: ReceiptOrderView, config: ReceiptConfigView)
             ...doc.nodes,
         ],
     };
+}
+
+/**
+ * The drawer-movement slip (REG-013).
+ *
+ * Deliberately not a receipt: nothing was sold, so there is no line table, no tax breakdown and no
+ * customer copy. What it has to carry is who took money out of the till, how much, why and when —
+ * the four facts an owner reconciling a short drawer at the end of the week actually needs, and the
+ * reason a cash-out with no paper trail is the easiest money in the building to take.
+ *
+ * The amount is printed as a positive magnitude under a heading that says which way it went. A
+ * minus sign on a thermal slip is one faded pixel away from being invisible.
+ */
+export function buildCashMoveDoc(move: CashMoveView, config: ReceiptConfigView): EscPosDoc {
+    const b = new EscPosBuilder({
+        width: config.width,
+        codepage: config.codepage,
+        kind: 'cash_move',
+        orderUuid: move.uuid,
+        title: move.reason ?? undefined,
+    });
+    const l = config.labels;
+
+    if (config.logoKey) b.image({ key: config.logoKey, align: 'center' });
+    b.title(config.companyName);
+    for (const line of config.companyAddress) b.subtitle(line);
+
+    b.feed(1);
+    b.text(l.cashMoveSlip, { align: 'center' });
+    b.text(move.kind === 'cash_in' ? l.cashIn : l.cashOut, { align: 'center', bold: true, size: 'lg' });
+
+    b.rule('=');
+    b.row(formatDateTime(move.movedAt), move.sessionName ?? '');
+    if (move.cashierName) b.row(l.cashier, move.cashierName);
+    b.rule('-');
+
+    // Magnitude, not the signed column value: the heading above already says which direction this
+    // is, and `-20.00` under a "CASH OUT" banner reads as a correction of a cash-out to someone
+    // holding the slip.
+    b.row(l.amount, formatMoney(Decimal.of(move.amount).abs().toString(), config.currency), {
+        bold: true,
+        size: 'lg',
+    });
+
+    if (move.reason) {
+        b.feed(1);
+        b.text(`${l.reason}:`, { bold: true });
+        b.text(move.reason);
+    }
+
+    // Two lines of nothing, then a rule: the slip is signed by hand and filed, so it needs somewhere
+    // to sign.
+    b.feed(2);
+    b.rule('_');
+
+    if (config.footer) {
+        b.feed(1);
+        b.text(config.footer, { align: 'center' });
+    }
+
+    b.feed(2);
+    b.cut();
+
+    return b.build();
 }
 
 /** The kitchen ticket. Big type, no prices, only the delta on a re-fire. */

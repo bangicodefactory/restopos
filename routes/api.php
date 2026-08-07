@@ -99,6 +99,7 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::post('sessions/{session}/opening-control', [SessionController::class, 'confirmOpening'])->name('sessions.opening-control');
         Route::get('sessions/{session}/closing-data', [SessionController::class, 'closingData'])->name('sessions.closing-data');
         Route::post('sessions/{session}/close', [SessionController::class, 'close'])->name('sessions.close');
+        Route::get('sessions/{session}/cash-movements', [SessionController::class, 'cashMovements'])->name('sessions.cash-movements.index');
         Route::post('sessions/{session}/cash-movements', [SessionController::class, 'cashMovement'])->name('sessions.cash-movements');
         Route::delete('sessions/{session}/cash-movements/{movement}', [SessionController::class, 'destroyCashMovement'])->name('sessions.cash-movements.destroy');
         Route::post('sessions/{session}/accounting-export', [SessionController::class, 'accountingExport'])->name('sessions.accounting-export');

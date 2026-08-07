@@ -3,6 +3,7 @@ import { Decimal } from '@domain/money/decimal';
 import {
     DEFAULT_LABELS,
     buildBillDoc,
+    buildCashMoveDoc,
     buildPrepTicketDoc,
     buildReceiptDoc,
     type PrepTicketView,
@@ -215,6 +216,26 @@ export function buildBill(
     const view = buildReceiptView(state, orderUuid, context);
     if (!view) return null;
     return buildBillDoc(view, receiptConfig());
+}
+
+/**
+ * REG-013 — the slip for money taken out of (or put into) the drawer.
+ *
+ * Built from what the cashier just entered rather than from a round trip, so the paper comes out
+ * with the customer or the courier still standing there. The movement itself queues through the
+ * outbox and may not have reached the server yet; the slip is a record of what was done at the
+ * till, which is exactly what someone is signing.
+ */
+export function buildCashMoveSlip(move: {
+    uuid: string;
+    kind: 'cash_in' | 'cash_out';
+    amount: string;
+    reason: string | null;
+    cashierName: string | null;
+    movedAt: string;
+    sessionName: string | null;
+}): EscPosDoc {
+    return buildCashMoveDoc(move, receiptConfig());
 }
 
 /** KDS-055 — one kitchen ticket for one station's slice of the delta. */
