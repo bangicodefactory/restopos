@@ -312,7 +312,10 @@ it('balances a cash-rounded period to exactly zero', function (): void {
             'uuid' => (string) Str::uuid(),
             'variant_id' => $this->fx->variant->getKey(),
             'qty' => '1',
+            // Hand-priced so it lands off the nickel grid; the catalogue price rounds cleanly and
+            // would take the rounding this test exists to exercise out of the picture (BAN-502).
             'price_unit' => '10.13',
+            'price_type' => 'manual',
             'discount' => '0',
         ]], ['state' => OrderState::Paid->value], [[
             'op' => 'create',

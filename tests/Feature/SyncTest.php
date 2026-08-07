@@ -880,3 +880,393 @@ it('refuses to adopt a course row belonging to another order', function (): void
         ->and((string) DB::table('restaurant_order_courses')->where('uuid', $courseUuid)->value('name'))
         ->toBe('Starters');
 });
+
+// ── XCT-107 — who decides what a line costs ──────────────────────────────────
+
+/**
+ * BAN-502.
+ *
+ * The register resolved prices client-side and the server stored what it was handed. The
+ * `client_total_mismatch` warning was never a control on this: it compares the client's total
+ * against the server's recomputation *of the client's own prices*, so a till that agrees with
+ * itself — a bug, a stale pricelist, a crafted payload — passed in silence. A EUR 10 pizza pushed at
+ * EUR 0.01 was charged at EUR 0.01, with no warning at all.
+ *
+ * What makes this a behavioural change rather than a bug fix is that a client-set price is often the
+ * *right* answer on a till. These pin which cases are which.
+ */
+
+/** One line command, spelled out, so a test can vary exactly one field. */
+function priced(PosFixtures $fx, array $overrides = []): array
+{
+    return [
+        'op' => 'create',
+        'uuid' => (string) Str::uuid(),
+        'variant_id' => $fx->variant->getKey(),
+        'qty' => '1',
+        'price_unit' => '10.00',
+        'discount' => '0',
+        ...$overrides,
+    ];
+}
+
+/** Ring up one line and return the order it landed on. */
+function ringOneLine(PosFixtures $fx, array $line, array $order = []): Order
+{
+    $uuid = (string) Str::uuid();
+
+    sync([$fx->orderCommand($uuid, [$line], $order)])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    return Order::query()->where('uuid', $uuid)->firstOrFail();
+}
+
+it('prices a catalog line itself and ignores what the client sent', function (): void {
+    // The pizza is 10.00 in the catalogue. The till says one cent.
+    $order = ringOneLine($this->fx, priced($this->fx, ['price_unit' => '0.01']));
+
+    expect((string) OrderLine::query()->where('pos_order_id', $order->getKey())->value('price_unit'))
+        ->toBe('10.0000')
+        ->and((string) $order->amount_total)->toBe('12.1000');
+});
+
+it('does not warn about a price it simply overruled', function (): void {
+    // Ignored, not flagged: the client's number never reaches the money, so there is nothing for a
+    // manager to triage. Warnings are for divergences that stand.
+    $uuid = (string) Str::uuid();
+
+    $warnings = sync([$this->fx->orderCommand($uuid, [priced($this->fx, ['price_unit' => '0.01'])])])
+        ->assertOk()->json('results.0.warnings');
+
+    expect(collect($warnings)->pluck('code')->all())->not->toContain('price_override_refused');
+});
+
+it('honours a manual override on a register that does not restrict price control', function (): void {
+    // The default configuration, and the till's own rule (`NumpadPanel`): with price control
+    // unrestricted, typing a price is an ordinary part of the job.
+    $order = ringOneLine($this->fx, priced($this->fx, ['price_unit' => '7.50', 'price_type' => 'manual']));
+
+    expect((string) OrderLine::query()->where('pos_order_id', $order->getKey())->value('price_unit'))
+        ->toBe('7.5000');
+});
+
+it('refuses an override the pushing employee is not entitled to make', function (): void {
+    // With `restrict_price_control` on, a hand-typed price is a manager's action. A cashier's push
+    // is corrected to the catalogue price — not rejected, because a rejected *line* is invisible to
+    // the client (it reads the order's status) and the sale would proceed with the line silently
+    // missing. Corrected is money-safe and shows up in the response.
+    $this->fx->config->forceFill(['restrict_price_control' => true])->save();
+
+    $uuid = (string) Str::uuid();
+
+    $response = sync([$this->fx->orderCommand($uuid, [
+        priced($this->fx, ['price_unit' => '0.01', 'price_type' => 'manual']),
+    ])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((string) OrderLine::query()->where('pos_order_id', $order->getKey())->value('price_unit'))
+        ->toBe('10.0000');
+
+    expect(collect($response->json('results.0.warnings'))->pluck('code')->all())
+        ->toContain('price_override_refused');
+
+    // …and it is recorded for triage rather than only echoed back.
+    expect(DB::table('sync_conflicts')->where('record_uuid', $uuid)->count())->toBeGreaterThan(0);
+});
+
+it('honours the same override from an employee who holds the ability', function (): void {
+    $this->fx->config->forceFill(['restrict_price_control' => true])->save();
+
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'employee_id' => $this->fx->manager->getKey(),
+        'orders' => [$this->fx->orderCommand($uuid, [
+            priced($this->fx, ['price_unit' => '7.50', 'price_type' => 'manual']),
+        ])],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((string) OrderLine::query()->where('pos_order_id', $order->getKey())->value('price_unit'))
+        ->toBe('7.5000');
+});
+
+it('lets an open-price product be priced by anyone, restricted or not', function (): void {
+    // A deposit or a zero-priced product: the prompt *is* the price and the catalogue has nothing to
+    // overrule it with. The till sends these as `manual` too, so without the product-level exemption
+    // a restricted register could not sell one at all.
+    $this->fx->config->forceFill(['restrict_price_control' => true])->save();
+    $this->fx->product->forceFill(['list_price' => '0'])->save();
+    $this->fx->variant->forceFill(['list_price' => '0'])->save();
+
+    $order = ringOneLine($this->fx, priced($this->fx, ['price_unit' => '3.00', 'price_type' => 'manual']));
+
+    expect((string) OrderLine::query()->where('pos_order_id', $order->getKey())->value('price_unit'))
+        ->toBe('3.0000');
+});
+
+it('still prices a weighed line from the catalogue', function (): void {
+    // The scale sets the *quantity*, not the price — the unit price stays the catalogue's, so a
+    // weighed line needs no exemption at all. 2.5 kg of a 10.00/kg product is 25.00 net.
+    $this->fx->product->forceFill(['to_weight' => true])->save();
+
+    $order = ringOneLine($this->fx, priced($this->fx, ['qty' => '2.5', 'price_unit' => '10.00']));
+
+    expect((string) $order->amount_untaxed)->toBe('25.0000');
+});
+
+it('derives the option surcharge from the options, not from the client', function (): void {
+    // `price_extra` is the sum of the chosen options' own extras and nothing else. The server
+    // already wrote the real per-option amounts into the pivot and charged the client's figure
+    // beside them, so a line could claim a discount the catalogue never gave.
+    $optionId = $this->fx->attributeOption('Extra cheese', '2.00');
+
+    $honest = ringOneLine($this->fx, priced($this->fx, [
+        'price_extra' => '2.00', 'attribute_line_value_ids' => [$optionId],
+    ]));
+
+    $lying = ringOneLine($this->fx, priced($this->fx, [
+        'price_extra' => '0', 'attribute_line_value_ids' => [$optionId],
+    ]));
+
+    expect((string) $honest->amount_total)->toBe('14.5200')
+        ->and((string) $lying->amount_total)->toBe('14.5200');
+
+    // …and a surcharge with no option behind it is fiction, whatever the client claims.
+    $invented = ringOneLine($this->fx, priced($this->fx, ['price_extra' => '-9.00']));
+
+    expect((string) $invented->amount_total)->toBe('12.1000');
+});
+
+it('will not let an update reprice a line the create was not allowed to price', function (): void {
+    // Otherwise the check on create is a formality: ring it up honestly, then edit the price.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($orderUuid, [priced($this->fx, ['uuid' => $lineUuid])])])->assertOk();
+
+    sync([$this->fx->orderCommand($orderUuid, [
+        ['op' => 'update', 'uuid' => $lineUuid, 'price_unit' => '0.01'],
+    ])])->assertOk();
+
+    expect((string) OrderLine::query()->where('uuid', $lineUuid)->value('price_unit'))->toBe('10.0000');
+});
+
+it('credits a refund at what the original line was actually charged', function (): void {
+    // The cap (BAN-406) bounds how *many* units come back and says nothing about the rate, so one
+    // unit of a cheap line could be credited at any price at all.
+    $this->fx->config->forceFill(['restrict_price_control' => false])->save();
+
+    $saleUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($saleUuid, [
+        priced($this->fx, ['uuid' => $lineUuid, 'qty' => '1', 'price_unit' => '4.00', 'price_type' => 'manual']),
+    ], ['state' => OrderState::Paid->value])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $refundUuid = (string) Str::uuid();
+    $refundLine = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($refundUuid, [[
+        'op' => 'create', 'uuid' => $refundLine, 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '-1', 'price_unit' => '500.00', 'discount' => '0', 'refunded_line_uuid' => $lineUuid,
+    ]], ['is_refund' => true, 'refunded_order_uuid' => $saleUuid])])
+        ->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    // 4.00 was charged, so 4.00 comes back — never the 500.00 the push asked for.
+    expect((string) OrderLine::query()->where('uuid', $refundLine)->value('price_unit'))->toBe('4.0000');
+});
+
+it('charges a register combo exactly what the kiosk charges for it', function (): void {
+    // The parity that matters: `ComboCartPricer` was written for the kiosk in BAN-470 and the
+    // register priced combos client-side, so the same meal could cost two different amounts
+    // depending on which screen rang it up.
+    $combo = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 1,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $item = DB::table('combo_items')->insertGetId([
+        'combo_id' => $combo,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $orderUuid = (string) Str::uuid();
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+
+    // The till sends the components at their own list prices, which is the overcharge SLF-030 named.
+    sync([$this->fx->orderCommand($orderUuid, [
+        [
+            'op' => 'create', 'uuid' => $parentUuid,
+            'variant_id' => $this->fx->variant->getKey(), 'qty' => '1',
+            'price_unit' => '10.00', 'discount' => '0',
+        ],
+        [
+            'op' => 'create', 'uuid' => $childUuid,
+            'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1',
+            'price_unit' => '2.50', 'discount' => '0',
+            'combo_parent_uuid' => $parentUuid, 'combo_item_id' => $item,
+        ],
+    ])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+
+    // All of the money rides on the children, exactly as on the kiosk path.
+    expect((float) OrderLine::query()->where('uuid', $parentUuid)->value('price_unit'))->toBe(0.0)
+        ->and((float) OrderLine::query()->where('uuid', $childUuid)->value('price_unit'))->toBe(10.0);
+
+    // 10.00 + 21 % — not 12.50 + tax, which is what the components at list would have produced.
+    expect((float) $order->amount_total)->toBe(12.10);
+});
+
+it('does not charge a combo upgrade twice', function (): void {
+    // The child's price already carries its attribute extra: `ComboCartPricer` folds it in before
+    // distributing, so a `price_extra` column beside it would bill the paid upgrade a second time.
+    $combo = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 1,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $item = DB::table('combo_items')->insertGetId([
+        'combo_id' => $combo,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    // "Make it a large" on the drink inside the meal, worth 2.00.
+    $optionId = $this->fx->attributeOption('Large', '2.00', $this->fx->drink->getKey());
+
+    $orderUuid = (string) Str::uuid();
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($orderUuid, [
+        [
+            'op' => 'create', 'uuid' => $parentUuid,
+            'variant_id' => $this->fx->variant->getKey(), 'qty' => '1',
+            'price_unit' => '10.00', 'discount' => '0',
+        ],
+        [
+            'op' => 'create', 'uuid' => $childUuid,
+            'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1',
+            'price_unit' => '2.50', 'discount' => '0',
+            'combo_parent_uuid' => $parentUuid, 'combo_item_id' => $item,
+            'attribute_line_value_ids' => [$optionId],
+        ],
+    ])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $child = OrderLine::query()->where('uuid', $childUuid)->firstOrFail();
+
+    // 10.00 meal + 2.00 upgrade, all of it inside the unit price and none of it beside it.
+    expect((string) $child->price_unit)->toBe('12.0000')
+        ->and((string) $child->price_extra)->toBe('0.0000');
+
+    // 12.00 + 21 % — not 14.00 + 21 %, which is the upgrade counted twice.
+    expect((float) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe(14.52);
+});
+
+it('keeps combo pricing when a later push carries only one child', function (): void {
+    // The register normally re-pushes an order whole, but nothing in the contract requires it. Priced
+    // from the push alone, a child arriving on its own has no parent in view and is repriced as a
+    // loose product at list — which is both a mispricing and a way around combo pricing altogether.
+    $combo = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 1,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $item = DB::table('combo_items')->insertGetId([
+        'combo_id' => $combo,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $orderUuid = (string) Str::uuid();
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($orderUuid, [
+        [
+            'op' => 'create', 'uuid' => $parentUuid,
+            'variant_id' => $this->fx->variant->getKey(), 'qty' => '1',
+            'price_unit' => '10.00', 'discount' => '0',
+        ],
+        [
+            'op' => 'create', 'uuid' => $childUuid,
+            'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1',
+            'price_unit' => '2.50', 'discount' => '0',
+            'combo_parent_uuid' => $parentUuid, 'combo_item_id' => $item,
+        ],
+    ])])->assertOk();
+
+    expect((string) OrderLine::query()->where('uuid', $childUuid)->value('price_unit'))->toBe('10.0000');
+
+    // The child alone, naming no parent — the meal is only visible in what the order already holds.
+    sync([$this->fx->orderCommand($orderUuid, [
+        ['op' => 'update', 'uuid' => $childUuid, 'qty' => '1'],
+    ])])->assertOk();
+
+    expect((string) OrderLine::query()->where('uuid', $childUuid)->value('price_unit'))->toBe('10.0000')
+        ->and((float) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe(12.10);
+});
+
+it('will not let a partial update strip a line out of its combo', function (): void {
+    // The narrower version of the same dodge: a push that names the line and its price but leaves
+    // out `combo_parent_uuid`. Priced from the command alone the line looks like a loose drink, and
+    // repricing it at list is exactly the meal-deal reversal BAN-470 fixed for the kiosk.
+    $combo = DB::table('combos')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Pick a drink', 'base_price' => '4.00', 'qty_free' => 1, 'qty_max' => 1,
+        'sequence' => 10, 'active' => true, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $item = DB::table('combo_items')->insertGetId([
+        'combo_id' => $combo,
+        'product_variant_id' => $this->fx->drinkVariant->getKey(),
+        'extra_price' => '0', 'sequence' => 10, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $orderUuid = (string) Str::uuid();
+    $parentUuid = (string) Str::uuid();
+    $childUuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($orderUuid, [
+        [
+            'op' => 'create', 'uuid' => $parentUuid,
+            'variant_id' => $this->fx->variant->getKey(), 'qty' => '1',
+            'price_unit' => '10.00', 'discount' => '0',
+        ],
+        [
+            'op' => 'create', 'uuid' => $childUuid,
+            'variant_id' => $this->fx->drinkVariant->getKey(), 'qty' => '1',
+            'price_unit' => '2.50', 'discount' => '0',
+            'combo_parent_uuid' => $parentUuid, 'combo_item_id' => $item,
+        ],
+    ])])->assertOk();
+
+    // Names the variant and a price, says nothing about the meal it belongs to.
+    sync([$this->fx->orderCommand($orderUuid, [[
+        'op' => 'update', 'uuid' => $childUuid,
+        'variant_id' => $this->fx->drinkVariant->getKey(),
+        'qty' => '1', 'price_unit' => '2.50',
+    ]])])->assertOk();
+
+    expect((string) OrderLine::query()->where('uuid', $childUuid)->value('price_unit'))->toBe('10.0000')
+        ->and((float) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe(12.10);
+});
+
+it('still warns when a client-priced line disagrees with the client own total', function (): void {
+    // The mismatch warning keeps its job for the cases that stay client-priced — it is simply no
+    // longer the only thing standing between a device and the price of a pizza.
+    $uuid = (string) Str::uuid();
+
+    $response = sync([$this->fx->orderCommand(
+        $uuid,
+        [priced($this->fx, ['price_unit' => '7.50', 'price_type' => 'manual'])],
+        ['amount_total_client' => '99.99'],
+    )])->assertOk();
+
+    expect(collect($response->json('results.0.warnings'))->pluck('code')->all())
+        ->toContain('client_total_mismatch');
+});

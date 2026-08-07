@@ -285,7 +285,10 @@ it('emits one row per changed field, not one per command', function (): void {
 
     // One command, three things moved.
     push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
-        ['op' => 'update', 'uuid' => $lineUuid, 'qty' => '1', 'price_unit' => '8.00', 'discount' => '10'],
+        // `price_type` is what makes a price change the cashier's rather than the catalogue's, and
+        // the register sends it on every line — without it the server reprices and there is no price
+        // change to log at all (BAN-502).
+        ['op' => 'update', 'uuid' => $lineUuid, 'qty' => '1', 'price_unit' => '8.00', 'price_type' => 'manual', 'discount' => '10'],
     ])]])->assertOk();
 
     expect(editLogs()->pluck('action')->map(static fn ($a): string => $a->value)->all())
@@ -745,6 +748,12 @@ it('points the impact the right way when a refund order is cancelled', function 
 it('logs a change to the option surcharge', function (): void {
     // `price_extra` was compared but not tracked: raising it flipped `is_edited` and wrote no row,
     // so a manager opening the flagged order found nothing that explained the flag.
+    //
+    // Driven by *choosing the option* rather than by sending a number, because since BAN-502 the
+    // surcharge is the server's: it is the sum of the selected options' own extras, and a figure
+    // with no option behind it is fiction that used to be charged anyway.
+    $optionId = $this->fx->attributeOption('Extra cheese', '5.00');
+
     $orderUuid = (string) Str::uuid();
     $lineUuid = (string) Str::uuid();
 
@@ -755,7 +764,7 @@ it('logs a change to the option surcharge', function (): void {
     OrderEditLog::query()->delete();
 
     push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
-        ['op' => 'update', 'uuid' => $lineUuid, 'price_extra' => '5.00'],
+        ['op' => 'update', 'uuid' => $lineUuid, 'attribute_line_value_ids' => [$optionId]],
     ])]])->assertOk();
 
     $row = editLogs(OrderEditAction::PriceChanged)->first();

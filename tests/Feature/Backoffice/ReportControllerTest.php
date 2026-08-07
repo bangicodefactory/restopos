@@ -158,7 +158,11 @@ it('ranks products by revenue, not by units sold', function (): void {
                 'uuid' => (string) Str::uuid(),
                 'variant_id' => $this->fx->drinkVariant->getKey(),
                 'qty' => '10',
+                // Priced by hand: the scenario needs a cheap high-volume line against an expensive
+                // one, and since BAN-502 the server prices a `original` line from the catalogue, so
+                // a fixture that wants its own numbers has to say so the way the till does.
                 'price_unit' => '1.00',
+                'price_type' => 'manual',
                 'discount' => '0',
             ],
             // …against one expensive one.
@@ -168,6 +172,7 @@ it('ranks products by revenue, not by units sold', function (): void {
                 'variant_id' => $this->fx->variant->getKey(),
                 'qty' => '1',
                 'price_unit' => '90.00',
+                'price_type' => 'manual',
                 'discount' => '0',
             ],
         ], ['state' => OrderState::Paid->value], [[
