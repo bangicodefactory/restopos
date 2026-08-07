@@ -162,6 +162,14 @@ final readonly class SelfOrderService
 
         // Server-resolved prices for the whole cart at once (SLF-030). Per-line pricing cannot see
         // a combo: it returns each child's own list price, which reverses the meal-deal discount.
+        //
+        // Kept even though ingest prices lines again since BAN-502, and the two agree — the order
+        // carries the pricelist resolved here, so `LinePriceAuthority` reads the same one. They are
+        // not the same rule, and that is the point: this path has **no** exemptions because the
+        // client is a stranger's phone, while the register's has five, because on a till a
+        // client-set price is often the correct answer. Collapsing them would quietly hand kiosk
+        // carts the till's exemptions. The second pass is nearly free — `PricingService` memoises
+        // per request — and the duplication buys the stricter rule staying stricter.
         $prices = $this->comboPricer->priceCart($config, $pricelistId, $lines, $this->roundingStep($config));
 
         // The cart's line uuids never reach the database. `pos_order_lines.uuid` is globally unique,

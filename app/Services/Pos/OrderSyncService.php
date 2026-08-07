@@ -73,6 +73,7 @@ final readonly class OrderSyncService
         private SessionService $sessions,
         private PreparationService $preparation,
         private RefundService $refunds,
+        private LinePriceAuthority $prices,
         private OrderEditRecorder $edits,
         private AuditRecorder $audit,
         private Dispatcher $events,
@@ -695,7 +696,11 @@ final readonly class OrderSyncService
             return $refundPlan['rejection'];
         }
 
-        $lineResults = $this->applyLineCommands($config, $order, $lineCommands, $employeeId, $device, $wasSettled, $refundPlan['links']);
+        // Who prices each line (XCT-107) — decided once for the whole push, next to the refund
+        // preflight it mirrors, because a combo cannot be priced one row at a time.
+        $pricePlan = $this->prices->plan($config, $order, $lineCommands, $employeeId, $refundPlan['links']);
+
+        $lineResults = $this->applyLineCommands($config, $order, $lineCommands, $employeeId, $device, $wasSettled, $refundPlan['links'], $pricePlan);
 
         // Re-read after the write, not only before it. The preflight decides on a snapshot taken
         // under a row lock, which is the right mechanism and holds on Postgres and MySQL — but it
@@ -759,6 +764,15 @@ final readonly class OrderSyncService
 
         // 5 — recompute every monetary field. This is the authoritative pass.
         $computed = $this->recompute($config, $order);
+
+        // A manual price the pushing employee was not entitled to set. Reported rather than
+        // honoured, and rather than refused: the sale goes through at the catalogue price, so the
+        // money is right and the attempt is on the record (XCT-107).
+        foreach ($pricePlan->refusals() as $warning) {
+            $warnings[] = $warning;
+
+            $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $warning);
+        }
 
         foreach ($this->mismatchWarnings($attributes, $order) as $warning) {
             $warnings[] = $warning;
@@ -1047,7 +1061,12 @@ final readonly class OrderSyncService
         ?PosDevice $device = null,
         bool $settled = false,
         array $refundLinks = [],
+        ?PricePlan $plan = null,
     ): array {
+        // Not defaulted to an empty plan. An empty one means "the client's price stands for every
+        // line", so a caller that forgot to build one would silently hand price authority back to
+        // the till — the exact thing this parameter exists to take away (XCT-107).
+        $plan ??= $this->prices->plan($config, $order, $commands, $employeeId, $refundLinks);
         /** @var array<string, int> $existing uuid => id */
         $existing = OrderLine::query()
             ->where('pos_order_id', $order->getKey())
@@ -1098,8 +1117,8 @@ final readonly class OrderSyncService
 
             $results[] = match ($op) {
                 'delete' => $this->deleteLine($config, $order, $existing[$uuid] ?? null, $uuid, $employeeId, $device),
-                'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device, $refundLinks[$uuid] ?? null),
-                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device, $refundLinks[$uuid] ?? null),
+                'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device, $refundLinks[$uuid] ?? null, $plan),
+                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device, $refundLinks[$uuid] ?? null, $plan),
             };
         }
 
@@ -1420,9 +1439,10 @@ final readonly class OrderSyncService
         array $command,
         string $uuid,
         array &$existing,
-        ?int $employeeId = null,
-        ?PosDevice $device = null,
-        ?int $refundedLineId = null,
+        ?int $employeeId,
+        ?PosDevice $device,
+        ?int $refundedLineId,
+        PricePlan $plan,
     ): array {
         $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
         $variant = $this->variantMeta($variantId);
@@ -1445,8 +1465,9 @@ final readonly class OrderSyncService
             'full_product_name' => (string) ($command['full_product_name'] ?? $variant['display_name']),
             'uom_id' => $variant['uom_id'],
             'quantity' => (string) ($command['qty'] ?? $command['quantity'] ?? '1'),
-            'price_unit' => (string) ($command['price_unit'] ?? $variant['list_price']),
-            'price_extra' => (string) ($command['price_extra'] ?? '0'),
+            // The server's price where it has one; the client's only where it does not (XCT-107).
+            'price_unit' => $plan->priceFor($uuid) ?? (string) ($command['price_unit'] ?? $variant['list_price']),
+            'price_extra' => $plan->extraFor($uuid) ?? (string) ($command['price_extra'] ?? '0'),
             'price_type' => (string) ($command['price_type'] ?? PriceType::Original->value),
             'discount_percent' => (string) ($command['discount'] ?? $command['discount_percent'] ?? '0'),
             'discount_notice' => $command['discount_notice'] ?? null,
@@ -1665,9 +1686,10 @@ final readonly class OrderSyncService
         int $id,
         array $command,
         string $uuid,
-        ?int $employeeId = null,
-        ?PosDevice $device = null,
-        ?int $refundedLineId = null,
+        ?int $employeeId,
+        ?PosDevice $device,
+        ?int $refundedLineId,
+        PricePlan $plan,
     ): array {
         /** @var OrderLine|null $line */
         $line = OrderLine::query()->find($id);
@@ -1707,6 +1729,20 @@ final readonly class OrderSyncService
             if (array_key_exists($from, $command)) {
                 $update[$to] = $command[$from];
             }
+        }
+
+        // Same authority as on create: where the server has a price of its own, it wins, whether the
+        // client sent one or not. An update that quietly repriced a line would otherwise be the way
+        // round the check on create (XCT-107).
+        $serverPrice = $plan->priceFor($uuid);
+        $serverExtra = $plan->extraFor($uuid);
+
+        if ($serverPrice !== null) {
+            $update['price_unit'] = $serverPrice;
+        }
+
+        if ($serverExtra !== null) {
+            $update['price_extra'] = $serverExtra;
         }
 
         // The link is server-owned: a client may edit a refund's quantity (the preflight has already

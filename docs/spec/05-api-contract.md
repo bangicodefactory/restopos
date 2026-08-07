@@ -483,6 +483,26 @@ Payment rows carry terminal metadata only — brand, last four, auth code. Never
 
 ---
 
+### Who prices a line
+
+The server prices every register line it has a more authoritative answer for, and the client's `price_unit` is **ignored** rather than warned about (XCT-107). `client_total_mismatch` was never a control on this: it compares the client's total against a recomputation of the client's *own* prices, so a till that agrees with itself passes in silence.
+
+The client's number stands in five cases, each for its own reason:
+
+| Case | Why |
+| -- | -- |
+| open-price product (`special_kind: deposit`, or a catalogue price of 0) | the prompt *is* the price |
+| special lines (tip, global discount, loyalty reward) | the amount comes from elsewhere in the system |
+| `price_type: automatic` | already the output of a pricelist or reward calculation |
+| `price_type: manual` | a cashier override — see below |
+| a combo line the push cannot see whole | pricing a meal from a fragment reverses the meal deal |
+
+A manual override is accepted when `pos_configs.restrict_price_control` is off (the default — price entry is then an ordinary part of the job), or when the pushing `employee_id` holds `line.price_override`, re-checked server-side. Otherwise the line is priced from the catalogue and the attempt is reported as a `price_override_refused` warning: the sale goes through at the right money and the attempt is on the record. It is **not** rejected — a rejected line is invisible to a client that reads the order's status.
+
+`price_extra` is always the server's: it is the sum of the selected options' own extras and nothing else. On a combo child it is `0`, because `ComboCartPricer` folds the extra into the distributed price.
+
+A refund line is priced from the line it credits. The refund cap (BAN-406) bounds how *many* units come back and says nothing about the rate.
+
 ## 6. Register — sessions & cash
 
 ### `GET /api/pos/sessions/current`
