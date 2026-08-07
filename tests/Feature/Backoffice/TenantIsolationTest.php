@@ -27,6 +27,13 @@ uses(TestCase::class, RefreshDatabase::class);
  * query site remembered to scope.
  */
 beforeEach(function (): void {
+    // Two of these render the Inertia root view, and the PHP CI job builds no front-end assets — so
+    // without this they fail on a missing Vite manifest *only in CI*, where nobody was looking.
+    // `RouteBindingTest` has said exactly this since it was written; this file renders the same
+    // views and never picked it up. Master's Tests workflow had been red on it for days while the
+    // suite passed locally, because a local checkout has `public/build` lying around from a build.
+    $this->withoutVite();
+
     $this->alpha = PosFixtures::make()->withSession();
     $this->beta = PosFixtures::make()->withSession();
 
