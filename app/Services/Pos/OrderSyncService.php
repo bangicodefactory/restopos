@@ -1063,7 +1063,10 @@ final readonly class OrderSyncService
         array $refundLinks = [],
         ?PricePlan $plan = null,
     ): array {
-        $plan ??= new PricePlan;
+        // Not defaulted to an empty plan. An empty one means "the client's price stands for every
+        // line", so a caller that forgot to build one would silently hand price authority back to
+        // the till — the exact thing this parameter exists to take away (XCT-107).
+        $plan ??= $this->prices->plan($config, $order, $commands, $employeeId, $refundLinks);
         /** @var array<string, int> $existing uuid => id */
         $existing = OrderLine::query()
             ->where('pos_order_id', $order->getKey())
@@ -1436,12 +1439,11 @@ final readonly class OrderSyncService
         array $command,
         string $uuid,
         array &$existing,
-        ?int $employeeId = null,
-        ?PosDevice $device = null,
-        ?int $refundedLineId = null,
-        ?PricePlan $plan = null,
+        ?int $employeeId,
+        ?PosDevice $device,
+        ?int $refundedLineId,
+        PricePlan $plan,
     ): array {
-        $plan ??= new PricePlan;
         $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
         $variant = $this->variantMeta($variantId);
 
@@ -1684,13 +1686,11 @@ final readonly class OrderSyncService
         int $id,
         array $command,
         string $uuid,
-        ?int $employeeId = null,
-        ?PosDevice $device = null,
-        ?int $refundedLineId = null,
-        ?PricePlan $plan = null,
+        ?int $employeeId,
+        ?PosDevice $device,
+        ?int $refundedLineId,
+        PricePlan $plan,
     ): array {
-        $plan ??= new PricePlan;
-
         /** @var OrderLine|null $line */
         $line = OrderLine::query()->find($id);
 

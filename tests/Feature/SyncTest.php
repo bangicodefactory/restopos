@@ -1256,6 +1256,43 @@ it('will not let a partial update strip a line out of its combo', function (): v
         ->and((float) Order::query()->where('uuid', $orderUuid)->value('amount_total'))->toBe(12.10);
 });
 
+it('does not make pricing cost more queries as the tab grows', function (): void {
+    // The register re-pushes an order whole on every change, so anything the price plan does *per
+    // line* is paid again on every add, every quantity change and every note — on the longest tabs,
+    // in the busiest service. The first cut of BAN-502 cost ~3 extra queries a line (a 40-line tab
+    // went from 181 queries to 303) because `PricingService::variant()` was unmemoised and the
+    // product id was fetched one row at a time.
+    //
+    // Asserted as a *marginal* cost rather than a total, so it keeps its meaning when unrelated
+    // work changes the fixed overhead. Measured: ~3.8 per line fixed, ~6.9 per line before.
+    $measure = function (int $size): int {
+        $lines = [];
+
+        for ($i = 0; $i < $size; $i++) {
+            $lines[] = [
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'variant_id' => $i % 2 === 0 ? $this->fx->variant->getKey() : $this->fx->drinkVariant->getKey(),
+                'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+            ];
+        }
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        sync([$this->fx->orderCommand((string) Str::uuid(), $lines)])->assertOk();
+
+        $count = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return $count;
+    };
+
+    $small = $measure(10);
+    $large = $measure(40);
+
+    expect(($large - $small) / 30)->toBeLessThan(5.0);
+});
+
 it('still warns when a client-priced line disagrees with the client own total', function (): void {
     // The mismatch warning keeps its job for the cases that stay client-priced — it is simply no
     // longer the only thing standing between a device and the price of a pizza.

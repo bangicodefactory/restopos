@@ -251,6 +251,11 @@ final readonly class LinePriceAuthority
     {
         $cart = $held;
 
+        // One lookup for every product this push needs, rather than one per line. The register
+        // re-pushes an order whole on each change, so anything per-line here is paid again on every
+        // keystroke of a long tab.
+        $productByVariant = $this->productIdsFor($commands, $held);
+
         foreach ($commands as $uuid => $command) {
             $existing = $held[$uuid] ?? [];
 
@@ -263,7 +268,7 @@ final readonly class LinePriceAuthority
             $cart[$uuid] = [
                 'uuid' => $uuid,
                 'variant_id' => $variantId,
-                'product_id' => (int) ($existing['product_id'] ?? $this->productIdFor($variantId)),
+                'product_id' => (int) ($existing['product_id'] ?? $productByVariant[$variantId] ?? 0),
                 'quantity' => (string) ($command['qty'] ?? $command['quantity'] ?? $existing['quantity'] ?? '1'),
                 'combo_parent_uuid' => $command['combo_parent_uuid'] ?? $existing['combo_parent_uuid'] ?? null,
                 'combo_item_id' => $command['combo_item_id'] ?? $existing['combo_item_id'] ?? null,
@@ -398,9 +403,41 @@ final readonly class LinePriceAuthority
         return $price === null ? null : (string) $price;
     }
 
-    private function productIdFor(int $variantId): int
+    /**
+     * `product_id` for every variant named by this push, in one query.
+     *
+     * Only for lines the order does not already hold — an existing line carries its own product id,
+     * and asking again for it would be the per-line query this replaces.
+     *
+     * @param  array<string, array<string, mixed>>  $commands
+     * @param  array<string, array<string, mixed>>  $held
+     * @return array<int, int>
+     */
+    private function productIdsFor(array $commands, array $held): array
     {
-        return (int) ($this->connection->table('product_variants')->where('id', $variantId)->value('product_id') ?? 0);
+        $variantIds = [];
+
+        foreach ($commands as $uuid => $command) {
+            if (isset($held[$uuid]['product_id'])) {
+                continue;
+            }
+
+            $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
+
+            if ($variantId > 0) {
+                $variantIds[$variantId] = true;
+            }
+        }
+
+        if ($variantIds === []) {
+            return [];
+        }
+
+        return $this->connection->table('product_variants')
+            ->whereIn('id', array_keys($variantIds))
+            ->pluck('product_id', 'id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
     }
 
     private function roundingStep(PosConfig $config): string

@@ -31,6 +31,16 @@ final class PricingService
     /** @var array<int, list<int>> category id => ancestry, nearest first */
     private array $ancestry = [];
 
+    /**
+     * @var array<int, object|null> variant id => its pricing row
+     *
+     * Memoised for the same reason the resolvers and the ancestry above are, and it matters more
+     * than either: since BAN-502 the ingest prices every line of a push through here, and a
+     * restaurant tab repeats its variants constantly — four of the same beer are four lines. Two
+     * queries per line became two per *distinct* variant per request.
+     */
+    private array $variants = [];
+
     public function __construct(private readonly ConnectionInterface $connection) {}
 
     /**
@@ -162,6 +172,10 @@ final class PricingService
 
     private function variant(int $variantId): ?object
     {
+        if (array_key_exists($variantId, $this->variants)) {
+            return $this->variants[$variantId];
+        }
+
         $row = $this->connection->table('product_variants')
             ->join('products', 'products.id', '=', 'product_variants.product_id')
             ->where('product_variants.id', $variantId)
@@ -176,7 +190,7 @@ final class PricingService
             ->first();
 
         if ($row === null) {
-            return null;
+            return $this->variants[$variantId] = null;
         }
 
         $row->pos_category_id = $this->connection->table('pos_category_product')
@@ -184,6 +198,6 @@ final class PricingService
             ->orderBy('sequence')
             ->value('pos_category_id');
 
-        return $row;
+        return $this->variants[$variantId] = $row;
     }
 }
