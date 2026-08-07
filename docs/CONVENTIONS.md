@@ -137,3 +137,53 @@ Rules:
 
 The helpers in `tests/e2e/support/register.ts` wrap these, so specs read `tableTile(page, 2)` rather
 than repeating locator plumbing.
+
+## Mutation testing (the money paths)
+
+The suite proves the code does what the tests say. It does not prove the tests would notice if the
+code stopped doing it. On the money paths that gap is the whole risk: a guard that has never been
+executed by a test is indistinguishable from one that works, and every Phase 2 ticket found at
+least one — a two-layer check where each layer covered for the other, a test that passed because
+the *whole push* was failing, a sort guard that SQLite made unreachable.
+
+Those were found by hand: revert the guard, run the suite, confirm a test fails, restore. That
+technique works and it is worth keeping as a habit while writing a guard. What it must **not** be
+is the record of whether the guard is covered, because it fails silently. Three times across two
+sessions the edit turned out not to change behaviour — `attributeExtra($id, [])` returns `'0'`
+either way; a `$cart = $held` edit while the fallback read `$held` by another path; once, a
+"mutation" applied to a *test* rather than to the code. Each produced a green run, and a green run
+reads as "the guard is safe".
+
+So the record is a tool:
+
+```
+composer mutation     # Infection over app/Services/Pos, app/Support/{Money,Pricing,Tax,Pos}
+npm run mutation      # Stryker over packages/domain
+```
+
+Both make the mutation themselves, verify it differs from the original, and report what **survived**
+— a mutant no test killed. A survivor is not automatically a bug; it is a line where the tests would
+not notice a change. Read each one and decide: write the test, or record why the mutant is
+uninteresting.
+
+Scope is deliberate, and it was set by measurement rather than taste. The first Stryker run covered
+all of `packages/domain`: 25 minutes, and the top of the survivor list was `receipt/build.ts` with
+288 mutants no test covers — because it is print layout, not money. Narrowed to the arithmetic, the
+same run is **7 minutes and scores 78.99 % (86.13 % of covered code)**, and every line in the report
+is about what a customer is charged. A slow check with an unreadable report is a check that gets
+deleted.
+
+So neither tool is pointed at the whole codebase. They cover money: the decimal and rounding
+primitives, pricelists and combo distribution, the tax engine, and on the PHP side the ingest,
+pricing and session services. Replication, bootstrap and sequence code is excluded by name — a
+survivor there is worth knowing and is not what this report is for.
+
+The floors are measured, not guessed. Stryker breaks below 75 against a real 78.99; Infection's is
+still 0, because generating PHP coverage needs pcov or Xdebug and neither was installed where this
+was written — raising it is a separate commit once CI has reported a number.
+
+`.github/workflows/mutation.yml` runs both on a PR that touches those paths **or the tests that
+cover them** — a PR that only edits a test can lower the score just as surely as one that edits the
+code — nightly, and on demand. The `break` thresholds are a ratchet, not a target: raise them when
+the real score clears them comfortably, and never lower one to make a build pass. A drop means a
+guard arrived without a test that exercises it, which is the exact thing this exists to catch.
