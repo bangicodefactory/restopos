@@ -218,6 +218,15 @@ final readonly class SessionService
             throw new DomainException('A cash movement needs an amount written as a decimal number.');
         }
 
+        // Money may only be attributed to someone who works here. `employee_id` arrives as a bare
+        // integer on both routes in, and nothing checked whose it was — so a movement could be
+        // recorded against another company's employee, which is a falsified record before it is
+        // anything else. Refused rather than quietly nulled: a push naming a stranger is not a
+        // rounding error, and swallowing it would hide that it happened.
+        if ($employeeId !== null && ! $this->employsWho($session, $employeeId)) {
+            throw new DomainException('That employee does not work for this company.');
+        }
+
         $magnitude = ltrim($amount, '-');
         $signed = $type === CashMovementType::CashOut || $type === CashMovementType::ClosingLift
             ? '-'.$magnitude
@@ -723,6 +732,15 @@ final readonly class SessionService
     private function abs(string $value): string
     {
         return ltrim($value, '-');
+    }
+
+    /** Does this employee belong to the company whose drawer is being moved? */
+    private function employsWho(PosSession $session, int $employeeId): bool
+    {
+        return $this->connection->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $session->company_id)
+            ->exists();
     }
 
     /**

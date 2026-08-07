@@ -217,8 +217,15 @@ final class SessionController extends Controller
             ->orderBy('id')
             ->get();
 
-        // One lookup for the names rather than one per row.
+        // One lookup for the names rather than one per row, and scoped to this register's company.
+        //
+        // The scoping is not belt-and-braces. `CompanyScope` deliberately does not apply to device
+        // requests — a till pulling its own catalogue is not a tenant question — so this query is
+        // unscoped unless it says otherwise, and `employee_id` on a movement is a bare integer that
+        // arrived from a client. `cashMove` now refuses a foreign one at the door, but rows written
+        // before it did are still in the table, and a name is not this register's to show.
         $employees = Employee::query()
+            ->where('company_id', $session->company_id)
             ->whereIn('id', $movements->pluck('employee_id')->filter()->unique()->all() ?: [0])
             ->pluck('name', 'id');
 

@@ -140,6 +140,51 @@ it('refuses to delete a movement belonging to another session', function (): voi
     expect(CashMovement::query()->where('uuid', $foreign)->exists())->toBeTrue();
 });
 
+// ── whose employee ───────────────────────────────────────────────────────────
+
+it('refuses to attribute a movement to another company employee', function (): void {
+    // `employee_id` is a bare integer on both routes in and nothing checked whose it was. A movement
+    // recorded against another company's employee is a falsified record before it is anything else,
+    // and it becomes a *disclosure* the moment the ledger resolves that id to a name.
+    $theirs = PosFixtures::make();
+
+    test()->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$this->fx->session->getKey()}/cash-movements", [
+            'movement_type' => 'cash_out',
+            'amount' => '10.00',
+            'reason' => 'Crafted',
+            'employee_id' => $theirs->manager->getKey(),
+        ])
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'cash_move_refused');
+
+    expect(CashMovement::query()->count())->toBe(0);
+});
+
+it('never names another company employee, even on a row already in the table', function (): void {
+    // The write is guarded now; rows written before it was are not. `CompanyScope` does not apply to
+    // device requests by design, so the read has to say so itself.
+    $theirs = PosFixtures::make();
+    $theirs->manager->forceFill(['name' => 'Somebody Elsewhere'])->save();
+
+    $uuid = (string) moveCash($this->fx, 'cash_out', '10.00', 'Historic')->assertCreated()->json('uuid');
+
+    // Straight into the table, the way a pre-guard row got there.
+    CashMovement::query()->where('uuid', $uuid)->update(['employee_id' => $theirs->manager->getKey()]);
+
+    $rows = listMovements($this->fx)->assertOk()->json('movements');
+
+    expect($rows[0]['employee_name'])->toBeNull()
+        ->and($rows[0]['reason'])->toBe('Historic');
+});
+
+it('still names an employee of its own company', function (): void {
+    moveCash($this->fx, 'cash_in', '25.00', 'Change fund', $this->fx->cashier->getKey())->assertCreated();
+
+    expect(listMovements($this->fx)->assertOk()->json('movements.0.employee_name'))
+        ->toBe($this->fx->cashier->name);
+});
+
 // ── the amount, on both ways in ──────────────────────────────────────────────
 
 it('refuses an amount bcmath cannot read on the sync command path too', function (): void {
@@ -162,7 +207,12 @@ it('refuses an amount bcmath cannot read on the sync command path too', function
         ]],
     ])->assertOk();
 
-    expect($response->json('command_results.0.status'))->not->toBe('ok');
+    // Under `results`, not `command_results` — commands and orders share one result array, which is
+    // what makes `boot.ts` mark the outbox entry quarantined and surface it in the sync drawer. An
+    // assertion on the wrong key would have compared `null` against `'ok'` and passed for nothing.
+    expect($response->json('results.0.status'))->toBe('rejected')
+        ->and($response->json('results.0.error.code'))->toBe('command_failed');
+
     expect(CashMovement::query()->count())->toBe(0);
 });
 
