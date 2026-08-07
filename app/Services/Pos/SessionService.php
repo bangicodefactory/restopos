@@ -209,6 +209,15 @@ final readonly class SessionService
             throw new DomainException('Cash movements require an open session.');
         }
 
+        // Checked here rather than only at the HTTP boundary, because there are **two** ways in and
+        // BAN-507 only closed one. `CashMovementRequest` validates the endpoint; the sync path
+        // arrives through the generic `commands[]` envelope, whose payload is typed `array` and
+        // nothing more. A movement of `'plenty'` went into a `decimal(16,4)` column and was summed
+        // into the expected drawer — silently on SQLite, as an error on a strict database.
+        if (! $this->isDecimal($amount)) {
+            throw new DomainException('A cash movement needs an amount written as a decimal number.');
+        }
+
         $magnitude = ltrim($amount, '-');
         $signed = $type === CashMovementType::CashOut || $type === CashMovementType::ClosingLift
             ? '-'.$magnitude
@@ -717,16 +726,20 @@ final readonly class SessionService
     }
 
     /**
-     * A well-formed, non-zero amount.
+     * An amount bcmath can read.
      *
-     * The shape check is not belt-and-braces: `bccomp` is stricter than `is_numeric` and throws a
-     * ValueError on `1e2`, which `is_numeric` happily accepts. `open()` takes the float straight
-     * from a request, so an amount that never reaches bcmath is the difference between a rejected
-     * payload and a 500 (BAN-413).
+     * Not belt-and-braces: `bccomp` is stricter than `is_numeric` and throws a ValueError on `1e2`,
+     * which `is_numeric` happily accepts. Every amount here arrives from a request, so a value that
+     * never reaches bcmath is the difference between a rejected payload and a 500 (BAN-413).
      */
+    private function isDecimal(string $amount): bool
+    {
+        return preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $amount) === 1;
+    }
+
+    /** A well-formed amount that is not zero. */
     private function isNonZeroAmount(string $amount): bool
     {
-        return preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $amount) === 1
-            && bccomp($amount, '0', 4) !== 0;
+        return $this->isDecimal($amount) && bccomp($amount, '0', 4) !== 0;
     }
 }

@@ -45,15 +45,35 @@ export type RegisterProblem = { code: string; message: string };
  */
 export type OpeningContext = { expected_float: Money; problems: RegisterProblem[] };
 
+/**
+ * One row of the drawer ledger (REG-012).
+ *
+ * Read from the server rather than assembled from the till's replica, for the same reason the
+ * closing figures are: a movement entered on one register of a pair and deleted from the other
+ * would otherwise leave the two tills describing different drawers.
+ */
+export type CashMovementRow = {
+    uuid: string;
+    movement_type: string;
+    /** Signed as stored: negative for money leaving the drawer. */
+    amount: Money;
+    reason: string | null;
+    employee_id: number | null;
+    employee_name: string | null;
+    moved_at: string | null;
+};
+
 export type SessionSlice = {
     session: PosSessionRow | null;
     opening: OpeningContext | null;
     closingData: ClosingData | null;
+    movements: CashMovementRow[];
     busy: boolean;
     error: string | null;
 
     setSession: (session: PosSessionRow | null) => void;
     setOpening: (opening: OpeningContext | null) => void;
+    setMovements: (movements: CashMovementRow[]) => void;
     setClosingData: (data: ClosingData | null) => void;
     setBusy: (busy: boolean) => void;
     setError: (error: string | null) => void;
@@ -63,6 +83,7 @@ export const usePosSessionStore = createPosStore<SessionSlice>((set) => ({
     session: null,
     opening: null,
     closingData: null,
+    movements: [],
     busy: false,
     error: null,
 
@@ -74,6 +95,11 @@ export const usePosSessionStore = createPosStore<SessionSlice>((set) => ({
     setOpening: (opening) =>
         set((state) => {
             state.opening = opening;
+        }),
+
+    setMovements: (movements) =>
+        set((state) => {
+            state.movements = movements;
         }),
 
     setClosingData: (data) =>

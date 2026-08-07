@@ -12,6 +12,7 @@ use App\Http\Requests\Pos\CashMovementRequest;
 use App\Http\Requests\Pos\CloseSessionRequest;
 use App\Http\Requests\Pos\OpenSessionRequest;
 use App\Http\Resources\Pos\SessionResource;
+use App\Models\Identity\Employee;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosSession;
 use App\Services\Identity\EmployeeAuthService;
@@ -192,6 +193,48 @@ final class SessionController extends Controller
             'amount' => (string) $movement->amount,
             'session' => SessionResource::make($session->refresh())->resolve($request),
         ], 201);
+    }
+
+    /**
+     * `GET /api/pos/sessions/{session}/cash-movements` (REG-012).
+     *
+     * The movements that explain the drawer, for the closing pane. Read from the server rather than
+     * from the till's own replica on purpose, and for the same reason the closing figures are
+     * (REG-014): a cash movement can be entered on one register of a pair and deleted from the
+     * other, so a list assembled locally would show a drawer nobody else agrees with.
+     *
+     * Deleted rows are excluded. `deleteCashMovement` soft-deletes and logs, so the record survives
+     * for the audit trail — but a movement that has been withdrawn is not part of the explanation
+     * of the cash in the drawer, and showing it would invite counting it twice.
+     */
+    public function cashMovements(Request $request, PosSession $session): JsonResponse
+    {
+        $this->assertOwned($request, $session);
+
+        $movements = CashMovement::query()
+            ->where('pos_session_id', $session->getKey())
+            ->orderBy('moved_at')
+            ->orderBy('id')
+            ->get();
+
+        // One lookup for the names rather than one per row.
+        $employees = Employee::query()
+            ->whereIn('id', $movements->pluck('employee_id')->filter()->unique()->all() ?: [0])
+            ->pluck('name', 'id');
+
+        return new JsonResponse([
+            'movements' => $movements->map(static fn (CashMovement $movement): array => [
+                'uuid' => (string) $movement->uuid,
+                'movement_type' => (string) ($movement->movement_type?->value ?? $movement->movement_type),
+                'amount' => (string) $movement->amount,
+                'reason' => $movement->reason,
+                'employee_id' => $movement->employee_id,
+                'employee_name' => $movement->employee_id === null
+                    ? null
+                    : ($employees[$movement->employee_id] ?? null),
+                'moved_at' => $movement->moved_at,
+            ])->values()->all(),
+        ]);
     }
 
     /**

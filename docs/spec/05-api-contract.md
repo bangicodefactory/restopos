@@ -631,6 +631,24 @@ With `set_maximum_difference` off, any difference closes — the number is recor
 
 The caller always sends a positive magnitude; the server signs it (`cash_out` is stored negative). `movement_type` is `cash_in` or `cash_out`.
 
+### `GET /api/pos/sessions/{session}/cash-movements`
+
+The drawer ledger for the closing pane (REG-012), device-scoped like every other session route.
+
+```jsonc
+{ "movements": [ { "uuid": "…", "movement_type": "cash_out",
+                   "amount": "-40.0000",          // signed as stored: negative leaves the drawer
+                   "reason": "Bank run",
+                   "employee_id": 7, "employee_name": "Karim M.",
+                   "moved_at": "…" } ] }
+```
+
+Withdrawn movements are omitted. `deleteCashMovement` soft-deletes and writes an audit row, so the record survives — but a movement that has been taken back is no longer part of the explanation of the cash in the drawer.
+
+Deleting one (`DELETE …/cash-movements/{movement}`) needs a manager PIN verified server-side and the `cash.in_out.delete` ability; an employee id alone is not proof, because ids ship in the bootstrap payload. The session's `cash_in_total` / `cash_out_total` are recomputed, so the closing figures move with the ledger.
+
+**Amounts.** `cash_movements.amount` reaches bcmath, so it is validated as `decimal:0,4` on **both** ways in — the `POST` endpoint and the `session.cash_move` sync command, whose generic `commands[]` payload carries no schema of its own. The check lives in `SessionService::cashMove`, the one thing both routes pass through.
+
 ### `POST /api/pos/sessions/{session}/accounting-export`
 
 `201`: `{ "uuid": "…", "state": "generated", "total_sales": "…", "total_tax": "…", "total_payments": "…", "imbalance_amount": "0.0000" }`.

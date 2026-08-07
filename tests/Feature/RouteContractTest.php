@@ -221,7 +221,7 @@ function clientApiReferences(): array
         ->exclude(['__fixtures__', '__mocks__']);
 
     // `api.get('…')` / `this.client.post('…')` — verb is the method name, path the first argument.
-    $verbCall = '/\b(?:api|client)\.(get|post)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
+    $verbCall = '/\b(?:api|client)\.(get|post|delete)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
     // `api.request('METHOD', '…')` — verb is the first argument, path the second.
     $request = '/\b(?:api|client|this)\.request(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*[\'"`]([A-Z]+)[\'"`]\s*,\s*([\'"`])([^\'"`]+)\2/';
     // Absolute `'/api/…'` literals (e.g. the reachability probe's `fetch`). Single/double quotes
@@ -357,7 +357,7 @@ it('the scanner knows every verb the ApiClient exposes', function (): void {
     // had gone blind in the same way.
     preg_match_all('/^\s{4}(?:async\s+)?([a-z][A-Za-z0-9]*)\s*(?:<[^>]*>)?\s*\(/m', $source, $matches);
 
-    $known = ['get', 'post', 'request', 'constructor'];
+    $known = ['get', 'post', 'delete', 'request', 'constructor'];
     $unknown = array_values(array_diff(array_unique($matches[1]), $known));
 
     expect($unknown)->toBe(

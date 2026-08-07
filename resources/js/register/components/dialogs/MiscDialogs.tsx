@@ -1,3 +1,4 @@
+import { generateUuid } from '@domain/sequence/index';
 import { Decimal } from '@domain/money/decimal';
 import { useCan, useSessionStore } from '@shared/auth';
 import { Button, Dialog, NumPad, cn } from '@shared/ui';
@@ -5,6 +6,9 @@ import type { JSX } from 'react';
 import { useState } from 'react';
 
 import { useT } from '../../i18n';
+import { getRuntime } from '../../data/runtime';
+import { print } from '../../domain/printing';
+import { buildCashMoveSlip } from '../../domain/receipt';
 import { recordCashMovement } from '../../domain/session-actions';
 import { discardOrder, renameOrder, setGuestCount } from '../../domain/order-actions';
 import { baseListPrice, taxIdsFor } from '../../data/catalog';
@@ -124,6 +128,9 @@ export function CashMoveDialog(): JSX.Element | null {
     const [amount, setAmount] = useState('');
     const [reason, setReason] = useState('');
     const [error, setError] = useState<string | null>(null);
+    // Defaulted on for money *leaving* the drawer: that is the one somebody signs for. Cash in is
+    // usually the venue's own float and printing a slip for it wastes paper all day.
+    const [slip, setSlip] = useState(true);
 
     if (dialog?.kind !== 'cashMove') return null;
 
@@ -147,13 +154,37 @@ export function CashMoveDialog(): JSX.Element | null {
                                 return;
                             }
                             if (session === null) return;
+                            const magnitude = Decimal.of(amount).abs().withScale(2).toString();
+
                             await recordCashMovement({
                                 sessionId: session.id,
                                 type,
-                                amount: Decimal.of(amount).abs().withScale(2).toString(),
+                                amount: magnitude,
                                 reason: reason.trim(),
                                 employeeId: cashier?.employee_id ?? null,
                             });
+
+                            // The slip is printed from what was just entered, not from a round trip:
+                            // the movement queues through the outbox and the person the money is for
+                            // is standing at the till now (REG-013).
+                            if (slip) {
+                                const { printer } = getRuntime();
+
+                                await print(
+                                    printer,
+                                    buildCashMoveSlip({
+                                        uuid: generateUuid(),
+                                        kind: type,
+                                        amount: magnitude,
+                                        reason: reason.trim(),
+                                        cashierName: cashier?.name ?? null,
+                                        movedAt: new Date().toISOString(),
+                                        sessionName: session.name,
+                                    }),
+                                    { role: 'receipt' },
+                                );
+                            }
+
                             close();
                         }}
                     >
@@ -163,6 +194,10 @@ export function CashMoveDialog(): JSX.Element | null {
             }
         >
             <div className="space-y-3">
+                <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={slip} onChange={(event) => setSlip(event.target.checked)} />
+                    <span>{t('reg.session.printSlip')}</span>
+                </label>
                 <div className="flex gap-2">
                     {(['cash_in', 'cash_out'] as const).map((kind) => (
                         <Button

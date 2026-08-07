@@ -84,6 +84,9 @@ export const registerEn = {
     'reg.session.amount': 'Amount',
     'reg.session.reasonRequired': 'A reason is required.',
     'reg.session.movementQueued': 'Cash movement recorded',
+    'reg.session.movements': 'Drawer movements',
+    'reg.session.removeMovement': 'Remove',
+    'reg.session.printSlip': 'Print a slip',
     'reg.session.offlineClose': 'Closing data is computed by the server — reconnect to close the session.',
 
     // ── products ─────────────────────────────────────────────────────────────
@@ -411,6 +414,9 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.session.amount': 'Montant',
     'reg.session.reasonRequired': 'Un motif est obligatoire.',
     'reg.session.movementQueued': 'Mouvement de caisse enregistré',
+    'reg.session.movements': 'Mouvements de caisse',
+    'reg.session.removeMovement': 'Supprimer',
+    'reg.session.printSlip': 'Imprimer un reçu',
     'reg.session.offlineClose': 'Les données de clôture viennent du serveur — reconnectez-vous pour clôturer.',
 
     'reg.products.search': 'Rechercher un produit, une référence, un code-barres',

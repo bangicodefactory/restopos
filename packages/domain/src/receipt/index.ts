@@ -1,4 +1,4 @@
-export { buildBillDoc, buildPrepTicketDoc, buildReceiptDoc } from './build';
+export { buildBillDoc, buildCashMoveDoc, buildPrepTicketDoc, buildReceiptDoc } from './build';
 export { descriptorToText, toDescriptor } from './descriptor';
 export type { ReceiptDescriptor, ReceiptElement } from './descriptor';
 export { formatDateTime, formatMoney, formatPercent, formatQuantity } from './format';

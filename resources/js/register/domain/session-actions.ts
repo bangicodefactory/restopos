@@ -5,6 +5,7 @@ import { ApiError } from '@shared/sync';
 import { getRuntime } from '../data/runtime';
 import {
     usePosSessionStore,
+    type CashMovementRow,
     type ClosingData,
     type DenominationCount,
     type OpeningContext,
@@ -286,6 +287,74 @@ export async function closeSession(input: CloseSessionInput): Promise<CloseSessi
         return body?.closing_data
             ? { ok: false, reason, closingData: body.closing_data }
             : { ok: false, reason };
+    } finally {
+        store.setBusy(false);
+    }
+}
+
+/**
+ * The drawer ledger for a session (REG-012).
+ *
+ * Network-only, and unlike the session itself there is no replica to fall back on. That is the
+ * honest answer rather than a gap: this list exists to explain a drawer that two registers can both
+ * move money in and out of, so a locally-assembled one would be a guess presented as a reckoning.
+ * Offline the closing pane already refuses to compute expected cash for the same reason.
+ */
+export async function fetchCashMovements(sessionId: number): Promise<CashMovementRow[]> {
+    const { api } = getRuntime();
+    const store = usePosSessionStore.getState();
+
+    try {
+        const response = await api.get<{ movements: CashMovementRow[] }>(
+            `pos/sessions/${sessionId}/cash-movements`,
+        );
+        const movements = response.data?.movements ?? [];
+
+        store.setMovements(movements);
+
+        return movements;
+    } catch {
+        // No error banner: the closing pane already says it needs the network, and a second message
+        // about the same outage helps nobody.
+        store.setMovements([]);
+
+        return [];
+    }
+}
+
+/**
+ * Withdraw a cash movement (REG-011).
+ *
+ * Manager-gated, and the PIN travels with the request because the server verifies it — an employee
+ * id alone is not proof of anything, since ids ship in the bootstrap payload.
+ */
+export async function deleteCashMovement(input: {
+    sessionId: number;
+    movementUuid: string;
+    managerEmployeeId: number | null;
+    managerPin: string | null;
+}): Promise<boolean> {
+    const { api } = getRuntime();
+    const store = usePosSessionStore.getState();
+    store.setBusy(true);
+    store.setError(null);
+
+    try {
+        await api.delete(`pos/sessions/${input.sessionId}/cash-movements/${input.movementUuid}`, {
+            employee_id: input.managerEmployeeId,
+            pin: input.managerPin,
+        });
+
+        // Both halves, because deleting a movement changes the drawer: the ledger the cashier reads
+        // and the expected cash they are counting against.
+        await fetchCashMovements(input.sessionId);
+        await fetchClosingData(input.sessionId);
+
+        return true;
+    } catch (error) {
+        store.setError(describe(error));
+
+        return false;
     } finally {
         store.setBusy(false);
     }
