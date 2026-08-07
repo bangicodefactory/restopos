@@ -25,7 +25,6 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
-        "infection/infection": "^0.34.2",
         "larastan/larastan": "^3.0",
         "laravel/pail": "^1.2.2",
         "laravel/pint": "^1.13",
@@ -71,7 +70,7 @@
         ],
         "mutation": [
             "Composer\\Config::disableProcessTimeout",
-            "@php vendor/bin/infection --configuration=infection.json5 --threads=max --no-interaction"
+            "@php vendor/bin/pest --mutate --parallel --class=App\\Services\\Pos --class=App\\Support\\Money --class=App\\Support\\Pricing --class=App\\Support\\Tax --class=App\\Support\\Pos --ignore=App\\Services\\Pos\\BootstrapService --ignore=App\\Services\\Pos\\BootstrapRegistry --ignore=App\\Services\\Pos\\DeltaService --ignore=App\\Services\\Pos\\SequenceService --ignore=App\\Services\\Pos\\Dto --ignore=App\\Support\\Pricing\\Dto"
         ]
     },
     "extra": {
@@ -85,8 +84,7 @@
         "sort-packages": true,
         "allow-plugins": {
             "pestphp/pest-plugin": true,
-            "php-http/discovery": true,
-            "infection/extension-installer": true
+            "php-http/discovery": true
         }
     },
     "minimum-stability": "stable",

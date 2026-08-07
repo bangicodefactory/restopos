@@ -25,7 +25,6 @@ on:
       - 'packages/domain/src/**'
       - 'tests/**'
       - 'packages/domain/test/**'
-      - 'infection.json5'
       - 'stryker.config.json'
       - '.github/workflows/mutation.yml'
   schedule:
@@ -38,22 +37,19 @@ permissions:
 jobs:
   php:
     runs-on: ubuntu-latest
-    name: Infection (PHP money paths)
+    name: Pest --mutate (PHP money paths)
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          # Infection can restrict itself to the lines a PR changed; that needs the base commit.
-          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
-          # The whole point. `tests.yml` runs with `coverage: none`; Infection needs to know which
-          # test covers which line, or it re-runs the entire suite per mutant.
+          # The whole point. `tests.yml` runs with `coverage: none`; mutation testing needs to know
+          # which test covers which line, or it re-runs the entire suite per mutant.
           coverage: pcov
 
       - name: Copy environment file
@@ -65,22 +61,13 @@ jobs:
       - name: Generate app key
         run: php artisan key:generate
 
-      - name: Run Infection
-        run: |
-          php vendor/bin/infection \
-            --configuration=infection.json5 \
-            --threads=max \
-            --no-progress \
-            --no-interaction \
-            --logger-github
-
-      - name: Upload the survivor report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infection-report
-          path: storage/logs/infection*.log
-          if-no-files-found: ignore
+      # Pest's own mutation testing, not Infection. Infection drives `vendor/bin/phpunit`, which
+      # Pest refuses outright ("Please run [./vendor/bin/pest] instead"), and no adapter package
+      # bridges the two. Pest 3+ has this built in: no second config file, no extra dependency, and
+      # a runner that understands the suite it is mutating. Found by pushing to CI, which is the
+      # only place the two could be seen not to fit.
+      - name: Run mutation testing
+        run: composer mutation
 
   domain:
     runs-on: ubuntu-latest

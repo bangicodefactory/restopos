@@ -157,8 +157,8 @@ reads as "the guard is safe".
 So the record is a tool:
 
 ```
-composer mutation     # Infection over app/Services/Pos, app/Support/{Money,Pricing,Tax,Pos}
-npm run mutation      # Stryker over packages/domain
+composer mutation     # Pest --mutate over app/Services/Pos, app/Support/{Money,Pricing,Tax,Pos}
+npm run mutation      # Stryker over the money half of packages/domain
 ```
 
 Both make the mutation themselves, verify it differs from the original, and report what **survived**
@@ -178,9 +178,14 @@ primitives, pricelists and combo distribution, the tax engine, and on the PHP si
 pricing and session services. Replication, bootstrap and sequence code is excluded by name — a
 survivor there is worth knowing and is not what this report is for.
 
-The floors are measured, not guessed. Stryker breaks below 75 against a real 78.99; Infection's is
-still 0, because generating PHP coverage needs pcov or Xdebug and neither was installed where this
-was written — raising it is a separate commit once CI has reported a number.
+The PHP side uses **Pest's own `--mutate`**, not Infection. Infection drives `vendor/bin/phpunit`,
+which Pest refuses outright, and no adapter bridges them — a fact that only surfaced by pushing to
+CI. Pest 3+ has mutation testing built in, so there is no second config file and no extra
+dependency.
+
+The floors are measured, not guessed. Stryker breaks below 75 against a real 78.99. The PHP `--min`
+is not set yet: generating PHP coverage needs pcov or Xdebug, neither was installed where this was
+written, so the score is unknown until CI reports it — raising it is a separate, evidenced commit.
 
 `.github/workflows/mutation.yml` runs both on a PR that touches those paths **or the tests that
 cover them** — a PR that only edits a test can lower the score just as surely as one that edits the
