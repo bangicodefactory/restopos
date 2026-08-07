@@ -157,8 +157,9 @@ reads as "the guard is safe".
 So the record is a tool:
 
 ```
-composer mutation     # Pest --mutate over app/Services/Pos, app/Support/{Money,Pricing,Tax,Pos}
-npm run mutation      # Stryker over the money half of packages/domain
+composer mutation           # Pest --mutate over app/Support/{Money,Pricing,Tax,Pos}
+composer mutation:services  # …and over app/Services/Pos — on demand, it takes far longer
+npm run mutation            # Stryker over the money half of packages/domain
 ```
 
 Both make the mutation themselves, verify it differs from the original, and report what **survived**
@@ -177,6 +178,13 @@ So neither tool is pointed at the whole codebase. They cover money: the decimal 
 primitives, pricelists and combo distribution, the tax engine, and on the PHP side the ingest,
 pricing and session services. Replication, bootstrap and sequence code is excluded by name — a
 survivor there is worth knowing and is not what this report is for.
+
+Both default runs cover **arithmetic, not orchestration**, and that split was measured too. Pointing
+Pest at `App\Services\Pos` — `OrderSyncService` alone is 2,500 lines, and every mutant re-runs a
+575-test suite against a database — was still going after 23 minutes with no end in sight. It lives
+in `composer mutation:services` for when someone wants it, and out of the PR path. The same call was
+made on the TS side for `escpos` and `receipt`: a check that takes half an hour is a check somebody
+turns off.
 
 The PHP side uses **Pest's own `--mutate`**, not Infection. Infection drives `vendor/bin/phpunit`,
 which Pest refuses outright, and no adapter bridges them — a fact that only surfaced by pushing to
