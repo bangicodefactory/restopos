@@ -249,6 +249,8 @@ export async function fetchClosingData(sessionId: number): Promise<ClosingData |
 
 export type CloseSessionInput = {
     sessionId: number;
+    /** A session that never traded is abandoned rather than closed — the server asks for the word. */
+    abandon?: boolean;
     countedCash: string;
     countedByMethod: Record<number, string>;
     denominations?: DenominationCount[];
@@ -260,14 +262,64 @@ export type CloseSessionInput = {
 };
 
 export type CloseSessionResult =
-    | { ok: true; session: PosSessionRow | null }
+    | { ok: true; session: PosSessionRow | null; quarantined?: number }
     | { ok: false; reason: string; closingData?: ClosingData };
+
+/**
+ * Empty the outbox before the summaries are frozen (REG-017).
+ *
+ * A sale still queued when the session closes syncs afterwards, finds its session gone and is
+ * rerouted into a rescue session — money taken during the shift, sitting outside the Z-report that
+ * is supposed to account for it. The rescue path is the right safety net for a till that crashed;
+ * it is the wrong outcome for a till that is being closed deliberately with the queue in plain
+ * sight.
+ *
+ * `blocksSessionClose` is the outbox's own answer to "is anything unsent", and it deliberately
+ * excludes quarantined entries: those have been refused by the server and will never send, so
+ * waiting for them would strand the till forever. They are reported instead, because a rejected
+ * sale is something a manager needs to hear about before the drawer is counted.
+ *
+ * `drain()` sends one batch, so this loops — and stops when a pass makes no progress rather than
+ * spinning against a queue that cannot move.
+ */
+export async function drainBeforeClose(): Promise<{ drained: boolean; quarantined: number }> {
+    const { syncer } = getRuntime();
+
+    let stats = await syncer.stats();
+
+    while (stats.blocksSessionClose) {
+        await syncer.drain();
+
+        const after = await syncer.stats();
+
+        // Judged on the queue, not on what this call returned. `drain()` answers `{sent: 0}` when
+        // another drain is already in flight — and the syncer drains on a timer, so a close-time
+        // drain genuinely collides with a scheduled one. Bailing out on that number would give up
+        // while the queue is emptying underneath us. A queue that has not moved between two reads
+        // is the honest stop: offline, or everything left waiting on a backoff.
+        if (after.total === stats.total && after.pending === stats.pending) break;
+
+        stats = after;
+    }
+
+    return { drained: !stats.blocksSessionClose, quarantined: stats.quarantined };
+}
 
 export async function closeSession(input: CloseSessionInput): Promise<CloseSessionResult> {
     const { api } = getRuntime();
     const store = usePosSessionStore.getState();
     store.setBusy(true);
     try {
+        // Before the freeze, never after it.
+        const { drained, quarantined } = await drainBeforeClose();
+
+        if (!drained) {
+            const reason = 'unsent';
+            store.setError(reason);
+
+            return { ok: false, reason };
+        }
+
         const response = await api.post<PosSessionRow>(`pos/sessions/${input.sessionId}/close`, {
             counted_cash: input.countedCash,
             counted_by_method: input.countedByMethod,
@@ -277,9 +329,11 @@ export async function closeSession(input: CloseSessionInput): Promise<CloseSessi
             manager_employee_id: input.managerEmployeeId ?? null,
             manager_pin: input.managerPin ?? null,
             force: input.force ?? false,
+            abandon: input.abandon ?? false,
         });
         if (response.data) store.setSession(response.data);
-        return { ok: true, session: response.data };
+
+        return { ok: true, session: response.data, quarantined };
     } catch (error) {
         const reason = describe(error);
         store.setError(reason);

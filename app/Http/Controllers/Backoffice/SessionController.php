@@ -114,6 +114,9 @@ final class SessionController extends Controller
             notes: $data['notes'] ?? null,
             managerApproved: true,
             force: true,
+            // A manager reaching for "close" on a session that never traded, from a screen that
+            // shows them its state, *is* the explicit decision the register has to ask for.
+            abandon: true,
         );
 
         return back()->with('success', 'Session closed.');

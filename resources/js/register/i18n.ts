@@ -88,6 +88,9 @@ export const registerEn = {
     'reg.session.removeMovement': 'Remove',
     'reg.session.printSlip': 'Print a slip',
     'reg.session.offlineClose': 'Closing data is computed by the server — reconnect to close the session.',
+    'reg.session.closeNotes': 'Closing notes',
+    'reg.session.unsentBlocksClose': 'Some sales have not reached the server yet. Reconnect and try again — closing now would file them outside this session.',
+    'reg.session.quarantinedAtClose': '{count} queued entr(y/ies) were refused by the server and are not in this session. Check the sync panel.',
 
     // ── products ─────────────────────────────────────────────────────────────
     'reg.products.search': 'Search a product, a reference, a barcode',
@@ -418,6 +421,9 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.session.removeMovement': 'Supprimer',
     'reg.session.printSlip': 'Imprimer un reçu',
     'reg.session.offlineClose': 'Les données de clôture viennent du serveur — reconnectez-vous pour clôturer.',
+    'reg.session.closeNotes': 'Notes de clôture',
+    'reg.session.unsentBlocksClose': "Des ventes ne sont pas encore parvenues au serveur. Reconnectez-vous puis réessayez — clôturer maintenant les placerait hors de cette session.",
+    'reg.session.quarantinedAtClose': '{count} entrée(s) en file ont été refusées par le serveur et ne figurent pas dans cette session. Consultez le panneau de synchronisation.',
 
     'reg.products.search': 'Rechercher un produit, une référence, un code-barres',
     'reg.products.all': 'Tout',
