@@ -101,9 +101,16 @@ final class PosFixtures
      */
     public string $suffix = '';
 
+    /** The company name every venue is built from; the ordinal counts these and nothing else. */
+    private const CompanyName = 'Trattoria Test';
+
     private function build(array $configOverrides): self
     {
-        $venue = Company::query()->count();
+        // Counted from the venues *this fixture* built, not from `companies` at large. A test that
+        // creates a company of its own before calling `make()` would otherwise push the first venue
+        // to ` #2`, and the failure — a test asserting `Margherita` breaking because of an unrelated
+        // company three lines earlier — would be very hard to read.
+        $venue = Company::query()->where('name', 'like', self::CompanyName.'%')->count();
         $this->suffix = $venue === 0 ? '' : ' #'.($venue + 1);
 
         // Currency codes are globally unique, so a second venue in the same
@@ -117,7 +124,7 @@ final class PosFixtures
         ]);
 
         $this->company = Company::query()->create([
-            'name' => 'Trattoria Test'.$this->suffix,
+            'name' => self::CompanyName.$this->suffix,
             'currency_id' => $this->currency->getKey(),
             'timezone' => 'UTC',
         ]);
@@ -145,7 +152,13 @@ final class PosFixtures
 
         $this->category = PosCategory::query()->create([
             'company_id' => $this->company->getKey(),
-            'name' => 'Food'.$this->suffix, 'path' => '/Food'.$this->suffix, 'depth' => 0, 'sequence' => 10,
+            'name' => 'Food'.$this->suffix,
+            // The marker leads the path rather than trailing it. `pos_categories.path` is matched
+            // with `LIKE path%` in three places, so `/Food` is a prefix of `/Food #2` and a subtree
+            // query rooted at the first venue would reach into the second — asymmetrically, which is
+            // a worse kind of wrong than the identical paths this replaced (BAN-508).
+            'path' => $this->suffix === '' ? '/Food' : '/'.trim($this->suffix).' Food',
+            'depth' => 0, 'sequence' => 10,
         ]);
 
         [$this->product, $this->variant] = $this->product('Margherita'.$this->suffix, '10.00', $uom->getKey());
@@ -245,7 +258,10 @@ final class PosFixtures
             'pos_config_id' => $this->config->getKey(),
             'company_id' => $this->company->getKey(),
             'currency_id' => $this->currency->getKey(),
-            'name' => 'Bar'.$this->suffix.'/00001',
+            // The shape `SessionService::nextName` produces, punctuation stripped and all — a
+            // fixture that hardcodes a name the application could never mint invites a test to
+            // assert against an impossible value.
+            'name' => (preg_replace('/[^A-Za-z0-9]/', '', (string) $this->config->name) ?: 'POS').'/00001',
             'state' => SessionState::Opened->value,
             'opened_at' => now(),
             'business_date' => now()->toDateString(),
