@@ -17,13 +17,7 @@ name: Mutation
 on:
   pull_request:
     paths:
-      - 'app/Services/Pos/**'
-      - 'app/Support/Money/**'
-      - 'app/Support/Pricing/**'
-      - 'app/Support/Tax/**'
-      - 'app/Support/Pos/**'
       - 'packages/domain/src/**'
-      - 'tests/**'
       - 'packages/domain/test/**'
       - 'stryker.config.json'
       - '.github/workflows/mutation.yml'
@@ -35,39 +29,16 @@ permissions:
   contents: read
 
 jobs:
-  php:
-    runs-on: ubuntu-latest
-    name: Pest --mutate (PHP money paths)
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
-          # The whole point. `tests.yml` runs with `coverage: none`; mutation testing needs to know
-          # which test covers which line, or it re-runs the entire suite per mutant.
-          coverage: pcov
-
-      - name: Copy environment file
-        run: cp .env.example .env
-
-      - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
-
-      - name: Generate app key
-        run: php artisan key:generate
-
-      # Pest's own mutation testing, not Infection. Infection drives `vendor/bin/phpunit`, which
-      # Pest refuses outright ("Please run [./vendor/bin/pest] instead"), and no adapter package
-      # bridges the two. Pest 3+ has this built in: no second config file, no extra dependency, and
-      # a runner that understands the suite it is mutating. Found by pushing to CI, which is the
-      # only place the two could be seen not to fit.
-      - name: Run mutation testing
-        run: composer mutation
+  # The PHP job is deliberately absent — see BAN-511.
+  #
+  # Pest's `--mutate` needs `mutates()` on the test files to know which tests cover which class.
+  # Without it, `--everything` is required to generate mutants at all, and that disables the
+  # per-test mapping — so every mutant re-runs all 575 tests against SQLite. Scoped to just the
+  # arithmetic (`App\Support\{Money,Pricing,Tax,Pos}`) that ran for **six hours** and hit the
+  # GitHub Actions ceiling without finishing.
+  #
+  # `composer mutation` and `composer mutation:services` still exist for anyone who wants to run it
+  # locally with a coverage driver. They are not on the PR path until they can finish.
 
   domain:
     runs-on: ubuntu-latest

@@ -147,56 +147,35 @@ least one — a two-layer check where each layer covered for the other, a test t
 the *whole push* was failing, a sort guard that SQLite made unreachable.
 
 Those were found by hand: revert the guard, run the suite, confirm a test fails, restore. That
-technique works and it is worth keeping as a habit while writing a guard. What it must **not** be
-is the record of whether the guard is covered, because it fails silently. Three times across two
-sessions the edit turned out not to change behaviour — `attributeExtra($id, [])` returns `'0'`
-either way; a `$cart = $held` edit while the fallback read `$held` by another path; once, a
-"mutation" applied to a *test* rather than to the code. Each produced a green run, and a green run
-reads as "the guard is safe".
-
-So the record is a tool:
+technique works and is worth keeping while writing a guard. What it must **not** be is the record of
+whether a guard is covered, because it fails silently — three times across two sessions the edit
+turned out not to change behaviour, and a green run reads as "the guard is safe".
 
 ```
-composer mutation           # Pest --mutate over app/Support/{Money,Pricing,Tax,Pos}
-composer mutation:services  # …and over app/Services/Pos — on demand, it takes far longer
-npm run mutation            # Stryker over the money half of packages/domain
+npm run mutation      # Stryker over the money half of packages/domain
 ```
 
-Both make the mutation themselves, verify it differs from the original, and report what **survived**
-— a mutant no test killed. A survivor is not automatically a bug; it is a line where the tests would
-not notice a change. Read each one and decide: write the test, or record why the mutant is
-uninteresting.
+Stryker makes each mutation itself, verifies it differs from the original, and reports what
+**survived** — a mutant no test killed. A survivor is not automatically a bug; it is a line where
+the tests would not notice a change. Read each one and decide: write the test, or record why the
+mutant is uninteresting.
 
-Scope is deliberate, and it was set by measurement rather than taste. The first Stryker run covered
-all of `packages/domain`: 25 minutes, and the top of the survivor list was `receipt/build.ts` with
-288 mutants no test covers — because it is print layout, not money. Narrowed to the arithmetic, the
-same run is **7 minutes and scores 78.99 % (86.13 % of covered code)**, and every line in the report
-is about what a customer is charged. A slow check with an unreadable report is a check that gets
-deleted.
+Scope was set by measurement. The first run covered all of `packages/domain`: 25 minutes, and the
+top of the survivor list was `receipt/build.ts` with 288 mutants no test covers, because it is print
+layout. Narrowed to the arithmetic — decimals and rounding, pricelists and combo distribution, the
+tax engine — the same run is **7 minutes locally, 15 in CI, and scores 78.99 % (86.13 % of covered
+code)**. `break` is 75: measured, not guessed, and a ratchet rather than a target. Raise it when the
+score clears it comfortably; never lower it to make a build pass.
 
-So neither tool is pointed at the whole codebase. They cover money: the decimal and rounding
-primitives, pricelists and combo distribution, the tax engine, and on the PHP side the ingest,
-pricing and session services. Replication, bootstrap and sequence code is excluded by name — a
-survivor there is worth knowing and is not what this report is for.
+`.github/workflows/mutation.yml` runs it on a PR touching `packages/domain`, nightly, and on demand.
 
-Both default runs cover **arithmetic, not orchestration**, and that split was measured too. Pointing
-Pest at `App\Services\Pos` — `OrderSyncService` alone is 2,500 lines, and every mutant re-runs a
-575-test suite against a database — was still going after 23 minutes with no end in sight. It lives
-in `composer mutation:services` for when someone wants it, and out of the PR path. The same call was
-made on the TS side for `escpos` and `receipt`: a check that takes half an hour is a check somebody
-turns off.
+**The PHP side is not covered yet — see BAN-511.** `composer mutation` and `composer mutation:services`
+exist and are correct as far as they go, but Pest's `--mutate` needs `mutates()` declared on the test
+files to know which tests cover which class. Without that, `--everything` is required to generate any
+mutants at all, and it disables the per-test mapping: every mutant re-runs all 575 tests against
+SQLite. Scoped to just `App\Support\{Money,Pricing,Tax,Pos}` that ran for six hours and hit the
+GitHub Actions ceiling without finishing. It is off the PR path until it can finish.
 
-The PHP side uses **Pest's own `--mutate`**, not Infection. Infection drives `vendor/bin/phpunit`,
-which Pest refuses outright, and no adapter bridges them — a fact that only surfaced by pushing to
-CI. Pest 3+ has mutation testing built in, so there is no second config file and no extra
-dependency.
-
-The floors are measured, not guessed. Stryker breaks below 75 against a real 78.99. The PHP `--min`
-is not set yet: generating PHP coverage needs pcov or Xdebug, neither was installed where this was
-written, so the score is unknown until CI reports it — raising it is a separate, evidenced commit.
-
-`.github/workflows/mutation.yml` runs both on a PR that touches those paths **or the tests that
-cover them** — a PR that only edits a test can lower the score just as surely as one that edits the
-code — nightly, and on demand. The `break` thresholds are a ratchet, not a target: raise them when
-the real score clears them comfortably, and never lower one to make a build pass. A drop means a
-guard arrived without a test that exercises it, which is the exact thing this exists to catch.
+Mutation testing pays where code is a pure function of its inputs. Where behaviour is a conversation
+with a database, the hand-written guard tests are what has actually been finding the defects — and
+this codebase has the record to show it.
