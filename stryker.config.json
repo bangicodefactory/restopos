@@ -16,6 +16,7 @@
     "reporters": [
         "progress",
         "clear-text",
+        "html",
         "json"
     ],
     "jsonReporter": {
@@ -35,5 +36,8 @@
         "break": 75
     },
     "tempDirName": "storage/framework/stryker",
-    "cleanTempDir": true
+    "cleanTempDir": true,
+    "htmlReporter": {
+        "fileName": "storage/logs/stryker.html"
+    }
 }

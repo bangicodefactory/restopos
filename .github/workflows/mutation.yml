@@ -37,8 +37,8 @@ jobs:
   # arithmetic (`App\Support\{Money,Pricing,Tax,Pos}`) that ran for **six hours** and hit the
   # GitHub Actions ceiling without finishing.
   #
-  # `composer mutation` and `composer mutation:services` still exist for anyone who wants to run it
-  # locally with a coverage driver. They are not on the PR path until they can finish.
+  # The composer scripts were removed with it. A command that hangs for six hours with a caveat
+  # buried in a doc file is a trap, not a tool; BAN-511 adds them back when they finish.
 
   domain:
     runs-on: ubuntu-latest
@@ -65,5 +65,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stryker-report
-          path: storage/logs/stryker.json
+          path: |
+            storage/logs/stryker.html
+            storage/logs/stryker.json
           if-no-files-found: ignore

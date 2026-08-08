@@ -38,5 +38,5 @@ Thumbs.db
 /storage/logs/playwright-report
 # Mutation-testing artefacts (BAN-509). `*.log` already covers Infection's; Stryker's is JSON.
 /storage/logs/stryker.json
-/storage/framework/infection
+/storage/logs/stryker.html
 /storage/framework/stryker

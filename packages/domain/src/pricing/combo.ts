@@ -35,6 +35,12 @@ export class ComboPriceDistributor {
         const precision = Decimal.of(input.precision ?? '0.01');
         const components = input.components;
         const count = components.length;
+
+        // Stryker disable next-line all: equivalent mutant — an early exit, not behaviour.
+        // With no components `originalTotal` stays zero, both share loops run zero times and the
+        // final map returns `[]` regardless, so no test can tell the guard from its absence. Kept
+        // because it says what the function does with an empty meal; recorded here because the
+        // alternative was a fixture that asserts something unfalsifiable (BAN-509).
         if (count === 0) {
             return [];
         }

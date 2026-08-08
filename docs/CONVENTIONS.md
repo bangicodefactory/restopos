@@ -169,12 +169,20 @@ score clears it comfortably; never lower it to make a build pass.
 
 `.github/workflows/mutation.yml` runs it on a PR touching `packages/domain`, nightly, and on demand.
 
-**The PHP side is not covered yet — see BAN-511.** `composer mutation` and `composer mutation:services`
-exist and are correct as far as they go, but Pest's `--mutate` needs `mutates()` declared on the test
-files to know which tests cover which class. Without that, `--everything` is required to generate any
+A survivor is answered one of two ways, and the second is not a cop-out. Either write the test — the
+corpus had `attributeExtra: "0"` in all 21 places it appeared, so a paid combo upgrade had never been
+priced by either engine, and fixture `084` fixes that — or record why the mutant cannot be killed.
+`combo.ts`'s empty-components guard is an early exit that returns the same `[]` either way; it
+carries a `// Stryker disable next-line all:` with the reasoning, because the alternative was a
+fixture asserting something unfalsifiable. Suppressing with a reason is honest; suppressing to move
+a number is not.
+
+**The PHP side is not covered yet — see BAN-511.** Pest's `--mutate` needs `mutates()` declared on
+the test files to know which tests cover which class. Without that, `--everything` is required to generate any
 mutants at all, and it disables the per-test mapping: every mutant re-runs all 575 tests against
 SQLite. Scoped to just `App\Support\{Money,Pricing,Tax,Pos}` that ran for six hours and hit the
-GitHub Actions ceiling without finishing. It is off the PR path until it can finish.
+GitHub Actions ceiling without finishing. There is deliberately no `composer mutation` script: a
+command that hangs for six hours, with the caveat in a doc file, is a trap rather than a tool.
 
 Mutation testing pays where code is a pure function of its inputs. Where behaviour is a conversation
 with a database, the hand-written guard tests are what has actually been finding the defects — and

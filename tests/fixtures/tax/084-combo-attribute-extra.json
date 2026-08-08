@@ -1,0 +1,75 @@
+{
+  "name": "084-combo-attribute-extra",
+  "description": "A paid attribute upgrade inside a combo is added after the distribution, exactly as combo_items.extra_price is — so choosing the large drink never changes what anyone else's share of the meal costs. Every other combo fixture carries attributeExtra: '0', so until this one existed neither engine had ever been driven with a non-zero value; the TS mutant replacing `attributeExtra ?? '0'` survived because the field was always zero either way (BAN-509).",
+  "specRefs": [
+    "11.2.4"
+  ],
+  "currency": {
+    "code": "EUR",
+    "decimalPlaces": 2,
+    "rounding": "0.01",
+    "roundingMode": "half_up"
+  },
+  "roundingMethod": "round_per_line",
+  "documentSign": "1",
+  "taxes": [
+    {
+      "id": 1,
+      "name": "VAT 21%",
+      "amountType": "percent",
+      "amount": "21",
+      "priceInclude": false,
+      "includeBaseAmount": false,
+      "isBaseAffected": true,
+      "hasNegativeFactor": false,
+      "sequence": 10,
+      "taxGroupId": 1,
+      "childrenTaxIds": []
+    }
+  ],
+  "fiscalPosition": null,
+  "cashRounding": null,
+  "pricelist": null,
+  "combo": {
+    "parentPrice": "9.99",
+    "precision": "0.01",
+    "components": [
+      {
+        "id": "C1",
+        "comboBasePrice": "5.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "0"
+      },
+      {
+        "id": "C2",
+        "comboBasePrice": "5.00",
+        "quantity": "1",
+        "extraPrice": "0",
+        "attributeExtra": "1.50"
+      }
+    ]
+  },
+  "lines": [],
+  "expected": {
+    "combo": [
+      {
+        "id": "C1",
+        "priceUnit": "5.0000"
+      },
+      {
+        "id": "C2",
+        "priceUnit": "6.4900"
+      }
+    ],
+    "lines": [],
+    "totals": {
+      "totalExcluded": "0.00",
+      "totalTax": "0.00",
+      "totalIncluded": "0.00",
+      "roundedTotal": "0.00",
+      "roundingDelta": "0.00",
+      "taxGroups": []
+    }
+  }
+}
