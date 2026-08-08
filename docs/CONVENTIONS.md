@@ -137,3 +137,53 @@ Rules:
 
 The helpers in `tests/e2e/support/register.ts` wrap these, so specs read `tableTile(page, 2)` rather
 than repeating locator plumbing.
+
+## Mutation testing (the money paths)
+
+The suite proves the code does what the tests say. It does not prove the tests would notice if the
+code stopped doing it. On the money paths that gap is the whole risk: a guard that has never been
+executed by a test is indistinguishable from one that works, and every Phase 2 ticket found at
+least one — a two-layer check where each layer covered for the other, a test that passed because
+the *whole push* was failing, a sort guard that SQLite made unreachable.
+
+Those were found by hand: revert the guard, run the suite, confirm a test fails, restore. That
+technique works and is worth keeping while writing a guard. What it must **not** be is the record of
+whether a guard is covered, because it fails silently — three times across two sessions the edit
+turned out not to change behaviour, and a green run reads as "the guard is safe".
+
+```
+npm run mutation      # Stryker over the money half of packages/domain
+```
+
+Stryker makes each mutation itself, verifies it differs from the original, and reports what
+**survived** — a mutant no test killed. A survivor is not automatically a bug; it is a line where
+the tests would not notice a change. Read each one and decide: write the test, or record why the
+mutant is uninteresting.
+
+Scope was set by measurement. The first run covered all of `packages/domain`: 25 minutes, and the
+top of the survivor list was `receipt/build.ts` with 288 mutants no test covers, because it is print
+layout. Narrowed to the arithmetic — decimals and rounding, pricelists and combo distribution, the
+tax engine — the same run is **7 minutes locally, 15 in CI, and scores 78.99 % (86.13 % of covered
+code)**. `break` is 75: measured, not guessed, and a ratchet rather than a target. Raise it when the
+score clears it comfortably; never lower it to make a build pass.
+
+`.github/workflows/mutation.yml` runs it on a PR touching `packages/domain`, nightly, and on demand.
+
+A survivor is answered one of two ways, and the second is not a cop-out. Either write the test — the
+corpus had `attributeExtra: "0"` in all 21 places it appeared, so a paid combo upgrade had never been
+priced by either engine, and fixture `084` fixes that — or record why the mutant cannot be killed.
+`combo.ts`'s empty-components guard is an early exit that returns the same `[]` either way; it
+carries a `// Stryker disable next-line all:` with the reasoning, because the alternative was a
+fixture asserting something unfalsifiable. Suppressing with a reason is honest; suppressing to move
+a number is not.
+
+**The PHP side is not covered yet — see BAN-511.** Pest's `--mutate` needs `mutates()` declared on
+the test files to know which tests cover which class. Without that, `--everything` is required to generate any
+mutants at all, and it disables the per-test mapping: every mutant re-runs all 575 tests against
+SQLite. Scoped to just `App\Support\{Money,Pricing,Tax,Pos}` that ran for six hours and hit the
+GitHub Actions ceiling without finishing. There is deliberately no `composer mutation` script: a
+command that hangs for six hours, with the caveat in a doc file, is a trap rather than a tool.
+
+Mutation testing pays where code is a pure function of its inputs. Where behaviour is a conversation
+with a database, the hand-written guard tests are what has actually been finding the defects — and
+this codebase has the record to show it.

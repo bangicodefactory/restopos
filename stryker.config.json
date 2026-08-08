@@ -1,0 +1,43 @@
+{
+    "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+    "_comment": "Mutation testing for the money logic (BAN-509). Scoped to the arithmetic that decides what a customer is charged — decimals and rounding, pricelists and combo distribution, the tax engine — because that is where a surviving mutant means money is wrong, and because it is mirrored line for line in PHP and driven by the same fixture corpus. The first run covered all of packages/domain and proved the point the hard way: receipt/build.ts alone contributed 288 mutants no test covers, because it is print layout, and escpos another 105. That is 25 minutes to produce a report whose top of the list is not about money. Narrow scope is what makes the survivor list readable, and a readable list is the only kind anyone acts on.",
+    "packageManager": "npm",
+    "testRunner": "vitest",
+    "vitest": {
+        "configFile": "vitest.config.ts"
+    },
+    "mutate": [
+        "packages/domain/src/money/**/*.ts",
+        "packages/domain/src/pricing/**/*.ts",
+        "packages/domain/src/tax/**/*.ts",
+        "!packages/domain/src/**/*.test.ts",
+        "!packages/domain/src/**/types.ts"
+    ],
+    "reporters": [
+        "progress",
+        "clear-text",
+        "html",
+        "json"
+    ],
+    "jsonReporter": {
+        "fileName": "storage/logs/stryker.json"
+    },
+    "clearTextReporter": {
+        "logTests": false,
+        "maxTestsToLog": 0
+    },
+    "coverageAnalysis": "perTest",
+    "timeoutMS": 60000,
+    "concurrency": 4,
+    "_thresholdsComment": "Measured, not guessed: the scoped run scores 78.99 total / 86.13 covered (657 killed, 106 survived, 69 uncovered, 7 minutes). `break` sits a few points under that — close enough that a real regression trips it, far enough that an ordinary refactor does not. It is a ratchet: raise it when the score clears it comfortably, and never lower it to make a build pass.",
+    "thresholds": {
+        "high": 90,
+        "low": 75,
+        "break": 75
+    },
+    "tempDirName": "storage/framework/stryker",
+    "cleanTempDir": true,
+    "htmlReporter": {
+        "fileName": "storage/logs/stryker.html"
+    }
+}

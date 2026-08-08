@@ -1,0 +1,71 @@
+name: Mutation
+
+# Mutation testing for the money paths (BAN-509).
+#
+# A separate workflow from `tests.yml`, with its own triggers, because mutation testing is minutes
+# rather than seconds and every PR paying that cost is how a slow check gets deleted. It runs:
+#
+#   - on a PR that touches the mutated code or the tests that cover it — the only PRs where the
+#     answer can change;
+#   - nightly, so a drop caused by something outside those paths is still found within a day;
+#   - on demand.
+#
+# The `paths` filter is the load-bearing part of keeping this affordable. It is deliberately wider
+# than the mutated directories: a PR that only edits a *test* can lower the score just as surely as
+# one that edits the code.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/domain/src/**'
+      - 'packages/domain/test/**'
+      - 'stryker.config.json'
+      - '.github/workflows/mutation.yml'
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The PHP job is deliberately absent — see BAN-511.
+  #
+  # Pest's `--mutate` needs `mutates()` on the test files to know which tests cover which class.
+  # Without it, `--everything` is required to generate mutants at all, and that disables the
+  # per-test mapping — so every mutant re-runs all 575 tests against SQLite. Scoped to just the
+  # arithmetic (`App\Support\{Money,Pricing,Tax,Pos}`) that ran for **six hours** and hit the
+  # GitHub Actions ceiling without finishing.
+  #
+  # The composer scripts were removed with it. A command that hangs for six hours with a caveat
+  # buried in a doc file is a trap, not a tool; BAN-511 adds them back when they finish.
+
+  domain:
+    runs-on: ubuntu-latest
+    name: Stryker (shared domain)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run Stryker
+        run: npx stryker run
+
+      - name: Upload the survivor report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-report
+          path: |
+            storage/logs/stryker.html
+            storage/logs/stryker.json
+          if-no-files-found: ignore
