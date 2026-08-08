@@ -86,8 +86,33 @@ final class PosFixtures
         return (new self)->build($configOverrides);
     }
 
+    /**
+     * A suffix that makes this venue's names its own.
+     *
+     * Empty for the first venue in a test, so the ~40 tests that assert on `Margherita` and friends
+     * keep working — and non-empty for every one after it, which is the point. Two venues built from
+     * the same literals are indistinguishable, so a cross-tenant assertion compares a string against
+     * itself and passes whether the boundary holds or not. That is not hypothetical: the probe that
+     * found the BAN-420 name disclosure printed "leak" against correct code first time, because both
+     * managers were called Karim M. (BAN-508).
+     *
+     * Counted from the table rather than a static, so it resets with `RefreshDatabase` exactly as
+     * the currency code beside it always has.
+     */
+    public string $suffix = '';
+
+    /** The company name every venue is built from; the ordinal counts these and nothing else. */
+    private const CompanyName = 'Trattoria Test';
+
     private function build(array $configOverrides): self
     {
+        // Counted from the venues *this fixture* built, not from `companies` at large. A test that
+        // creates a company of its own before calling `make()` would otherwise push the first venue
+        // to ` #2`, and the failure — a test asserting `Margherita` breaking because of an unrelated
+        // company three lines earlier — would be very hard to read.
+        $venue = Company::query()->where('name', 'like', self::CompanyName.'%')->count();
+        $this->suffix = $venue === 0 ? '' : ' #'.($venue + 1);
+
         // Currency codes are globally unique, so a second venue in the same
         // test gets its own.
         $existing = Currency::query()->count();
@@ -99,19 +124,19 @@ final class PosFixtures
         ]);
 
         $this->company = Company::query()->create([
-            'name' => 'Trattoria Test',
+            'name' => self::CompanyName.$this->suffix,
             'currency_id' => $this->currency->getKey(),
             'timezone' => 'UTC',
         ]);
 
         $group = TaxGroup::query()->create([
-            'company_id' => $this->company->getKey(), 'name' => 'VAT', 'sequence' => 10,
+            'company_id' => $this->company->getKey(), 'name' => 'VAT'.$this->suffix, 'sequence' => 10,
         ]);
 
         $this->tax = Tax::query()->create([
             'company_id' => $this->company->getKey(),
             'tax_group_id' => $group->getKey(),
-            'name' => 'VAT 21%',
+            'name' => 'VAT 21%'.$this->suffix,
             'amount_type' => 'percent',
             'amount' => 21,
             'price_include' => false,
@@ -127,16 +152,22 @@ final class PosFixtures
 
         $this->category = PosCategory::query()->create([
             'company_id' => $this->company->getKey(),
-            'name' => 'Food', 'path' => '/Food', 'depth' => 0, 'sequence' => 10,
+            'name' => 'Food'.$this->suffix,
+            // The marker leads the path rather than trailing it. `pos_categories.path` is matched
+            // with `LIKE path%` in three places, so `/Food` is a prefix of `/Food #2` and a subtree
+            // query rooted at the first venue would reach into the second — asymmetrically, which is
+            // a worse kind of wrong than the identical paths this replaced (BAN-508).
+            'path' => $this->suffix === '' ? '/Food' : '/'.trim($this->suffix).' Food',
+            'depth' => 0, 'sequence' => 10,
         ]);
 
-        [$this->product, $this->variant] = $this->product('Margherita', '10.00', $uom->getKey());
-        [$this->drink, $this->drinkVariant] = $this->product('Sparkling water', '2.50', $uom->getKey());
+        [$this->product, $this->variant] = $this->product('Margherita'.$this->suffix, '10.00', $uom->getKey());
+        [$this->drink, $this->drinkVariant] = $this->product('Sparkling water'.$this->suffix, '2.50', $uom->getKey());
 
         $this->config = PosConfig::query()->create([
             'uuid' => (string) Str::uuid(),
             'company_id' => $this->company->getKey(),
-            'name' => 'Bar',
+            'name' => 'Bar'.$this->suffix,
             'access_token' => PosConfig::newAccessToken(),
             'currency_id' => $this->currency->getKey(),
             'is_restaurant' => true,
@@ -147,13 +178,13 @@ final class PosFixtures
         ]);
 
         $this->cash = PaymentMethod::query()->create([
-            'company_id' => $this->company->getKey(), 'name' => 'Cash',
+            'company_id' => $this->company->getKey(), 'name' => 'Cash'.$this->suffix,
             'method_type' => 'cash', 'is_cash_count' => true,
             'currency_id' => $this->currency->getKey(), 'sequence' => 10, 'active' => true,
         ]);
 
         $this->card = PaymentMethod::query()->create([
-            'company_id' => $this->company->getKey(), 'name' => 'Card',
+            'company_id' => $this->company->getKey(), 'name' => 'Card'.$this->suffix,
             'method_type' => 'card_terminal', 'is_cash_count' => false,
             'currency_id' => $this->currency->getKey(), 'sequence' => 20, 'active' => true,
         ]);
@@ -164,12 +195,12 @@ final class PosFixtures
         ]);
 
         $this->cashier = Employee::query()->create([
-            'company_id' => $this->company->getKey(), 'name' => 'Amina B.',
+            'company_id' => $this->company->getKey(), 'name' => 'Amina B.'.$this->suffix,
             'default_role' => 'cashier', 'pin_hash' => hash('sha256', '1234'), 'active' => true,
         ]);
 
         $this->manager = Employee::query()->create([
-            'company_id' => $this->company->getKey(), 'name' => 'Karim M.',
+            'company_id' => $this->company->getKey(), 'name' => 'Karim M.'.$this->suffix,
             'default_role' => 'manager', 'pin_hash' => hash('sha256', '9999'), 'active' => true,
         ]);
 
@@ -177,7 +208,7 @@ final class PosFixtures
             'uuid' => (string) Str::uuid(),
             'pos_config_id' => $this->config->getKey(),
             'device_identifier' => 1,
-            'name' => 'Bar terminal 1',
+            'name' => 'Bar terminal 1'.$this->suffix,
             'device_type' => DeviceType::Register->value,
             'active' => true,
         ]);
@@ -227,7 +258,10 @@ final class PosFixtures
             'pos_config_id' => $this->config->getKey(),
             'company_id' => $this->company->getKey(),
             'currency_id' => $this->currency->getKey(),
-            'name' => 'Bar/00001',
+            // The shape `SessionService::nextName` produces, punctuation stripped and all — a
+            // fixture that hardcodes a name the application could never mint invites a test to
+            // assert against an impossible value.
+            'name' => (preg_replace('/[^A-Za-z0-9]/', '', (string) $this->config->name) ?: 'POS').'/00001',
             'state' => SessionState::Opened->value,
             'opened_at' => now(),
             'business_date' => now()->toDateString(),
@@ -242,7 +276,7 @@ final class PosFixtures
         $this->floor = Floor::query()->create([
             'uuid' => (string) Str::uuid(),
             'company_id' => $this->company->getKey(),
-            'name' => 'Terrace',
+            'name' => 'Terrace'.$this->suffix,
             'sequence' => 1,
             'active' => true,
         ]);
@@ -262,7 +296,7 @@ final class PosFixtures
             'restaurant_floor_id' => $this->floor?->getKey(),
             'company_id' => $this->company->getKey(),
             'table_number' => $number,
-            'name' => 'T'.$number,
+            'name' => 'T'.$number.$this->suffix,
             'identifier' => Str::lower(Str::random(8)),
             'seats' => 4,
             'active' => true,
@@ -274,7 +308,7 @@ final class PosFixtures
         $this->display = PrepDisplay::query()->create([
             'uuid' => (string) Str::uuid(),
             'company_id' => $this->company->getKey(),
-            'name' => 'Pass',
+            'name' => 'Pass'.$this->suffix,
             'access_token' => Str::lower(Str::random(32)),
             'show_all_categories' => true,
             'active' => true,
