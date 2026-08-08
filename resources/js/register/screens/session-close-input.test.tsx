@@ -48,6 +48,14 @@ function runtime() {
     setRuntime({
         api: { get: vi.fn().mockResolvedValue({ data: CLOSING }), post },
         db: { sessions: { toArray: () => Promise.resolve([]) } },
+        // Since BAN-425 the close drains first; without a syncer it never reaches the request.
+        syncer: {
+            stats: vi.fn().mockResolvedValue({
+                total: 0, pending: 0, inflight: 0, error: 0, quarantined: 0,
+                oldestAgeMs: 0, blocksSessionClose: false,
+            }),
+            drain: vi.fn().mockResolvedValue({ sent: 0, failed: 0 }),
+        },
     } as never);
 
     return post;

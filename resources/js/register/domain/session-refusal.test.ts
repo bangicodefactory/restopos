@@ -20,10 +20,24 @@ import { closeSession, openSession } from './session-actions';
  * between, and a session already open — where there is no panel at all.
  */
 
+/**
+ * An outbox with nothing in it. Since BAN-425 `closeSession` drains before it posts, so a runtime
+ * without a syncer never reaches the request these tests are about.
+ */
+function emptyOutbox() {
+    return {
+        stats: vi.fn().mockResolvedValue({
+            total: 0, pending: 0, inflight: 0, error: 0, quarantined: 0,
+            oldestAgeMs: 0, blocksSessionClose: false,
+        }),
+        drain: vi.fn().mockResolvedValue({ sent: 0, failed: 0 }),
+    };
+}
+
 function refusing(status: number, body: unknown) {
     const rejection = new ApiError(status, classifyHttpError(status, body as never), body);
 
-    setRuntime({ api: { post: vi.fn().mockRejectedValue(rejection) } } as never);
+    setRuntime({ api: { post: vi.fn().mockRejectedValue(rejection) }, syncer: emptyOutbox() } as never);
 }
 
 const NOT_READY = {
