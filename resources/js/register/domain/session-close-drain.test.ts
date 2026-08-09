@@ -60,6 +60,19 @@ function syncer(options: { passes?: number; stuck?: boolean; quarantined?: numbe
     };
 }
 
+const CLOSING = {
+    session_id: 1,
+    opening_balance: '100.0000',
+    cash_in: '0.0000',
+    cash_out: '0.0000',
+    expected_cash: '100.0000',
+    payment_totals: [],
+    order_count: 0,
+    draft_order_count: 0,
+    amount_authorized_diff: '0',
+    enforces_maximum_difference: false,
+};
+
 function install(sync: ReturnType<typeof syncer>, api: unknown = { post: vi.fn().mockResolvedValue({ data: null }) }) {
     setRuntime({ syncer: sync, api } as never);
 }
@@ -126,13 +139,30 @@ describe('drainBeforeClose', () => {
         await expect(drainBeforeClose()).resolves.toMatchObject({ drained: true });
     });
 
+    it('stops rather than spinning on a queue that keeps refilling', async () => {
+        // The exit below is "the queue did not move between two reads", which anything enqueuing
+        // concurrently defeats — a print's `audit.batch`, a queued cash move. Unbounded, that is a
+        // close button that spins forever on a till at 2am.
+        let n = 1000;
+        const sync = {
+            drain: vi.fn(async () => { n += 1; return { sent: 1, failed: 0 }; }),
+            stats: vi.fn(async () => stats({ total: n, pending: n, blocksSessionClose: true })),
+        };
+
+        install(sync as never);
+
+        await expect(drainBeforeClose()).resolves.toMatchObject({ drained: false });
+        // Bounded, not infinite — the exact ceiling matters less than there being one.
+        expect(sync.drain.mock.calls.length).toBeLessThanOrEqual(200);
+    });
+
     it('does not wait for entries the server has already refused', async () => {
         // `blocksSessionClose` excludes quarantined entries on purpose: they will never send, so
         // blocking on them would strand the till forever. They are counted and reported instead.
         const sync = syncer({ passes: 0, quarantined: 2 });
         install(sync);
 
-        await expect(drainBeforeClose()).resolves.toEqual({ drained: true, quarantined: 2 });
+        await expect(drainBeforeClose()).resolves.toEqual({ drained: true, quarantined: 2, sent: 0 });
     });
 });
 
@@ -187,6 +217,73 @@ describe('closeSession', () => {
         await expect(
             closeSession({ sessionId: 1, countedCash: '0', countedByMethod: {}, employeeId: null }),
         ).resolves.toMatchObject({ ok: true, quarantined: 3 });
+    });
+
+    it('hands the close back when draining moves the expected cash', async () => {
+        // The cashier counted 124.20 against an expected 100.00, because a 24.20 cash sale was still
+        // queued. Draining sends it, the server now expects 124.20, and the +24.20 overage on screen
+        // evaporates — but only if somebody looks. Posting here records correct money against a
+        // figure nobody agreed to, and on a register with a variance threshold it has already called
+        // a manager over to authorise a difference that no longer exists.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: { ...CLOSING, expected_cash: '124.2000' } }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        await expect(
+            closeSession({
+                sessionId: 1,
+                countedCash: '124.20',
+                countedByMethod: {},
+                employeeId: null,
+                expectedCash: '100.0000',
+            }),
+        ).resolves.toMatchObject({ ok: false, reason: 'expected_changed' });
+
+        expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it('goes through when the drain leaves the expectation where it was', async () => {
+        // The ordinary case: the queue held a card sale, or a note edit, or nothing that moves cash.
+        // Handing the close back here would be a second press for no reason.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: CLOSING }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        await expect(
+            closeSession({
+                sessionId: 1,
+                countedCash: '100.00',
+                countedByMethod: {},
+                employeeId: null,
+                expectedCash: '100.0000',
+            }),
+        ).resolves.toMatchObject({ ok: true });
+
+        expect(api.post).toHaveBeenCalled();
+    });
+
+    it('does not re-read the expectation when the drain sent nothing', async () => {
+        // Nothing synced, so nothing can have moved. The extra round trip is pure latency on the
+        // common path — a till whose queue was already empty.
+        const sync = syncer({ passes: 0 });
+        const api = { get: vi.fn(), post: vi.fn().mockResolvedValue({ data: null }) };
+        install(sync, api);
+
+        await closeSession({
+            sessionId: 1,
+            countedCash: '100.00',
+            countedByMethod: {},
+            employeeId: null,
+            expectedCash: '100.0000',
+        });
+
+        expect(api.get).not.toHaveBeenCalled();
     });
 
     it('passes the closing note and the abandon flag to the server', async () => {

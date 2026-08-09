@@ -1,3 +1,4 @@
+import { Decimal } from '@domain/money/decimal';
 import { generateUuid } from '@domain/sequence/index';
 import type { PosSessionRow } from '@domain/types';
 import { ApiError } from '@shared/sync';
@@ -249,6 +250,8 @@ export async function fetchClosingData(sessionId: number): Promise<ClosingData |
 
 export type CloseSessionInput = {
     sessionId: number;
+    /** What the cashier counted against. If the drain moves it, the close is handed back. */
+    expectedCash?: string;
     /** A session that never traded is abandoned rather than closed — the server asks for the word. */
     abandon?: boolean;
     countedCash: string;
@@ -264,6 +267,12 @@ export type CloseSessionInput = {
 export type CloseSessionResult =
     | { ok: true; session: PosSessionRow | null; quarantined?: number }
     | { ok: false; reason: string; closingData?: ClosingData };
+
+/** At one batch per pass, far beyond any real backlog — a backstop, not a budget. */
+const DrainMaxPasses = 200;
+
+/** Long enough for a genuine backlog on a slow link, short enough that a stuck till says so. */
+const DrainDeadlineMs = 60_000;
 
 /**
  * Empty the outbox before the summaries are frozen (REG-017).
@@ -282,13 +291,24 @@ export type CloseSessionResult =
  * `drain()` sends one batch, so this loops — and stops when a pass makes no progress rather than
  * spinning against a queue that cannot move.
  */
-export async function drainBeforeClose(): Promise<{ drained: boolean; quarantined: number }> {
+export async function drainBeforeClose(): Promise<{ drained: boolean; quarantined: number; sent: number }> {
     const { syncer } = getRuntime();
 
     let stats = await syncer.stats();
+    let sent = 0;
 
-    while (stats.blocksSessionClose) {
-        await syncer.drain();
+    // Bounded twice over, because this runs behind a spinner on a till at 2am. `drain()` sends one
+    // batch, so a long backlog is many sequential round trips — and the progress check below is
+    // satisfied by anything that enqueues while we work (a print's `audit.batch`, a queued cash
+    // move), which without a ceiling is a loop that never ends. A close that gives up and says why
+    // beats one that spins.
+    const deadline = Date.now() + DrainDeadlineMs;
+
+    for (let pass = 0; stats.blocksSessionClose && pass < DrainMaxPasses; pass++) {
+        if (Date.now() > deadline) break;
+
+        const result = await syncer.drain();
+        sent += result.sent;
 
         const after = await syncer.stats();
 
@@ -302,7 +322,7 @@ export async function drainBeforeClose(): Promise<{ drained: boolean; quarantine
         stats = after;
     }
 
-    return { drained: !stats.blocksSessionClose, quarantined: stats.quarantined };
+    return { drained: !stats.blocksSessionClose, quarantined: stats.quarantined, sent };
 }
 
 export async function closeSession(input: CloseSessionInput): Promise<CloseSessionResult> {
@@ -311,13 +331,30 @@ export async function closeSession(input: CloseSessionInput): Promise<CloseSessi
     store.setBusy(true);
     try {
         // Before the freeze, never after it.
-        const { drained, quarantined } = await drainBeforeClose();
+        const { drained, quarantined, sent } = await drainBeforeClose();
 
         if (!drained) {
             const reason = 'unsent';
             store.setError(reason);
 
             return { ok: false, reason };
+        }
+
+        // Anything the drain just sent changes what the server expects in the drawer — and the
+        // cashier counted against the figure on screen *before* it moved. Posting now records the
+        // right money against a number nobody agreed to: a queued cash sale makes the count look
+        // like an overage, and on a register with a variance threshold that calls a manager over to
+        // authorise a difference that no longer exists. Re-read, and if it moved, hand the pane the
+        // new figure and let them press again.
+        if (sent > 0 && input.expectedCash !== undefined) {
+            const fresh = await fetchClosingData(input.sessionId);
+
+            if (fresh && !Decimal.of(fresh.expected_cash).eq(Decimal.of(input.expectedCash))) {
+                const reason = 'expected_changed';
+                store.setError(reason);
+
+                return { ok: false, reason };
+            }
         }
 
         const response = await api.post<PosSessionRow>(`pos/sessions/${input.sessionId}/close`, {

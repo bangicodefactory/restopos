@@ -481,7 +481,11 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                 than a code. */}
             {error ? (
                 <p className="text-danger">
-                    {error === 'unsent' ? t('reg.session.unsentBlocksClose') : error}
+                    {error === 'unsent'
+                        ? t('reg.session.unsentBlocksClose')
+                        : error === 'expected_changed'
+                          ? t('reg.session.expectedMoved')
+                          : error}
                 </p>
             ) : null}
 
@@ -505,6 +509,10 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                         const result = await closeSession({
                             sessionId: session.id,
                             countedCash: total.toFixed(2),
+                            // What this screen showed while the drawer was counted. If draining the
+                            // outbox moves it, the close comes back rather than recording the count
+                            // against a number that changed underneath it.
+                            expectedCash: closingData.expected_cash,
                             countedByMethod: Object.fromEntries(
                                 closingData.payment_totals.map((row) => [
                                     row.payment_method_id,
