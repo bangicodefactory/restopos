@@ -26,7 +26,20 @@ final readonly class ApprovalGrant
         private array $refusals = [],
     ) {}
 
-    /** Did a verified manager authorise this ability on this push? */
+    /**
+     * Did a verified manager authorise this ability on this push?
+     *
+     * **Order-scoped, not line-scoped, and that is a decision.** `ApprovalRow` carries an
+     * `order_uuid` and an always-empty `context: {}`, so the client records *which order* an
+     * approval was granted for and never which line. One approval therefore unlocks the ability for
+     * every line in the push: three manual prices under a single `line.price_override` all stand.
+     *
+     * That is wider than the manager pressed the button for, and narrowing it needs the client to
+     * populate `context` with the line — tracked separately rather than guessed at here, because a
+     * server that invented a line binding the client never sent would refuse approvals that are
+     * perfectly genuine. The order binding is enforced (see `ApprovalAuthority::replayed()`), which
+     * is the whole of what the client actually asserts.
+     */
     public function allows(string $ability): bool
     {
         return in_array($ability, $this->abilities, true);

@@ -7,6 +7,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Pos\ManagerApproval;
 
+use App\Enums\OrderState;
 use App\Enums\SessionState;
 use App\Models\Audit\AuditLog;
 use App\Models\Pos\OrderLine;
@@ -295,6 +296,92 @@ it('lets an order re-send its own approval as often as it likes', function (): v
         // Still one override, not three.
         ->and(AuditLog::query()->where('event', AuditEvent::EmployeeOverride)->count())->toBe(1)
         ->and(AuditLog::query()->where('event', AuditEvent::EmployeeOverrideRefused)->count())->toBe(0);
+});
+
+// ── refunds: priced by history, not by today's limit ─────────────────────
+
+/** Sell one €10 line at `$discount` off, manager-approved, and settle it. */
+function sellDiscounted(PosFixtures $fx, string $orderUuid, string $lineUuid, string $discount, string $tender): void
+{
+    $command = $fx->orderCommand($orderUuid, [[
+        'op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => $discount,
+    ]], ['state' => OrderState::Paid->value], [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(),
+        'payment_method_id' => $fx->cash->getKey(), 'amount' => $tender,
+    ]]);
+    $command['approvals'] = approval('line.discount.above_limit', (int) $fx->manager->getKey());
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', [
+        'employee_id' => $fx->cashier->getKey(),
+        'orders' => [$command],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+}
+
+/** Give the line back, at whatever rate the till claims. */
+function refundAt(PosFixtures $fx, string $orderUuid, string $lineUuid, string $discount): OrderLine
+{
+    $refundLine = (string) Str::uuid();
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', [
+        'employee_id' => $fx->cashier->getKey(),
+        'orders' => [$fx->orderCommand((string) Str::uuid(), [[
+            'op' => 'create', 'uuid' => $refundLine, 'variant_id' => $fx->variant->getKey(),
+            'qty' => '-1', 'price_unit' => '10.00', 'discount' => $discount,
+            'refunded_line_uuid' => $lineUuid,
+        ]], [
+            'state' => OrderState::Paid->value, 'is_refund' => true,
+            'refunded_order_uuid' => $orderUuid,
+        ])],
+    ])->assertOk();
+
+    return OrderLine::query()->where('uuid', $refundLine)->firstOrFail();
+}
+
+it('gives back exactly what was taken, not what the limit would allow', function (): void {
+    // The cap must stop at the refund branch. Applying it here cut an approved 90% back to 30 and
+    // handed the customer 8.47 against the 1.21 they paid - a guard failing in the one direction a
+    // refund guard cannot: money outward.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sellDiscounted($this->fx, $orderUuid, $lineUuid, '90', '1.21');
+
+    $sold = OrderLine::query()->where('uuid', $lineUuid)->firstOrFail();
+    $refund = refundAt($this->fx, $orderUuid, $lineUuid, '90');
+
+    expect((string) $refund->discount_percent)->toBe('90.0000')
+        ->and(ltrim((string) $refund->price_subtotal_incl, '-'))->toBe((string) $sold->price_subtotal_incl);
+});
+
+it('refuses to give back more than was charged when the till understates the discount', function (): void {
+    // The general case, and older than this ticket: `originalPrice()` pinned a refund's *price* to
+    // what was charged and nothing pinned its *discount*, so the two together - which are what the
+    // customer actually handed over - were never bounded. Refunding a 90%-off line at `discount: 0`
+    // returned 12.10 against 1.21 taken, on master, with no warning at all.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sellDiscounted($this->fx, $orderUuid, $lineUuid, '90', '1.21');
+
+    $sold = OrderLine::query()->where('uuid', $lineUuid)->firstOrFail();
+    $refund = refundAt($this->fx, $orderUuid, $lineUuid, '0');
+
+    expect((string) $refund->discount_percent)->toBe('90.0000')
+        ->and(ltrim((string) $refund->price_subtotal_incl, '-'))->toBe((string) $sold->price_subtotal_incl);
+});
+
+it('does not let a refund invent a bigger discount either', function (): void {
+    // The mirror: overstating the discount refunds less than was taken and quietly keeps the
+    // difference. Pinning to the original settles both directions at once.
+    $orderUuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    sellDiscounted($this->fx, $orderUuid, $lineUuid, '90', '1.21');
+
+    $refund = refundAt($this->fx, $orderUuid, $lineUuid, '99');
+
+    expect((string) $refund->discount_percent)->toBe('90.0000');
 });
 
 // ── the over-variance close ──────────────────────────────────────────────────

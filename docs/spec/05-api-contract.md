@@ -526,7 +526,9 @@ A valid approval both authorises the mutation and lands on the audit trail as `e
 
 The PIN itself does not travel with the order and is deliberately not re-checked here; `verified` records whether the device checked it online or against a cached hash, and an offline grant is logged at warning severity.
 
-Approvals are bound to one order, matching what `approval.ts` has always stored. Without that an approval is a bearer token: one 90% discount signed off, the row kept, and replayed on every sale for the rest of the shift — invisibly, because the dedupe that stops one override being counted many times also hid the replays.
+Refunds are exempt from the discount cap, and their discount is pinned to the original line's alongside its price. A refund is priced by what was actually charged, and history is not subject to today's limit — clamping it refunds *more* than was taken, which is the one direction a refund guard must never fail in.
+
+Approvals are bound to one order, matching what `approval.ts` has always stored. They are **not** bound to a line: `context` is always `{}`, so one approval authorises its ability for every line in the push (tracked as BAN-515). Without that an approval is a bearer token: one 90% discount signed off, the row kept, and replayed on every sale for the rest of the shift — invisibly, because the dedupe that stops one override being counted many times also hid the replays.
 
 #### When repricing arrives too late
 

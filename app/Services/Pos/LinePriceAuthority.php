@@ -88,10 +88,16 @@ final readonly class LinePriceAuthority
         $held = $this->linesOnOrder($order);
         $cart = $this->cartView($commands, $held);
         $catalogue = $this->catalogue($cart);
+        // Resolved once. Both checks below want the same employee, and `plan()` is on the ingest
+        // hot path - two lookups per push for one person is a query nobody needs.
+        $pusher = $employeeId === null
+            ? null
+            : $this->employees->candidates($config)->firstWhere('id', $employeeId);
+
         // An approval is a manager standing at the till granting exactly this, so it counts the
         // same as the pusher holding the ability outright (BAN-430).
-        $mayOverride = $this->mayOverride($config, $employeeId) || $grant->allows('line.price_override');
-        $mayDiscountAbove = $this->holds($config, $employeeId, 'line.discount.above_limit')
+        $mayOverride = $this->mayOverride($config, $pusher) || $grant->allows('line.price_override');
+        $mayDiscountAbove = $this->holds($config, $pusher, 'line.discount.above_limit')
             || $grant->allows('line.discount.above_limit');
         $discountLimit = (string) $this->config->get('pos.discount_limit_percent', 30);
 
@@ -138,13 +144,39 @@ final readonly class LinePriceAuthority
                     (array) ($command['attribute_line_value_ids'] ?? $line['attribute_value_ids'] ?? []),
                 );
 
+            // A refund is priced by what was actually charged, not by what the till says now. The
+            // cap (BAN-406) bounds how *many* units come back; without this it says nothing about
+            // the rate, so one unit of a 1-cent line could be credited at any price at all.
+            if (isset($refundLinks[$uuid])) {
+                ['price' => $original, 'discount' => $originalDiscount] = $this->originalTerms($refundLinks[$uuid]);
+
+                if ($original !== null) {
+                    $prices[$uuid] = $original;
+                    $proposals[$uuid] = (string) ($command['price_unit'] ?? $line['price_unit'] ?? $original);
+                }
+
+                // The discount is half of "what was actually charged" and was never pinned, so a
+                // refund could name any rate it liked: a line sold at an approved 90% off, for
+                // which the customer paid 1.21, refunded at `discount: 0` gave back 12.10. The cap
+                // below is no help - 0 is not above any limit - and the cap being *applied* here
+                // was worse still, cutting 90 back to 30 and handing back 8.47 (BAN-430).
+                if ($originalDiscount !== null) {
+                    $discounts[$uuid] = $originalDiscount;
+                }
+
+                // Deliberately before the cap: a refund is priced by history, and history is not
+                // subject to today's limit. Clamping it would refund more than was taken, which is
+                // the one direction a refund guard must never fail in.
+                continue;
+            }
+
             // A discount past the house limit is a manager's call, and until BAN-430 the server did
             // not look: `discount` was picked out of the command and written, so a patched till
             // could send 100 and take the whole sale to zero. Cut back to the limit rather than
             // refused outright - the cashier is entitled to discount up to it, and a rejected line
             // is invisible to a client that reads the order's status (the BAN-406 lesson).
             if (! $mayDiscountAbove) {
-                $asked = (string) ($command['discount'] ?? $command['discount_percent'] ?? $line['discount_percent'] ?? '0');
+                $asked = (string) ($command['discount'] ?? $command['discount_percent'] ?? '0');
 
                 if (bccomp($asked, $discountLimit, 4) > 0) {
                     $discounts[$uuid] = $discountLimit;
@@ -156,20 +188,6 @@ final readonly class LinePriceAuthority
                         'server' => $discountLimit,
                     ];
                 }
-            }
-
-            // A refund is priced by what was actually charged, not by what the till says now. The
-            // cap (BAN-406) bounds how *many* units come back; without this it says nothing about
-            // the rate, so one unit of a 1-cent line could be credited at any price at all.
-            if (isset($refundLinks[$uuid])) {
-                $original = $this->originalPrice($refundLinks[$uuid]);
-
-                if ($original !== null) {
-                    $prices[$uuid] = $original;
-                    $proposals[$uuid] = (string) ($command['price_unit'] ?? $line['price_unit'] ?? $original);
-                }
-
-                continue;
             }
 
             if ($this->verdict($config, $command, $line, $catalogue, $mayOverride) === PricePlan::Server) {
@@ -213,32 +231,19 @@ final readonly class LinePriceAuthority
      * register left on a cashier's login cannot quietly reprice the catalogue, which is the thing
      * `restrict_price_control` exists to prevent.
      */
-    private function mayOverride(PosConfig $config, ?int $employeeId): bool
+    private function mayOverride(PosConfig $config, ?Employee $pusher): bool
     {
         if (! $config->restrict_price_control) {
             return true;
         }
 
-        if ($employeeId === null) {
-            return false;
-        }
-
-        $employee = $this->employees->candidates($config)->firstWhere('id', $employeeId);
-
-        return $employee instanceof Employee
-            && $this->employees->can($employee, $config, 'line.price_override');
+        return $this->holds($config, $pusher, 'line.price_override');
     }
 
     /** Does the employee pushing this order hold an ability in their own right? */
-    private function holds(PosConfig $config, ?int $employeeId, string $ability): bool
+    private function holds(PosConfig $config, ?Employee $pusher, string $ability): bool
     {
-        if ($employeeId === null) {
-            return false;
-        }
-
-        $employee = $this->employees->candidates($config)->firstWhere('id', $employeeId);
-
-        return $employee instanceof Employee && $this->employees->can($employee, $config, $ability);
+        return $pusher instanceof Employee && $this->employees->can($pusher, $config, $ability);
     }
 
     /**
@@ -444,13 +449,25 @@ final readonly class LinePriceAuthority
     }
 
     /** What the line being credited was actually charged. */
-    private function originalPrice(int $originalLineId): ?string
+    /**
+     * What the original line was actually charged at - both terms, in one query.
+     *
+     * The price alone was not enough: `price_unit` and `discount_percent` together decide what the
+     * customer handed over, so pinning one and leaving the other client-supplied bounds nothing
+     * (BAN-430).
+     *
+     * @return array{price: ?string, discount: ?string}
+     */
+    private function originalTerms(int $originalLineId): array
     {
-        $price = $this->connection->table('pos_order_lines')
+        $row = $this->connection->table('pos_order_lines')
             ->where('id', $originalLineId)
-            ->value('price_unit');
+            ->first(['price_unit', 'discount_percent']);
 
-        return $price === null ? null : (string) $price;
+        return [
+            'price' => $row === null ? null : (string) $row->price_unit,
+            'discount' => $row === null ? null : (string) $row->discount_percent,
+        ];
     }
 
     /**
