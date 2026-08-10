@@ -78,7 +78,7 @@ final readonly class LinePriceAuthority
         }
 
         if ($commands === []) {
-            return new PricePlan([], [], []);
+            return new PricePlan([], [], [], []);
         }
 
         $held = $this->linesOnOrder($order);
@@ -89,6 +89,10 @@ final readonly class LinePriceAuthority
         $prices = [];
         $extras = [];
         $refusals = [];
+        // What the client asked for, kept only for lines the server ends up pricing itself. The
+        // gap between the two is what the repricing actually changed, and the only bound on a
+        // stale-price write-off that a device cannot inflate (BAN-514).
+        $proposals = [];
 
         // Server prices for the whole cart, computed once. Includes lines this push does not touch,
         // because a combo's parent may already be on the order while only a child is being edited.
@@ -132,6 +136,7 @@ final readonly class LinePriceAuthority
 
                 if ($original !== null) {
                     $prices[$uuid] = $original;
+                    $proposals[$uuid] = (string) ($command['price_unit'] ?? $line['price_unit'] ?? $original);
                 }
 
                 continue;
@@ -140,6 +145,9 @@ final readonly class LinePriceAuthority
             if ($this->verdict($config, $command, $line, $catalogue, $mayOverride) === PricePlan::Server) {
                 if (isset($priced[$uuid])) {
                     $prices[$uuid] = $priced[$uuid];
+                    // No `price_unit` in the command means an update that did not restate the
+                    // price, so what the line already carries is the client's standing proposal.
+                    $proposals[$uuid] = (string) ($command['price_unit'] ?? $line['price_unit'] ?? $priced[$uuid]);
                 }
 
                 // A manual price that the till was not entitled to set does not fail the sale — it
@@ -158,7 +166,7 @@ final readonly class LinePriceAuthority
             }
         }
 
-        return new PricePlan($prices, $extras, $refusals);
+        return new PricePlan($prices, $extras, $refusals, $proposals);
     }
 
     /**

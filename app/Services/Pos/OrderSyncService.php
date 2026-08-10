@@ -781,7 +781,7 @@ final readonly class OrderSyncService
         }
 
         // 5b — the money the repricing above left uncollected on a sale that is already over.
-        $writeOff = $this->absorbStalePriceShortfall($config, $order, $attributes, $session, $device, $employeeId);
+        $writeOff = $this->absorbStalePriceShortfall($config, $order, $pricePlan, $session, $device, $employeeId);
 
         if ($writeOff !== null) {
             $warnings[] = $writeOff;
@@ -2320,12 +2320,28 @@ final readonly class OrderSyncService
      * difference surfaces at the end of the chain as an unexplained `imbalance_amount` on the
      * accounting export. The drawer still reconciles; the ledger does not.
      *
-     * So the shortfall is recorded rather than left outstanding. Two bounds keep it honest:
+     * So the shortfall is recorded rather than left outstanding — bounded three ways.
      *
-     * - **Only what the price gap explains.** The write-off is capped at `server total − client
-     *   total`, so an order that is genuinely part-paid keeps the rest of its `amount_due`. A till
-     *   that under-tendered by 10.00 on a 2.42 stale price is short 10.00, of which 2.42 is our
-     *   pricing and 7.58 is a debt; only the first is forgiven.
+     * ## The bound has to be the server's own number
+     *
+     * The tempting cap is `amount_total − amount_total_client`: what the order is worth against
+     * what the till thought it was worth. It is also a hole straight through BAN-502. That field is
+     * an unvalidated assertion by the device, so a till that under-declares it has the server
+     * forgive whatever it likes — with a correct catalogue and no repricing at all, a push of ten
+     * items worth 121.00 declaring a total of 12.10 and tendering 12.10 settles in full, writes off
+     * 108.90, and the accounting export *balances*. BAN-502 stopped the device dictating the price;
+     * that would have let it dictate what it owed, which is the same money by another route.
+     *
+     * So the cap is {@see repricingDelta()}: the sum of what *this server* moved each line by,
+     * grossed up at the line's own tax rate. The device cannot inflate it — it is zero exactly when
+     * the server changed nothing, which is precisely the fraud case above.
+     *
+     * ## The other two bounds
+     *
+     * - **Cumulative, not per-push.** The allowance is the delta *less what has already been
+     *   forgiven*. Without that, a second push re-measures the full gap and forgives against it
+     *   again: a tip added after settlement, with the till re-sending its original total, had the
+     *   whole tip written off on top of the genuine 2.42.
      * - **Only after settlement.** A draft still being built is repriced with nobody's money on the
      *   counter, and the next push simply charges the right amount.
      *
@@ -2333,13 +2349,12 @@ final readonly class OrderSyncService
      * {@see recompute()} subtracts on every subsequent pass, so a re-push recomputes `amount_due`
      * to zero, finds no residual, and adds nothing.
      *
-     * @param  array<string, mixed>  $attributes
      * @return array<string, mixed>|null the warning to return to the device, if anything was written off
      */
     private function absorbStalePriceShortfall(
         PosConfig $config,
         Order $order,
-        array $attributes,
+        PricePlan $pricePlan,
         PosSession $session,
         ?PosDevice $device,
         ?int $employeeId,
@@ -2350,22 +2365,22 @@ final readonly class OrderSyncService
 
         $due = (string) $order->amount_due;
 
-        if (bccomp($due, '0', 4) <= 0 || ! isset($attributes['amount_total_client'])) {
+        if (bccomp($due, '0', 4) <= 0) {
             return null;
         }
 
-        // How far above the client's own total the server priced this order. Negative (the server
-        // priced it *lower*) explains no shortfall at all, so it forgives nothing.
-        $gap = bcsub((string) $order->amount_total, (string) $attributes['amount_total_client'], 4);
+        $delta = $this->repricingDelta($order, $pricePlan);
+        $alreadyForgiven = (string) $order->amount_write_off;
+        $allowance = bcsub($delta, $alreadyForgiven, 4);
 
-        if (bccomp($gap, '0', 4) <= 0) {
+        if (bccomp($allowance, '0', 4) <= 0) {
             return null;
         }
 
-        $writeOff = bccomp($due, $gap, 4) <= 0 ? $due : $gap;
+        $writeOff = bccomp($due, $allowance, 4) <= 0 ? $due : $allowance;
 
         $order->forceFill([
-            'amount_write_off' => bcadd((string) $order->amount_write_off, $writeOff, 4),
+            'amount_write_off' => bcadd($alreadyForgiven, $writeOff, 4),
             'amount_due' => bcsub($due, $writeOff, 4),
         ])->save();
 
@@ -2375,8 +2390,8 @@ final readonly class OrderSyncService
             severity: AuditSeverity::Warning,
             message: 'Settled order repriced above what was collected; shortfall written off',
             changes: [
-                'amount_total' => ['old' => (string) $attributes['amount_total_client'], 'new' => (string) $order->amount_total],
-                'amount_write_off' => ['old' => '0', 'new' => $writeOff],
+                'amount_write_off' => ['old' => $alreadyForgiven, 'new' => bcadd($alreadyForgiven, $writeOff, 4)],
+                'repricing_delta' => ['old' => null, 'new' => $delta],
             ],
             config: $config,
             session: $session,
@@ -2387,9 +2402,62 @@ final readonly class OrderSyncService
         return [
             'code' => 'stale_price_written_off',
             'amount' => $writeOff,
-            'client_total' => (string) $attributes['amount_total_client'],
+            'repricing_delta' => $delta,
             'server_total' => (string) $order->amount_total,
         ];
+    }
+
+    /**
+     * How much the server's own repricing added to this order, tax included.
+     *
+     * Only lines this push actually priced count, and only upward: `proposedFor()` is populated
+     * exactly where {@see LinePriceAuthority} overrode the client, so a line whose price the client
+     * was entitled to set — an open-price product, a tip, a permitted manual override — contributes
+     * nothing, which is what makes a tip added after settlement stay owed rather than forgiven.
+     *
+     * Grossed up per line rather than at order level: `price_subtotal_incl / price_subtotal` is that
+     * line's own effective rate, so a zero-rated line and a 21% line are not averaged into each
+     * other. A change of `d` in the unit price moves the subtotal by `d × qty × (1 − discount)`,
+     * because that is how the subtotal is built.
+     */
+    private function repricingDelta(Order $order, PricePlan $pricePlan): string
+    {
+        $delta = '0';
+
+        /** @var list<OrderLine> $lines */
+        $lines = OrderLine::query()->where('pos_order_id', $order->getKey())->get()->all();
+
+        foreach ($lines as $line) {
+            $proposed = $pricePlan->proposedFor((string) $line->uuid);
+
+            if ($proposed === null) {
+                continue;
+            }
+
+            // Signed, deliberately: a line the server priced *down* offsets one it priced up, and
+            // the net is what the customer's tender actually fell short by. Skipping the downward
+            // ones over-forgives — on a push with one line +2.42 and another −1.21 the order is
+            // only 1.21 adrift, and an unrelated under-tender on top would have had 2.42 forgiven
+            // instead of 1.21. The sum is guarded once at the end, where a net-negative delta
+            // forgives nothing at all.
+            $perUnit = bcsub((string) $line->price_unit, $proposed, 4);
+
+            $untaxed = bcmul(
+                bcmul($perUnit, (string) $line->quantity, 6),
+                bcsub('1', bcdiv((string) $line->discount_percent, '100', 8), 8),
+                6,
+            );
+
+            // A fully discounted line moves the subtotal by nothing, so there is no rate to read
+            // off it and nothing to add either.
+            $ratio = bccomp((string) $line->price_subtotal, '0', 4) === 0
+                ? '1'
+                : bcdiv((string) $line->price_subtotal_incl, (string) $line->price_subtotal, 8);
+
+            $delta = bcadd($delta, bcmul($untaxed, $ratio, 4), 4);
+        }
+
+        return $delta;
     }
 
     // ------------------------------------------------------------ recompute

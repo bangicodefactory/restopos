@@ -8,7 +8,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Pos\StalePriceWriteOff;
 
 use App\Enums\OrderState;
+use App\Enums\SpecialKind;
 use App\Models\Audit\AuditLog;
+use App\Models\Catalog\Product;
 use App\Models\Pos\Order;
 use App\Models\Pos\PosSession;
 use App\Services\Pos\AccountingExportService;
@@ -74,6 +76,24 @@ function settleAtStalePrice(
     ]]);
 }
 
+/** A variant whose product is `special_kind = tip` - a line the client prices, not the server. */
+function tipVariantFor(PosFixtures $fx): int
+{
+    $product = Product::query()->where('company_id', $fx->company->getKey())->firstOrFail()->replicate(['uuid']);
+    $product->uuid = (string) Str::uuid();
+    $product->name = 'Pourboire';
+    $product->special_kind = SpecialKind::Tip->value;
+    $product->save();
+
+    $variant = $fx->variant->replicate(['uuid']);
+    $variant->uuid = (string) Str::uuid();
+    $variant->product_id = $product->getKey();
+    $variant->display_name = 'Pourboire';
+    $variant->save();
+
+    return (int) $variant->getKey();
+}
+
 // ── the order ────────────────────────────────────────────────────────────────
 
 it('writes off what the repricing left uncollected', function (): void {
@@ -105,7 +125,8 @@ it('tells the device what it wrote off', function (): void {
 
     expect($warning)->not->toBeNull()
         ->and($warning['amount'])->toBe('2.4200')
-        ->and($warning['client_total'])->toBe('12.10')
+        // The delta is the server's own measure of what it changed, and the bound on the amount.
+        ->and($warning['repricing_delta'])->toBe('2.4200')
         ->and($warning['server_total'])->toBe('14.5200');
 });
 
@@ -131,7 +152,7 @@ it('does not write the same shortfall off twice', function (): void {
         ->and((string) $order->amount_due)->toBe('0.0000');
 });
 
-it('forgives only what the price gap explains', function (): void {
+it('forgives only what the server own repricing added', function (): void {
     // The bound that keeps this from becoming "settled orders never owe anything". A till on a
     // stale price that also under-tendered is short on two counts: 2.42 of it is our pricing and
     // the rest is a genuine debt. Only the first is written off.
@@ -146,6 +167,163 @@ it('forgives only what the price gap explains', function (): void {
         ->and((string) $order->amount_write_off)->toBe('2.4200')
         // 14.52 − 5.00 tendered − 2.42 forgiven.
         ->and((string) $order->amount_due)->toBe('7.1000');
+});
+
+it('forgives nothing on an order the server never repriced', function (): void {
+    // The hole the first cut of this left, and the reason the bound is the server's own delta and
+    // not `amount_total_client`. That field is an unvalidated assertion by the device.
+    //
+    // Nothing is stale here: the catalogue is correct and the server prices the order correctly at
+    // 121.00. The device simply declares a total of 12.10 and tenders 12.10. Capped at the client's
+    // declared total, the server forgave 108.90, marked the order settled, and the accounting
+    // export *balanced* - BAN-502 stopped the device setting the price, and this let it set what it
+    // owed instead, which is the same money by another route.
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', ['orders' => [
+        $this->fx->orderCommand(
+            $uuid,
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+                // Ten units at exactly the catalogue price - the server changes nothing.
+                'qty' => '10', 'price_unit' => '10.00', 'discount' => '0',
+            ]],
+            ['state' => OrderState::Paid->value, 'amount_total_client' => '12.10'],
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '12.10',
+            ]],
+        ),
+    ]])->assertOk();
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((string) $order->amount_total)->toBe('121.0000')
+        ->and((string) $order->amount_write_off)->toBe('0.0000')
+        ->and((string) $order->amount_due)->toBe('108.9000')
+        ->and(AuditLog::query()->where('event', AuditEvent::StalePriceWrittenOff)->exists())->toBeFalse();
+});
+
+it('does not forgive a tip added after the sale was settled', function (): void {
+    // The accumulation bound. The allowance is the delta *less what has already been forgiven*, and
+    // without that a second push re-measures the full gap and spends it again. A tip is a line the
+    // client is entitled to price, so it adds nothing to the delta - but the till re-sending its
+    // original stale total made the gap look wide enough to cover it, and the whole 5.00 tip was
+    // written off on top of the genuine 2.42.
+    $fx = PosFixtures::make(['enable_tips' => true, 'tip_after_payment' => true])->withSession();
+    repriceCatalogue($fx, '12.00');
+
+    $uuid = (string) Str::uuid();
+    $lineUuid = (string) Str::uuid();
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', ['orders' => [
+        $fx->orderCommand(
+            $uuid,
+            [[
+                'op' => 'create', 'uuid' => $lineUuid, 'variant_id' => $fx->variant->getKey(),
+                'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+            ]],
+            ['state' => OrderState::Paid->value, 'amount_total_client' => '12.10'],
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'payment_method_id' => $fx->cash->getKey(), 'amount' => '12.10',
+            ]],
+        ),
+    ]])->assertOk();
+
+    expect((string) Order::query()->where('uuid', $uuid)->value('amount_write_off'))->toBe('2.4200');
+
+    // The whole graph comes back, as it does on every push, with a tip line joining it.
+    $command = $fx->orderCommand($uuid, [], ['state' => OrderState::Paid->value, 'amount_total_client' => '12.10']);
+    $command['lines'] = [
+        ['op' => 'update', 'uuid' => $lineUuid, 'variant_id' => $fx->variant->getKey(),
+            'qty' => '1', 'price_unit' => '10.00', 'discount' => '0'],
+        ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => tipVariantFor($fx),
+            'qty' => '1', 'price_unit' => '5.00', 'discount' => '0'],
+    ];
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', ['orders' => [$command]])->assertOk();
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((string) $order->amount_total)->toBe('19.5200')
+        ->and((string) $order->amount_write_off)->toBe('2.4200')
+        // The tip is money the customer agreed to and has not handed over. It stays owed.
+        ->and((string) $order->amount_due)->toBe('5.0000');
+});
+
+it('nets a line the server priced down against one it priced up', function (): void {
+    // The delta is signed. Two lines of the same product, the till proposing 8.00 on one and 14.00
+    // on the other; the catalogue says 12.00 for both, so the server moves one up by 2.00 and the
+    // other down by 2.00 - net +2.00, or 2.42 with tax.
+    //
+    // Counting only the upward line makes the allowance 4.84, and on an order that is *also*
+    // under-tendered that extra 2.42 comes straight out of a debt the customer still owes. What the
+    // customer's money actually fell short by is the net, and nothing else.
+    repriceCatalogue($this->fx, '12.00');
+
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', ['orders' => [
+        $this->fx->orderCommand(
+            $uuid,
+            [
+                ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+                    'qty' => '1', 'price_unit' => '8.00', 'discount' => '0'],
+                ['op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+                    'qty' => '1', 'price_unit' => '14.00', 'discount' => '0'],
+            ],
+            ['state' => OrderState::Paid->value, 'amount_total_client' => '26.62'],
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                // Well under even the till's own 26.62, so the shortfall is much larger than the
+                // repricing explains and the bound is what decides the answer.
+                'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '20.00',
+            ]],
+        ),
+    ]])->assertOk();
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    // 2 x 12.00 = 24.00 + 21% = 29.04.
+    expect((string) $order->amount_total)->toBe('29.0400')
+        ->and((string) $order->amount_write_off)->toBe('2.4200')
+        // 29.04 - 20.00 tendered - 2.42 forgiven.
+        ->and((string) $order->amount_due)->toBe('6.6200');
+});
+
+it('measures the repricing after the line discount, not before it', function (): void {
+    // A 2.00 move on a half-price line is worth 1.00, not 2.00 - the discount is applied to the
+    // unit price before tax, so that is where the repricing lands too. Reading the raw per-unit
+    // difference doubles the allowance, which again only shows up once the order is short by more
+    // than the repricing explains.
+    repriceCatalogue($this->fx, '12.00');
+
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', ['orders' => [
+        $this->fx->orderCommand(
+            $uuid,
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+                'qty' => '1', 'price_unit' => '10.00', 'discount' => '50',
+            ]],
+            ['state' => OrderState::Paid->value, 'amount_total_client' => '6.05'],
+            [[
+                'op' => 'create', 'uuid' => (string) Str::uuid(),
+                'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '3.00',
+            ]],
+        ),
+    ]])->assertOk();
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    // 12.00 less 50% = 6.00, + 21% = 7.26.
+    expect((string) $order->amount_total)->toBe('7.2600')
+        // (12.00 - 10.00) x 1 x 0.5 = 1.00 untaxed, 1.21 with tax.
+        ->and((string) $order->amount_write_off)->toBe('1.2100')
+        // 7.26 - 3.00 tendered - 1.21 forgiven.
+        ->and((string) $order->amount_due)->toBe('3.0500');
 });
 
 it('leaves a part-paid order at the right price entirely alone', function (): void {

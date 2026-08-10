@@ -414,7 +414,7 @@ Batch cap: 200 orders (`pos.sync.max_orders_per_batch`).
 | Code | Meaning |
 |---|---|
 | `client_total_mismatch` | The client's proposed total disagrees with the server's recomputation. Informational — a manual price override is a legitimate cause. Recorded in `sync_conflicts`. |
-| `stale_price_written_off` | The order arrived **settled** and the server priced it above what the till had already collected, so the difference was written off to `pos_orders.amount_write_off` rather than left outstanding. Carries `amount`, `client_total`, `server_total`. Recorded in `sync_conflicts` and on the audit trail. |
+| `stale_price_written_off` | The order arrived **settled** and the server's repricing left it short of what was collected, so the difference was written off to `pos_orders.amount_write_off` rather than left outstanding. Carries `amount`, `repricing_delta`, `server_total`. Recorded in `sync_conflicts` and on the audit trail. |
 | `session_rerouted` | The requested session was closed; the order landed in the config's currently-open session |
 | `session_rescued` | No open session existed; a **rescue session** was created and the order landed there |
 | `already_settled` | Accompanies `superseded` |
@@ -506,10 +506,13 @@ A manual override is accepted when `pos_configs.restrict_price_control` is off (
 
 A till running a stale catalogue has already taken the customer's money at the price it displayed, and the customer has gone. Repricing is still correct — the catalogue is the authority — but it leaves the order permanently short, and because the session summaries freeze the *server's* total while the payment totals freeze what was actually tendered, that difference resurfaces as an unexplained `imbalance_amount` on the accounting export.
 
-So on an order that arrives **settled**, the residual is written off to `pos_orders.amount_write_off` and `amount_due` goes to zero. Two bounds keep that honest:
+So on an order that arrives **settled**, the residual is written off to `pos_orders.amount_write_off` and `amount_due` goes to zero. Three bounds keep that honest:
 
-* capped at `server total − client total`, so an order that is genuinely part-paid keeps the rest of its `amount_due` — only the part our own pricing created is forgiven, and a server price *below* the client's forgives nothing at all;
-* only after settlement — a draft is repriced with nobody's money on the counter, and the next push simply charges the right amount.
+* **capped at the server's own repricing delta** — Σ over lines of `(server price − client price) × qty × (1 − discount)`, grossed up at each line's own tax rate. Not `amount_total − amount_total_client`: that field is an unvalidated assertion by the device, so a till that under-declares it would have the server forgive whatever balance it liked, with a correct catalogue and no repricing at all. The delta is zero exactly when the server changed nothing, and a line the client is entitled to price (open-price, tip, permitted manual override) contributes nothing to it;
+* **cumulative, not per-push** — the allowance is the delta *less what has already been forgiven*, so a later push cannot re-measure the same gap and spend it twice;
+* **only after settlement** — a draft is repriced with nobody's money on the counter, and the next push simply charges the right amount.
+
+An order that is genuinely part-paid therefore keeps the rest of its `amount_due`: a till short 10.00 on a 2.42 stale price has 2.42 forgiven and 7.58 still owed.
 
 The amount is idempotent by construction: `recompute()` subtracts the persisted column on every pass, so a resend of the same order adds nothing. It reaches the ledger through `pos_sessions.write_off_total` and the export's `total_write_off`, never netted silently into rounding.
 

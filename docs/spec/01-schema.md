@@ -1733,7 +1733,7 @@ kept, portal mixin (kept `access_token` + `ticket_code`).
 | amount_paid | decimal(16,4) default 0 | Σ payments (incl. negative change) |
 | amount_change | decimal(16,4) default 0 | change given back |
 | amount_due | decimal(16,4) default 0 | total − paid − write_off (0 when settled) |
-| amount_write_off | decimal(16,4) default 0 | money a settled sale was short and will never collect: the server repriced above what the till had already taken. Capped at the client/server price gap, so a genuine part-payment keeps its `amount_due` |
+| amount_write_off | decimal(16,4) default 0 | money a settled sale was short and will never collect: the server repriced above what the till had already taken. Capped at the server's own repricing delta (never at the device-declared total), cumulatively, so a genuine part-payment keeps its `amount_due` |
 | amount_discount | decimal(16,4) default 0 | Σ of line discounts (reporting) |
 | total_cost | decimal(16,4) default 0 | Σ line costs |
 | margin | decimal(16,4) default 0 | |
