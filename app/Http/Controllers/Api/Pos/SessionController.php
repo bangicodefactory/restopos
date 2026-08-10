@@ -155,6 +155,7 @@ final class SessionController extends Controller
                 managerApproved: $managerApproved,
                 force: (bool) ($request->validated('force') ?? false),
                 approvedByEmployeeId: $approvedByEmployeeId,
+                abandon: (bool) ($request->validated('abandon') ?? false),
             );
         } catch (DomainException $e) {
             return new JsonResponse([

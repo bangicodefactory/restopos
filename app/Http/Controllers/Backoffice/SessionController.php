@@ -112,8 +112,17 @@ final class SessionController extends Controller
             countedCash: $data['counted_cash'] ?? null,
             userId: (int) $request->user()?->getKey(),
             notes: $data['notes'] ?? null,
+            // Every guard on `close()` is bypassed here, deliberately and completely: drafts are
+            // forced over, the variance is pre-approved, and a session that never traded is
+            // abandoned without further ceremony. The back office is the escape hatch for a till
+            // that cannot close itself — a manager on an authenticated admin screen, looking at the
+            // session's state, deciding.
+            //
+            // It is stated rather than accumulated because the next guard added to `close()` will
+            // silently not apply here either, and whoever adds it should have to think about that.
             managerApproved: true,
             force: true,
+            abandon: true,
         );
 
         return back()->with('success', 'Session closed.');

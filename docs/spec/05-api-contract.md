@@ -621,6 +621,21 @@ Amounts describing **physical cash** (`opening_float`, `counted_cash`, `denomina
 
 With `set_maximum_difference` off, any difference closes — the number is recorded and reported, but the cashier is not held hostage by it.
 
+### Closing a session (REG-017)
+
+`POST …/close` takes `abandon` alongside `force`, and they answer different questions:
+
+| Flag | Question |
+| -- | -- |
+| `force` | there are unfinished drafts — close over them anyway? |
+| `abandon` | this session never started trading — give up on the open? |
+
+A session in `opening_control` has no sales, no sequence number and an opening float nobody confirmed. Closing it is not closing a shift; it is abandoning an open started by mistake, and reaching it by accident produces a Z-report for a day that never happened. So it is refused unless `abandon` is set. An ordinary trading session ignores the flag entirely.
+
+**Drafts booked for later do not block the close.** A draft whose `preset_time` is in the future is tomorrow lunchtime's table, taken today and deliberately left open; it is excluded from `draft_order_count` and from the guard. `pos_orders.pos_session_id` is not nullable, so nothing moves at close — the next push that touches the order is rerouted to whichever session is open, which is what makes leaving it attached harmless. A `preset_time` in the *past* is tonight's business and still blocks.
+
+**The till drains its outbox before it calls this.** A sale still queued when the summaries freeze syncs afterwards, finds its session gone, and is rerouted into a rescue session — money taken during the shift, sitting outside the Z-report meant to account for it. The register refuses to close while `OutboxStats.blocksSessionClose` is true. Quarantined entries deliberately do **not** block: the server has already refused them and they will never send, so waiting would strand the till. They are reported to the cashier instead.
+
 ### `POST /api/pos/sessions/{session}/cash-movements`
 
 ```jsonc

@@ -342,6 +342,8 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
     const [counts, update, total] = useDenominations();
     const [byMethod, setByMethod] = useState<Record<number, string>>({});
     const [force, setForce] = useState(false);
+    const [notes, setNotes] = useState('');
+    const [quarantined, setQuarantined] = useState(0);
 
     useEffect(() => {
         if (!session) return;
@@ -442,6 +444,28 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                 </ul>
             </section>
 
+            {quarantined > 0 ? (
+                <div className="rounded-pos bg-warn-soft p-3 text-warn-fg">
+                    <p>{t('reg.session.quarantinedAtClose', { count: quarantined })}</p>
+                    <Button variant="secondary" className="mt-2" onClick={onDone}>
+                        {t('common.ok')}
+                    </Button>
+                </div>
+            ) : null}
+
+            {/* The server has persisted `closing_notes` all along and nothing ever sent one. It is
+                where "till 2 was 5 short, Amina counted it twice" goes — the sentence that stops a
+                variance becoming an argument a week later. */}
+            <label className="grid gap-1">
+                <span className="font-semibold">{t('reg.session.closeNotes')}</span>
+                <textarea
+                    rows={2}
+                    className="rounded-pos border border-slate-300 p-2"
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                />
+            </label>
+
             {drafts > 0 ? (
                 <label className="flex items-center gap-2 rounded-pos bg-warn-soft p-3 text-warn-fg">
                     <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
@@ -452,7 +476,18 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
             ) : null}
 
             {overVariance ? <p className="text-warn-fg">{t('reg.session.overVariance')}</p> : null}
-            {error ? <p className="text-danger">{error}</p> : null}
+            {/* `unsent` is the sentinel `closeSession` returns when the outbox would not drain. It
+                is the one refusal a cashier can act on themselves, so it gets a sentence rather
+                than a code. */}
+            {error ? (
+                <p className="text-danger">
+                    {error === 'unsent'
+                        ? t('reg.session.unsentBlocksClose')
+                        : error === 'expected_changed'
+                          ? t('reg.session.expectedMoved')
+                          : error}
+                </p>
+            ) : null}
 
             <div className="flex gap-2">
                 <Button variant="ghost" onClick={onDone}>
@@ -469,9 +504,15 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                             grant = await requestApproval('session.close.over_variance');
                             if (!grant) return;
                         }
+                        setQuarantined(0);
+
                         const result = await closeSession({
                             sessionId: session.id,
                             countedCash: total.toFixed(2),
+                            // What this screen showed while the drawer was counted. If draining the
+                            // outbox moves it, the close comes back rather than recording the count
+                            // against a number that changed underneath it.
+                            expectedCash: closingData.expected_cash,
                             countedByMethod: Object.fromEntries(
                                 closingData.payment_totals.map((row) => [
                                     row.payment_method_id,
@@ -480,13 +521,25 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                             ),
                             denominations: counts.filter((row) => row.quantity > 0),
                             employeeId: cashier?.employee_id ?? null,
+                            notes: notes.trim() === '' ? null : notes.trim(),
                             // Pass the approving manager's credentials so the server can verify the
                             // over-variance approval and record who authorised it (REG-016).
                             managerEmployeeId: grant?.managerEmployeeId ?? null,
                             managerPin: grant?.pin ?? null,
                             force,
                         });
-                        if (result.ok) onDone();
+                        if (!result.ok) return;
+
+                        // Refused entries never reach the server, so they are not in the summaries
+                        // the drawer was just counted against. The close is correct; somebody still
+                        // has to be told what is missing from it.
+                        if (result.quarantined) {
+                            setQuarantined(result.quarantined);
+
+                            return;
+                        }
+
+                        onDone();
                     }}
                 >
                     {t('reg.session.close')}

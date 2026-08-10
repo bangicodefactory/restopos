@@ -183,8 +183,10 @@ it('an abandoned opening control does not consume a session number', function ()
     // gap in the sequence that an accountant has to explain away.
     $abandoned = openRegister($this->fx)->assertCreated()->json('id');
 
+    // `abandon` is the point: a session that never traded is not closed like a shift, it is given
+    // up on, and since BAN-425 the till has to say so (REG-017).
     $this->withHeaders($this->fx->headers())
-        ->postJson("/api/pos/sessions/{$abandoned}/close", ['counted_cash' => '0'])
+        ->postJson("/api/pos/sessions/{$abandoned}/close", ['counted_cash' => '0', 'abandon' => true])
         ->assertOk();
 
     $second = openRegister($this->fx)->assertCreated()->json('id');

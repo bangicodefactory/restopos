@@ -43,6 +43,9 @@ final class CloseSessionRequest extends FormRequest
             'manager_employee_id' => ['nullable', 'integer'],
             'manager_pin' => ['nullable', 'string', 'max:32'],
             'force' => ['nullable', 'boolean'],
+            // Abandoning a session that never traded is a different act from closing a shift,
+            // so the till has to say which one it means (REG-017).
+            'abandon' => ['nullable', 'boolean'],
         ];
     }
 }

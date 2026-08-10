@@ -353,9 +353,21 @@ final readonly class SessionService
         bool $managerApproved = false,
         bool $force = false,
         ?int $approvedByEmployeeId = null,
+        bool $abandon = false,
     ): PosSession {
         if ($session->state === SessionState::Closed) {
             throw new DomainException('This session is already closed.');
+        }
+
+        // A session still awaiting its opening control has never traded: it has no sales, no
+        // sequence number and an opening float nobody confirmed. Closing it is a different act from
+        // closing a shift — it is abandoning an open that was started by mistake — and it has to be
+        // asked for, because reaching this by accident produces a Z-report for a day that never
+        // happened (REG-017, server audit 4.14).
+        if ($session->state === SessionState::OpeningControl && ! $abandon) {
+            throw new DomainException(
+                'This session has not started trading. Confirm the opening control first, or abandon it explicitly.',
+            );
         }
 
         $drafts = $this->draftOrderCount($session);
@@ -592,12 +604,26 @@ final readonly class SessionService
         return bcadd(bcadd((string) $session->cash_balance_opening, $cashSales, 4), $movements, 4);
     }
 
+    /**
+     * Drafts that stand between this session and its close.
+     *
+     * A draft booked for *later* is not one of them. `preset_time` in the future is tomorrow
+     * lunchtime's table, taken today and deliberately left open; counting it against tonight's close
+     * tells the cashier to "settle or cancel" an order whose customer has not arrived, and forcing
+     * the close over it files the sale in the wrong period when it finally lands.
+     *
+     * Nothing needs to move it: `pos_orders.pos_session_id` is not nullable, and the next push that
+     * touches the order is rerouted to whichever session is open by `resolveForIngest`. Leaving it
+     * attached to a closed session is therefore harmless — the money follows the reroute, and this
+     * count is only ever about what blocks the close (REG-017).
+     */
     public function draftOrderCount(PosSession $session): int
     {
         return $this->connection->table('pos_orders')
             ->where('pos_session_id', $session->getKey())
             ->where('state', OrderState::Draft->value)
             ->whereNull('deleted_at')
+            ->where(fn ($q) => $q->whereNull('preset_time')->orWhere('preset_time', '<=', now()))
             ->count();
     }
 
