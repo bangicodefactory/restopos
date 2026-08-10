@@ -640,8 +640,9 @@ manager wants to know how the day is going.
 ```
 
 `sales_total` is the tax-**exclusive** base, the same thing the accounting export means by sales;
-tax is its own line. Refunds are reported separately rather than folded in — a service that took 900
-and gave back 100 is a different day from one that took 800.
+tax is its own line. `refund_total` is reported separately rather than folded in — a service that
+took 900 and gave back 100 is a different day from one that took 800 — and it is **negative**,
+carrying the refund lines' own sign, so a consumer nets it by adding rather than subtracting.
 
 Every figure comes from `SessionSummaryService`'s live aggregations, which are the queries
 `freeze()` persists at close. That is what makes "an X-report matches the totals computed at close

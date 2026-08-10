@@ -158,6 +158,7 @@ export type ReceiptLabels = {
     expectedInDrawer: string;
     payments: string;
     notAClose: string;
+    incompleteReading: string;
 };
 
 export const DEFAULT_LABELS: ReceiptLabels = {
@@ -206,6 +207,8 @@ export const DEFAULT_LABELS: ReceiptLabels = {
     expectedInDrawer: 'Expected in drawer',
     payments: 'Payments',
     notAClose: 'This session is still open',
+    // Short enough to survive a 42-column roll without wrapping mid-sentence.
+    incompleteReading: 'Queued sales not included',
 };
 
 /**
@@ -226,7 +229,14 @@ export type SessionReportView = {
     printedAt: Iso;
     cashierName: string | null;
     orderCount: number;
+    /** Tax-exclusive, and excluding refunds — the same thing the accounting export calls sales. */
     grossSales: Money;
+    /**
+     * **Negative**, because money went out. A refund line's `base_amount` carries its negative
+     * quantity and the server passes that through unchanged, so the net line *adds* this rather
+     * than subtracting it. Getting that backwards prints a day that sold 20 and refunded 10 as
+     * 30.00 net — the one number on the slip a manager actually reads.
+     */
     refunds: Money;
     tax: Money;
     openingFloat: Money;
@@ -235,6 +245,13 @@ export type SessionReportView = {
     expectedCash: Money;
     taxes: ReadonlyArray<{ label: string; base: Money; amount: Money }>;
     payments: ReadonlyArray<{ label: string; amount: Money; count: number }>;
+    /**
+     * The till still had sales queued when this was taken, so the figures are short by whatever is
+     * in the outbox. Printed on the slip rather than used to refuse it: a reading that says it is
+     * incomplete is worth more than no reading, and the cashier asking is usually the person who
+     * can see the queue.
+     */
+    queuedUnsent?: boolean;
 };
 
 /**

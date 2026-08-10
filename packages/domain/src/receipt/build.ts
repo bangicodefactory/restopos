@@ -276,6 +276,7 @@ export function buildSessionReportDoc(report: SessionReportView, config: Receipt
     b.feed(1);
     b.text(report.isOpen ? l.xReport : l.zReport, { align: 'center', bold: true, size: 'lg' });
     if (report.isOpen) b.text(l.notAClose, { align: 'center' });
+    if (report.queuedUnsent) b.text(l.incompleteReading, { align: 'center', bold: true });
 
     b.rule('=');
     b.row(report.configName, report.sessionName ?? '');
@@ -289,13 +290,18 @@ export function buildSessionReportDoc(report: SessionReportView, config: Receipt
 
     // Only when there were some. A zero refund line on every reading trains people to skim past the
     // one shift where it is not zero.
+    //
+    // Printed with its own sign. Flipping it to a positive reads as though refunds *added* to the
+    // take, which is precisely the misreading the net line below would then confirm.
     if (!Decimal.of(report.refunds).isZero()) {
-        b.row(l.refunds, money(Decimal.of(report.refunds).negate().toString()));
+        b.row(l.refunds, money(report.refunds));
     }
 
     b.row(l.tax, money(report.tax));
     b.rule('-');
-    b.row(l.netSales, money(Decimal.of(report.grossSales).sub(Decimal.of(report.refunds)).toString()), {
+    // `add`, not `sub`: `refunds` is negative (see `SessionReportView`). Subtracting it printed a
+    // day that sold 20 and refunded 10 as 30.00 net.
+    b.row(l.netSales, money(Decimal.of(report.grossSales).add(Decimal.of(report.refunds)).toString()), {
         bold: true,
         size: 'lg',
     });

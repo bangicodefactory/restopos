@@ -414,12 +414,27 @@ final readonly class SessionService
             $tax = bcadd($tax, (string) ($row['tax_amount'] ?? '0'), 4);
         }
 
+        // Scaled once, here, rather than left as whatever bcmath handed back: a shift with no
+        // refunds answered `"0"` while every neighbouring field was 4dp, and a client formatting
+        // the two the same way has to guess.
+        $sales = bcadd($sales, '0', 4);
+        $tax = bcadd($tax, '0', 4);
+        $refunds = bcadd($refunds, '0', 4);
+
+        // One query, not two: the payload below and the DTO want the same figure, and this runs on
+        // a path a cashier is waiting on.
+        $expectedCash = $this->expectedCash($session);
+
         // The figures as they stood at the reading, so the row still means something when somebody
         // reads it back next month against a drawer that went missing at 19:00.
+        //
+        // Recorded on the *request*, not on a successful print: "somebody pulled a reading at
+        // 18:30" stays true when the paper jams, and a till that asks for the figures four times in
+        // an hour is the pattern worth seeing whether or not any of it came out.
         $this->sessionEvents->record(
             $session,
             SessionEventType::XReport,
-            ['sales' => $sales, 'tax' => $tax, 'refunds' => $refunds, 'expected_cash' => $this->expectedCash($session)],
+            ['sales' => $sales, 'tax' => $tax, 'refunds' => $refunds, 'expected_cash' => $expectedCash],
             employeeId: $employeeId,
         );
 
@@ -439,7 +454,7 @@ final readonly class SessionService
             openingBalance: (string) $session->cash_balance_opening,
             cashIn: (string) $session->cash_in_total,
             cashOut: (string) $session->cash_out_total,
-            expectedCash: $this->expectedCash($session),
+            expectedCash: $expectedCash,
             salesRows: $salesRows,
             taxRows: $taxRows,
             paymentTotals: $this->summaries->expectedPaymentTotals($session),
