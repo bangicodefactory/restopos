@@ -37,6 +37,7 @@ class AccountingExport extends Model
             'total_tax' => 'decimal:4',
             'total_payments' => 'decimal:4',
             'total_rounding' => 'decimal:4',
+            'total_write_off' => 'decimal:4',
             'imbalance_amount' => 'decimal:4',
         ];
     }

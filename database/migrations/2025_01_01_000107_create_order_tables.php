@@ -78,6 +78,13 @@ return new class extends Migration
             $table->decimal('amount_paid', 16, 4)->default(0);
             $table->decimal('amount_change', 16, 4)->default(0);
             $table->decimal('amount_due', 16, 4)->default(0);
+            // Money the sale was short at settlement and will never collect (BAN-514). The register
+            // takes what its own catalogue displayed; the server prices from the live catalogue.
+            // When those disagree on an order that is already paid, the difference is not a debt —
+            // the customer has gone — so it is written off here, named, and left attributable to
+            // the order's device and employee, rather than sitting in `amount_due` forever and
+            // reaching the accounting export as an unexplained imbalance.
+            $table->decimal('amount_write_off', 16, 4)->default(0);
             $table->decimal('amount_discount', 16, 4)->default(0);
             $table->decimal('total_cost', 16, 4)->default(0);
             $table->decimal('margin', 16, 4)->default(0);

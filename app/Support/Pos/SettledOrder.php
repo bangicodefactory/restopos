@@ -56,6 +56,12 @@ final class SettledOrder
         'customer_id',
         'customer_email',
         'customer_phone',
+        // The reprint counter itself (BAN-514). The docblock above opens by arguing that a blanket
+        // freeze is wrong *because* reprints re-send a settled order — and then the list left out
+        // the only column a reprint moves, so every reprint was answered `ok` and stored nothing.
+        // A count that reads 0 on the one population that gets reprinted is worse than no count:
+        // "reprinted three times" is what an audit looks for when a receipt has been reused.
+        'print_count',
     ];
 
     /** The verdict on one child command against a settled order. */

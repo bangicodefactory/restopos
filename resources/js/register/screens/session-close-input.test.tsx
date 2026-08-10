@@ -130,3 +130,40 @@ it('leaves an ordinary dotted amount exactly as typed', async () => {
 
     expect(field.value).toBe('24.20');
 });
+
+/**
+ * BAN-514 — the force checkbox has to be offered for drafts this till cannot see.
+ *
+ * The pane counted drafts out of the local order store alone. A draft left open on a *sibling* till
+ * on the same register is not in that store, so the pane showed none, hid the force checkbox, and
+ * the server refused the close over an order the cashier had no way to acknowledge — a dead end at
+ * the one moment the drawer is already counted.
+ */
+it('offers the force checkbox for a draft only the server knows about', async () => {
+    runtime();
+
+    usePosSessionStore.setState((state) => ({
+        ...state,
+        // Nothing in this till's own store; one open on a sibling.
+        closingData: { ...CLOSING, draft_order_count: 1 },
+    }));
+
+    render(<SessionScreen mode="close" onDone={vi.fn()} />);
+
+    expect(screen.getByRole('checkbox')).toBeTruthy();
+    // And the close is gated behind it, rather than posting into a refusal.
+    expect((screen.getByRole('button', { name: /close session/i }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('leaves an ordinary close free of it', async () => {
+    runtime();
+
+    render(<SessionScreen mode="close" onDone={vi.fn()} />);
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    // Waited for rather than read on first paint: the screen fetches closing data on mount and the
+    // button is disabled while that is in flight, so an immediate read tests the spinner.
+    await waitFor(() =>
+        expect((screen.getByRole('button', { name: /close session/i }) as HTMLButtonElement).disabled).toBe(false),
+    );
+});

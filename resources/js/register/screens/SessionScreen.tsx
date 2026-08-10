@@ -351,7 +351,18 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
         void fetchCashMovements(session.id);
     }, [session]);
 
-    const drafts = useMemo(() => (orders ? draftOrders(useOrderStore.getState()).length : 0), [orders]);
+    // The greater of what this till holds and what the server counts. The local store alone misses
+    // a draft left open on a sibling till on the same register — the server refuses the close over
+    // it, but this pane, seeing none of its own, never offered the force checkbox that is the only
+    // way past. Counting both means the refusal is one the cashier can actually answer (BAN-514).
+    const drafts = useMemo(
+        () =>
+            Math.max(
+                orders ? draftOrders(useOrderStore.getState()).length : 0,
+                closingData?.draft_order_count ?? 0,
+            ),
+        [orders, closingData?.draft_order_count],
+    );
 
     if (!session) {
         return (
@@ -485,7 +496,9 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                         ? t('reg.session.unsentBlocksClose')
                         : error === 'expected_changed'
                           ? t('reg.session.expectedMoved')
-                          : error}
+                          : error === 'drafts_arrived'
+                            ? t('reg.session.draftsArrived')
+                            : error}
                 </p>
             ) : null}
 
@@ -513,6 +526,10 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
                             // outbox moves it, the close comes back rather than recording the count
                             // against a number that changed underneath it.
                             expectedCash: closingData.expected_cash,
+                            // Likewise for the drafts it showed: draining can sync a queued one,
+                            // and the close would then be refused over an order this pane said was
+                            // not there.
+                            draftOrderCount: closingData.draft_order_count,
                             countedByMethod: Object.fromEntries(
                                 closingData.payment_totals.map((row) => [
                                     row.payment_method_id,

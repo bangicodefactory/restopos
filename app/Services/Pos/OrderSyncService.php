@@ -780,6 +780,15 @@ final readonly class OrderSyncService
             $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $warning);
         }
 
+        // 5b — the money the repricing above left uncollected on a sale that is already over.
+        $writeOff = $this->absorbStalePriceShortfall($config, $order, $attributes, $session, $device, $employeeId);
+
+        if ($writeOff !== null) {
+            $warnings[] = $writeOff;
+
+            $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $writeOff);
+        }
+
         // 6 — sequence + name, gapless per session, assigned once.
         if ($order->sequence_number === null && $this->stateValue($order->state) !== OrderState::Draft->value) {
             $sequence = $this->sequences->nextSessionSequence($session);
@@ -920,6 +929,10 @@ final readonly class OrderSyncService
             // A table transfer, a tip, and an explicit "no tip" (is_tipped=false, tip_amount=0)
             // must all survive an update; the client sends the column names directly.
             'restaurant_table_id', 'is_tipped', 'tip_amount',
+            // How many times the receipt has been printed. Absent from this list entirely until
+            // BAN-514, so it was dropped on every update — not just settled ones — and the column
+            // the back office reads never left 0.
+            'print_count',
         ];
 
         // `tracking_number` is deliberately NOT writable, for the same reason `access_token` is not
@@ -947,6 +960,14 @@ final readonly class OrderSyncService
             if (array_key_exists($field, $attributes)) {
                 $update[$field] = $attributes[$field];
             }
+        }
+
+        // A reprint count only ever goes up. The register re-sends the whole order on every push,
+        // so a queued copy from before the reprint arrives *after* it routinely — and a plain write
+        // would let that stale copy erase the reprint it does not know about. Taking the greater of
+        // the two makes the column safe to trust and the write order-independent.
+        if (isset($update['print_count'])) {
+            $update['print_count'] = max((int) $order->print_count, (int) $update['print_count']);
         }
 
         if (! $settled) {
@@ -2288,6 +2309,89 @@ final readonly class OrderSyncService
         );
     }
 
+    /**
+     * Write off what a settled sale was short because the server repriced it (BAN-514).
+     *
+     * BAN-502 made the server the price authority: the client's `price_unit` is a proposal and the
+     * catalogue decides. That is right, and it stays right. But a till running a stale catalogue
+     * has already taken the customer's money at the price it displayed, and the customer has left.
+     * Repricing then leaves the order permanently short — and `session_sales_summaries` freeze the
+     * *server's* total while `session_payment_totals` freeze what was actually tendered, so the
+     * difference surfaces at the end of the chain as an unexplained `imbalance_amount` on the
+     * accounting export. The drawer still reconciles; the ledger does not.
+     *
+     * So the shortfall is recorded rather than left outstanding. Two bounds keep it honest:
+     *
+     * - **Only what the price gap explains.** The write-off is capped at `server total − client
+     *   total`, so an order that is genuinely part-paid keeps the rest of its `amount_due`. A till
+     *   that under-tendered by 10.00 on a 2.42 stale price is short 10.00, of which 2.42 is our
+     *   pricing and 7.58 is a debt; only the first is forgiven.
+     * - **Only after settlement.** A draft still being built is repriced with nobody's money on the
+     *   counter, and the next push simply charges the right amount.
+     *
+     * Idempotent by construction: the amount lands in `pos_orders.amount_write_off`, which
+     * {@see recompute()} subtracts on every subsequent pass, so a re-push recomputes `amount_due`
+     * to zero, finds no residual, and adds nothing.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>|null the warning to return to the device, if anything was written off
+     */
+    private function absorbStalePriceShortfall(
+        PosConfig $config,
+        Order $order,
+        array $attributes,
+        PosSession $session,
+        ?PosDevice $device,
+        ?int $employeeId,
+    ): ?array {
+        if (! SettledOrder::isSettled($this->stateValue($order->state))) {
+            return null;
+        }
+
+        $due = (string) $order->amount_due;
+
+        if (bccomp($due, '0', 4) <= 0 || ! isset($attributes['amount_total_client'])) {
+            return null;
+        }
+
+        // How far above the client's own total the server priced this order. Negative (the server
+        // priced it *lower*) explains no shortfall at all, so it forgives nothing.
+        $gap = bcsub((string) $order->amount_total, (string) $attributes['amount_total_client'], 4);
+
+        if (bccomp($gap, '0', 4) <= 0) {
+            return null;
+        }
+
+        $writeOff = bccomp($due, $gap, 4) <= 0 ? $due : $gap;
+
+        $order->forceFill([
+            'amount_write_off' => bcadd((string) $order->amount_write_off, $writeOff, 4),
+            'amount_due' => bcsub($due, $writeOff, 4),
+        ])->save();
+
+        $this->audit->record(
+            event: AuditEvent::StalePriceWrittenOff,
+            subject: $order,
+            severity: AuditSeverity::Warning,
+            message: 'Settled order repriced above what was collected; shortfall written off',
+            changes: [
+                'amount_total' => ['old' => (string) $attributes['amount_total_client'], 'new' => (string) $order->amount_total],
+                'amount_write_off' => ['old' => '0', 'new' => $writeOff],
+            ],
+            config: $config,
+            session: $session,
+            employeeId: $employeeId,
+            device: $device,
+        );
+
+        return [
+            'code' => 'stale_price_written_off',
+            'amount' => $writeOff,
+            'client_total' => (string) $attributes['amount_total_client'],
+            'server_total' => (string) $order->amount_total,
+        ];
+    }
+
     // ------------------------------------------------------------ recompute
 
     /**
@@ -2370,6 +2474,16 @@ final readonly class OrderSyncService
             bcsub($totals->roundedTotal, $netPaid, 4),
             $totals->roundingDelta,
         );
+
+        // A stale-price shortfall already written off is settled business, not an outstanding debt
+        // (BAN-514). Subtracting the *persisted* column here rather than re-deciding is what makes
+        // this idempotent: the ingest path below writes the write-off once, and every subsequent
+        // recompute — a re-push, a tip, a back-office edit — reproduces `amount_due = 0` from it
+        // without needing to know why. Clamped at zero so a later credit cannot drive the due
+        // negative and read as an overpayment.
+        $amountDue = bccomp($amountDue, (string) $order->amount_write_off, 4) <= 0
+            ? '0.0000'
+            : bcsub($amountDue, (string) $order->amount_write_off, 4);
 
         $order->forceFill([
             'amount_untaxed' => $totals->totalExcluded,

@@ -90,17 +90,22 @@ final readonly class AccountingExportService
         ]);
         $taxes = $this->aggregate('session_tax_summaries', $ids, ['base_amount', 'tax_amount']);
         $payments = $this->aggregate('session_payment_totals', $ids, ['expected_amount', 'difference_amount']);
-        $rounding = $this->aggregate('pos_sessions', $ids, ['rounding_total'], 'id');
+        $sessionTotals = $this->aggregate('pos_sessions', $ids, ['rounding_total', 'write_off_total'], 'id');
 
         $totalSales = $sales['base_amount'];
         $totalTax = $taxes['tax_amount'];
         $totalPayments = $payments['expected_amount'];
-        $totalRounding = $rounding['rounding_total'];
+        $totalRounding = $sessionTotals['rounding_total'];
+        $totalWriteOff = $sessionTotals['write_off_total'];
 
-        // sales + tax + rounding − payments. The rounding delta is the amount the cash total was
-        // moved by, so it belongs on the sales side of the identity, not the payments side.
+        // sales + tax + rounding − write-off − payments. The rounding delta is the amount the cash
+        // total was moved by, so it belongs on the sales side of the identity, not the payments
+        // side. Write-offs sit on the same side and subtract: they are revenue the summaries
+        // recorded at the catalogue price and the drawer never received (BAN-514). Netting them
+        // here is what keeps a stale-price sale from arriving as an unexplained imbalance — and
+        // the amount stays visible as its own column and its own detail row, never absorbed.
         $imbalance = bcsub(
-            bcadd(bcadd($totalSales, $totalTax, 4), $totalRounding, 4),
+            bcsub(bcadd(bcadd($totalSales, $totalTax, 4), $totalRounding, 4), $totalWriteOff, 4),
             $totalPayments,
             4,
         );
@@ -108,7 +113,7 @@ final readonly class AccountingExportService
         try {
             return $this->connection->transaction(function () use (
                 $companyId, $periodStart, $periodEnd, $format, $userId, $ids,
-                $totalSales, $totalTax, $totalPayments, $totalRounding, $imbalance,
+                $totalSales, $totalTax, $totalPayments, $totalRounding, $totalWriteOff, $imbalance,
             ): AccountingExport {
                 /** @var AccountingExport $export */
                 $export = AccountingExport::query()->create([
@@ -123,6 +128,7 @@ final readonly class AccountingExportService
                     'total_tax' => $totalTax,
                     'total_payments' => $totalPayments,
                     'total_rounding' => $totalRounding,
+                    'total_write_off' => $totalWriteOff,
                     'imbalance_amount' => $imbalance,
                     'generated_by_user_id' => $userId,
                 ]);
@@ -173,6 +179,7 @@ final readonly class AccountingExportService
                 'total_tax' => $totalTax,
                 'total_payments' => $totalPayments,
                 'total_rounding' => $totalRounding,
+                'total_write_off' => $totalWriteOff,
                 'imbalance_amount' => $imbalance,
                 'generated_by_user_id' => $userId,
                 'error_message' => $this->describe($e),
@@ -324,6 +331,26 @@ final readonly class AccountingExportService
             ];
         }
 
+        // One row per session that forgave something, and only then. A write-off is the reason the
+        // sales rows above total more than the payment rows below, so an export carrying one has to
+        // say so on its face — otherwise the accountant reconciles by hand and finds a gap the file
+        // does not explain (BAN-514).
+        foreach ($this->connection->table('pos_sessions')
+            ->whereIn('id', $sessionIds)
+            ->where('write_off_total', '!=', 0)
+            ->get(['id', 'write_off_total', 'name']) as $row) {
+            $rows[] = [
+                (string) $row->id,
+                $dateOf($row->id),
+                'write_off',
+                (string) $row->id,
+                (string) ($row->name ?? ''),
+                '0',
+                '0',
+                (string) $row->write_off_total,
+            ];
+        }
+
         $out = '';
 
         foreach ($rows as $row) {
@@ -345,12 +372,21 @@ final readonly class AccountingExportService
                 'total_sales' => (string) $export->total_sales,
                 'total_tax' => (string) $export->total_tax,
                 'total_payments' => (string) $export->total_payments,
+                // Both terms of the identity that sit on the sales side. `total_rounding` was
+                // missing here as well, so a JSON reader could not check sales + tax + rounding −
+                // write-off − payments = imbalance without going back to the database (BAN-514).
+                'total_rounding' => (string) $export->total_rounding,
+                'total_write_off' => (string) $export->total_write_off,
                 'imbalance_amount' => (string) $export->imbalance_amount,
             ],
             'sessions' => $sessionIds,
             'sales' => $this->connection->table('session_sales_summaries')->whereIn('pos_session_id', $sessionIds)->get(),
             'taxes' => $this->connection->table('session_tax_summaries')->whereIn('pos_session_id', $sessionIds)->get(),
             'payments' => $this->connection->table('session_payment_totals')->whereIn('pos_session_id', $sessionIds)->get(),
+            'write_offs' => $this->connection->table('pos_sessions')
+                ->whereIn('id', $sessionIds)
+                ->where('write_off_total', '!=', 0)
+                ->get(['id', 'name', 'business_date', 'write_off_total']),
         ], JSON_PRETTY_PRINT);
     }
 }

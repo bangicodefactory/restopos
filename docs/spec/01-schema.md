@@ -1516,6 +1516,7 @@ sessions, notes, theoretical-vs-counted arithmetic.
 | refund_amount_total | decimal(16,4) default 0 | |
 | payments_total | decimal(16,4) default 0 | Σ captured payments |
 | rounding_total | decimal(16,4) default 0 | Σ `pos_orders.amount_rounding`; frozen at close so the export's imbalance check never reads live orders |
+| write_off_total | decimal(16,4) default 0 | Σ `pos_orders.amount_write_off`; frozen at close for the same reason. Kept apart from `rounding_total` so each concession stays separately answerable |
 | is_rescue | boolean default false, index | auto-created recovery session for late offline pushes |
 | rescued_from_session_id | FK→pos_sessions.id nullable, set null | |
 | closing_forced | boolean default false | manager forced the close over an unauthorised difference |
@@ -1650,7 +1651,9 @@ New table (replaces Odoo's closing journal entry + `pos.close.session.wizard`).
 | total_sales | decimal(16,4) default 0 | |
 | total_tax | decimal(16,4) default 0 | |
 | total_payments | decimal(16,4) default 0 | |
-| imbalance_amount | decimal(16,4) default 0 | sales+tax+rounding−payments; non-zero triggers the "force balance" UI |
+| total_rounding | decimal(16,4) default 0 | Σ `pos_sessions.rounding_total` over the period |
+| total_write_off | decimal(16,4) default 0 | Σ `pos_sessions.write_off_total`; without it a period containing a stale-price sale does not add up on its face |
+| imbalance_amount | decimal(16,4) default 0 | sales+tax+rounding−write_off−payments; non-zero triggers the "force balance" UI |
 | media_file_id | FK→media_files.id nullable, set null | generated file; served only by the authenticated download route, never web-served |
 | generated_by_user_id | FK→users.id nullable, set null | |
 | error_message | text nullable | |
@@ -1729,7 +1732,8 @@ kept, portal mixin (kept `access_token` + `ticket_code`).
 | amount_rounding | decimal(16,4) default 0 | cash-rounding adjustment |
 | amount_paid | decimal(16,4) default 0 | Σ payments (incl. negative change) |
 | amount_change | decimal(16,4) default 0 | change given back |
-| amount_due | decimal(16,4) default 0 | total − paid (0 when settled) |
+| amount_due | decimal(16,4) default 0 | total − paid − write_off (0 when settled) |
+| amount_write_off | decimal(16,4) default 0 | money a settled sale was short and will never collect: the server repriced above what the till had already taken. Capped at the client/server price gap, so a genuine part-payment keeps its `amount_due` |
 | amount_discount | decimal(16,4) default 0 | Σ of line discounts (reporting) |
 | total_cost | decimal(16,4) default 0 | Σ line costs |
 | margin | decimal(16,4) default 0 | |

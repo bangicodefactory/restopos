@@ -693,3 +693,60 @@ it('lets a settled order resend its courses unchanged', function (): void {
         ->assertOk()
         ->assertJsonPath('results.0.courses.0.status', 'ok');
 });
+
+// ------------------------------------------------------------------ the reprint itself (BAN-514)
+
+it('records a reprint of a settled receipt', function (): void {
+    // The hole this guard left. Everything above is built on "a reprint re-sends the whole graph,
+    // so a blanket freeze is wrong" — and `print_count`, the only column a reprint actually moves,
+    // was left out of the allowlist. The push was answered `ok` and the count stayed at 0, which is
+    // worse than having no counter: "this receipt was printed three times" is exactly what an audit
+    // goes looking for when a customer copy turns up twice.
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    repushSettled($this->fx, $orderUuid)->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect((int) Order::query()->where('uuid', $orderUuid)->value('print_count'))->toBe(0);
+
+    $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value, 'print_count' => 3]);
+    $command['lines'] = [];
+
+    pushOrders($this->fx, [$command])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect((int) Order::query()->where('uuid', $orderUuid)->value('print_count'))->toBe(3);
+});
+
+it('does not let a stale resend walk the reprint count backwards', function (): void {
+    // The register re-sends the whole order on every push, so a copy queued before the reprint
+    // arrives after it as a matter of course — offline, or simply behind a slower batch. A plain
+    // write would let that copy erase a reprint it never knew about, and the count would depend on
+    // the order two queued entries happened to drain in.
+    $orderUuid = (string) Str::uuid();
+
+    settleOrder($this->fx, $orderUuid, (string) Str::uuid(), (string) Str::uuid());
+
+    foreach ([4, 1] as $count) {
+        $command = $this->fx->orderCommand($orderUuid, [], ['state' => OrderState::Paid->value, 'print_count' => $count]);
+        $command['lines'] = [];
+        pushOrders($this->fx, [$command])->assertOk();
+    }
+
+    expect((int) Order::query()->where('uuid', $orderUuid)->value('print_count'))->toBe(4);
+});
+
+it('records a reprint on an order that has not been settled yet', function (): void {
+    // `print_count` was absent from the base writable list too, not just the settled one — so a
+    // pre-payment print (the kitchen's copy, a proforma bill) was dropped on every ordinary update
+    // as well. The settled case is the one that matters, but both were broken.
+    $orderUuid = (string) Str::uuid();
+
+    pushOrders($this->fx, [$this->fx->orderCommand($orderUuid)])->assertOk();
+
+    pushOrders($this->fx, [$this->fx->orderCommand($orderUuid, [], ['print_count' => 2])])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
+
+    expect((int) Order::query()->where('uuid', $orderUuid)->value('print_count'))->toBe(2);
+});

@@ -414,6 +414,7 @@ Batch cap: 200 orders (`pos.sync.max_orders_per_batch`).
 | Code | Meaning |
 |---|---|
 | `client_total_mismatch` | The client's proposed total disagrees with the server's recomputation. Informational — a manual price override is a legitimate cause. Recorded in `sync_conflicts`. |
+| `stale_price_written_off` | The order arrived **settled** and the server priced it above what the till had already collected, so the difference was written off to `pos_orders.amount_write_off` rather than left outstanding. Carries `amount`, `client_total`, `server_total`. Recorded in `sync_conflicts` and on the audit trail. |
 | `session_rerouted` | The requested session was closed; the order landed in the config's currently-open session |
 | `session_rescued` | No open session existed; a **rescue session** was created and the order landed there |
 | `already_settled` | Accompanies `superseded` |
@@ -500,6 +501,17 @@ The client's number stands in five cases, each for its own reason:
 A manual override is accepted when `pos_configs.restrict_price_control` is off (the default — price entry is then an ordinary part of the job), or when the pushing `employee_id` holds `line.price_override`, re-checked server-side. Otherwise the line is priced from the catalogue and the attempt is reported as a `price_override_refused` warning: the sale goes through at the right money and the attempt is on the record. It is **not** rejected — a rejected line is invisible to a client that reads the order's status.
 
 `price_extra` is always the server's: it is the sum of the selected options' own extras and nothing else. On a combo child it is `0`, because `ComboCartPricer` folds the extra into the distributed price.
+
+#### When repricing arrives too late
+
+A till running a stale catalogue has already taken the customer's money at the price it displayed, and the customer has gone. Repricing is still correct — the catalogue is the authority — but it leaves the order permanently short, and because the session summaries freeze the *server's* total while the payment totals freeze what was actually tendered, that difference resurfaces as an unexplained `imbalance_amount` on the accounting export.
+
+So on an order that arrives **settled**, the residual is written off to `pos_orders.amount_write_off` and `amount_due` goes to zero. Two bounds keep that honest:
+
+* capped at `server total − client total`, so an order that is genuinely part-paid keeps the rest of its `amount_due` — only the part our own pricing created is forgiven, and a server price *below* the client's forgives nothing at all;
+* only after settlement — a draft is repriced with nobody's money on the counter, and the next push simply charges the right amount.
+
+The amount is idempotent by construction: `recompute()` subtracts the persisted column on every pass, so a resend of the same order adds nothing. It reaches the ledger through `pos_sessions.write_off_total` and the export's `total_write_off`, never netted silently into rounding.
 
 A refund line is priced from the line it credits. The refund cap (BAN-406) bounds how *many* units come back and says nothing about the rate.
 
@@ -666,9 +678,11 @@ Deleting one (`DELETE …/cash-movements/{movement}`) needs a manager PIN verifi
 
 ### `POST /api/pos/sessions/{session}/accounting-export`
 
-`201`: `{ "uuid": "…", "state": "generated", "total_sales": "…", "total_tax": "…", "total_payments": "…", "imbalance_amount": "0.0000" }`.
+`201`: `{ "uuid": "…", "state": "generated", "total_sales": "…", "total_tax": "…", "total_payments": "…", "total_rounding": "…", "total_write_off": "…", "imbalance_amount": "0.0000" }`.
 
-Reads the **frozen** summaries, never the live orders — an exported period must re-export byte-identically. `imbalance_amount` is `sales + tax − payments`; anything non-zero is surfaced rather than rounded away.
+Reads the **frozen** summaries, never the live orders — an exported period must re-export byte-identically. `imbalance_amount` is `sales + tax + rounding − write_off − payments`; anything non-zero is surfaced rather than rounded away.
+
+Both terms on the sales side are concessions the register was entitled to make and the ledger has to see: `rounding` is what cash rounding cost, `write_off` is what a stale till price cost. Each also gets its own detail row in the file — balanced is not the same as explained.
 
 ---
 

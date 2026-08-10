@@ -268,6 +268,105 @@ describe('closeSession', () => {
         expect(api.post).toHaveBeenCalled();
     });
 
+    it('hands the close back when the drain syncs a draft the pane never showed', async () => {
+        // BAN-514. `drain()` sends whatever is queued, and a queued *draft* is an order the server
+        // will then refuse to close over — so the drain manufactures the very blocker it was run to
+        // clear. The pane loaded showing no drafts and would get back a bare 422 naming a condition
+        // it was told the opposite of, with no force checkbox offered because it believes there is
+        // nothing to force past.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: { ...CLOSING, draft_order_count: 1 } }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        await expect(
+            closeSession({
+                sessionId: 1,
+                countedCash: '100.00',
+                countedByMethod: {},
+                employeeId: null,
+                expectedCash: '100.0000',
+                draftOrderCount: 0,
+            }),
+        ).resolves.toMatchObject({ ok: false, reason: 'drafts_arrived' });
+
+        expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it('does not hand it back over a draft the pane already displayed', async () => {
+        // Seen and answered: the cashier either settled it or ticked force. Refusing here would be
+        // a second press for something they have already dealt with.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: { ...CLOSING, draft_order_count: 1 } }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        await expect(
+            closeSession({
+                sessionId: 1,
+                countedCash: '100.00',
+                countedByMethod: {},
+                employeeId: null,
+                expectedCash: '100.0000',
+                draftOrderCount: 1,
+            }),
+        ).resolves.toMatchObject({ ok: true });
+
+        expect(api.post).toHaveBeenCalled();
+    });
+
+    it('lets a deliberate force through a draft that arrived mid-drain', async () => {
+        // The cashier has already said "close anyway". Handing the close back at that point would
+        // make the force checkbox impossible to satisfy — tick it, drain syncs another draft,
+        // refused again.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: { ...CLOSING, draft_order_count: 2 } }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        await expect(
+            closeSession({
+                sessionId: 1,
+                countedCash: '100.00',
+                countedByMethod: {},
+                employeeId: null,
+                expectedCash: '100.0000',
+                draftOrderCount: 0,
+                force: true,
+            }),
+        ).resolves.toMatchObject({ ok: true });
+
+        expect(api.post).toHaveBeenCalled();
+    });
+
+    it('hands back the fresh closing data with the refusal', async () => {
+        // The pane has to be able to say what arrived. Without the payload it can only repeat the
+        // count it already had, which is the count that was wrong.
+        const sync = syncer({ passes: 1 });
+        const api = {
+            get: vi.fn().mockResolvedValue({ data: { ...CLOSING, draft_order_count: 3 } }),
+            post: vi.fn().mockResolvedValue({ data: null }),
+        };
+        install(sync, api);
+
+        const result = await closeSession({
+            sessionId: 1,
+            countedCash: '100.00',
+            countedByMethod: {},
+            employeeId: null,
+            draftOrderCount: 0,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.ok === false && result.closingData?.draft_order_count).toBe(3);
+    });
+
     it('does not re-read the expectation when the drain sent nothing', async () => {
         // Nothing synced, so nothing can have moved. The extra round trip is pure latency on the
         // common path — a till whose queue was already empty.
