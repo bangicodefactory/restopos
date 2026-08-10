@@ -15,6 +15,7 @@ import {
     fetchCurrentSession,
     openSession,
     openingFloatFor,
+    printXReport,
 } from '../domain/session-actions';
 import { useCatalog, useMoney } from '../hooks/use-register';
 import { draftOrders, useOrderStore } from '../state/order-store';
@@ -505,6 +506,21 @@ function ClosePane({ onDone }: { onDone: () => void }): JSX.Element {
             <div className="flex gap-2">
                 <Button variant="ghost" onClick={onDone}>
                     {t('common.back')}
+                </Button>
+                {/* A reading, not a close (REG-020, REG-022). Deliberately not the primary button,
+                    and deliberately not disabled by the draft guard: unsettled orders are a reason
+                    to look at where the day stands, not a reason to be refused a look. */}
+                <Button
+                    variant="ghost"
+                    loading={busy}
+                    onClick={async () => {
+                        await printXReport({
+                            sessionId: session.id,
+                            employeeId: cashier?.employee_id ?? null,
+                        });
+                    }}
+                >
+                    {t('reg.session.xReport')}
                 </Button>
                 <Button
                     size="xl"

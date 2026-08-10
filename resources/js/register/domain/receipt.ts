@@ -6,11 +6,13 @@ import {
     buildCashMoveDoc,
     buildPrepTicketDoc,
     buildReceiptDoc,
+    buildSessionReportDoc,
     type PrepTicketView,
     type ReceiptConfigView,
     type ReceiptLabels,
     type ReceiptLineView,
     type ReceiptOrderView,
+    type SessionReportView,
 } from '@domain/receipt/index';
 import type { OrderRow } from '@domain/types';
 
@@ -87,6 +89,20 @@ export function receiptConfig(catalog: CatalogIndex = getCatalog()): ReceiptConf
         openDrawer: false,
         labels: FR_LABELS,
     };
+}
+
+/**
+ * A tax's own name, for a slip that groups by tax rather than by group.
+ *
+ * Falls back to the rate the *server* sent rather than to the local catalogue: a till whose replica
+ * is a day stale would otherwise print `#7` beside a real amount of money.
+ */
+export function taxLabelFor(taxId: number, rate: string): string {
+    const tax = getCatalog().taxes.get(taxId);
+
+    if (tax) return tax.label ?? tax.name;
+
+    return `${Decimal.of(rate).withScale(2).toString()} %`;
 }
 
 function taxGroupLabel(catalog: CatalogIndex, taxGroupId: number): string {
@@ -236,6 +252,18 @@ export function buildCashMoveSlip(move: {
     sessionName: string | null;
 }): EscPosDoc {
     return buildCashMoveDoc(move, receiptConfig());
+}
+
+/**
+ * REG-020, REG-022 — the session reading, printed without closing.
+ *
+ * Built from the server's answer rather than from local state, unlike the cash-move slip: a reading
+ * has to cover every device on this register, and the till only knows its own orders. That is also
+ * why there is no offline path — an X-report the till assembled alone would be confidently wrong on
+ * exactly the busy service where somebody bothers to ask for one.
+ */
+export function buildSessionReport(report: SessionReportView): EscPosDoc {
+    return buildSessionReportDoc(report, receiptConfig());
 }
 
 /** KDS-055 — one kitchen ticket for one station's slice of the delta. */

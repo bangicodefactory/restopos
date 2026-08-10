@@ -21,6 +21,7 @@ use App\Enums\AccountingExportFormat;
 use App\Enums\AccountingExportState;
 use App\Enums\CashCountType;
 use App\Enums\CashMovementType;
+use App\Enums\SessionEventType;
 use App\Enums\SessionState;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -109,6 +110,32 @@ return new class extends Migration
         });
 
         $this->applyChecks('cash_movements', ['movement_type' => CashMovementType::values()]);
+
+        // What happened to this till, in order (REG-024). `audit_logs` covers orders and
+        // `cash_movements` covers money; neither answers "what happened to this session
+        // yesterday", and reconstructing it from a state column and three other tables is
+        // guesswork. One row per lifecycle transition, and nothing else.
+        Schema::create('session_events', function (Blueprint $table): void {
+            $table->id();
+            $table->char('uuid', 36)->unique();
+            $table->foreignId('pos_session_id')->constrained('pos_sessions')->cascadeOnDelete();
+            $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+            $table->string('event_type', 32)->index();
+            // Whatever the transition needs to be readable a month later without joining back to
+            // the world it happened in: the float that was declared, the amount forced over, the
+            // reason a close was forced.
+            $table->json('payload')->nullable();
+            $table->foreignId('employee_id')->nullable()->constrained('employees')->nullOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('pos_device_id')->nullable()->constrained('pos_devices')->nullOnDelete();
+            $table->timestamp('occurred_at', 3)->index();
+            $table->timestamps();
+
+            // The shift's story is always read in order, for one session.
+            $table->index(['pos_session_id', 'occurred_at']);
+        });
+
+        $this->applyChecks('session_events', ['event_type' => SessionEventType::values()]);
 
         // A denomination count event (opening / closing / mid-shift).
         Schema::create('session_cash_counts', function (Blueprint $table): void {

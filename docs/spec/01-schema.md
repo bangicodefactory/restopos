@@ -1548,6 +1548,35 @@ reconciliation, foreign currency.
 | timestamps, softDeletes | | soft-deleted (Odoo `delete_cash_in_out` logs the deletion) |
 | index | (pos_session_id, movement_type) | |
 
+### `session_events`
+What happened to this till, in order (REG-024). `audit_logs` covers orders and `cash_movements`
+covers money; neither answers "what happened to this session yesterday", and reconstructing it from
+a state column and three other tables is guesswork. Append-only: no update path, no soft delete —
+its value is that it says what happened, not what is currently true.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | id | |
+| uuid | char(36) **unique** | |
+| pos_session_id | FK→pos_sessions.id, cascade, index | |
+| company_id | FK→companies.id, cascade | |
+| event_type | enum('opened','opening_control_confirmed','cash_in','cash_out','x_report','closed','force_closed','rescued'), index | §4.4 |
+| payload | json nullable | whatever makes the row readable a month later: the float declared, the difference forced over, the figures a reading showed |
+| employee_id | FK→employees.id nullable, set null | |
+| user_id | FK→users.id nullable, set null | |
+| pos_device_id | FK→pos_devices.id nullable, set null | |
+| occurred_at | timestamp(3), index | |
+| timestamps | | |
+| index | (pos_session_id, occurred_at) | the shift is always read in order, for one session |
+
+**Exactly one row per lifecycle transition**, and the guarantee lives in `SessionEventRecorder`
+rather than in each caller: `close()` runs in a transaction that can be retried, and an order push
+can reroute into a rescue session more than once. `x_report`, `cash_in` and `cash_out` are the
+exception and append every time — two readings are two readings, and a drawer opened four times in
+an hour is the pattern the log exists to show.
+
+`closed` and `force_closed` are mutually exclusive; a forced close is the close.
+
 ### `session_cash_counts`
 A denomination count event (opening or closing). One header per count.
 New table (Odoo kept only the total). Enables a real "count the drawer" UX and a variance audit.

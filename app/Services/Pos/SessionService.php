@@ -8,20 +8,24 @@ use App\Enums\AuditSeverity;
 use App\Enums\CashCountType;
 use App\Enums\CashMovementType;
 use App\Enums\OrderState;
+use App\Enums\SessionEventType;
 use App\Enums\SessionState;
 use App\Events\Pos\SessionClosed;
 use App\Exceptions\Pos\RegisterNotReady;
+use App\Models\Identity\Employee;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use App\Models\Pos\SessionCashCount;
 use App\Services\Audit\AuditRecorder;
 use App\Services\Pos\Dto\SessionClosingData;
+use App\Services\Pos\Dto\SessionXReport;
 use App\Support\Audit\AuditEvent;
 use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Psr\Log\LoggerInterface;
 
@@ -49,6 +53,7 @@ final readonly class SessionService
         private LoggerInterface $logger,
         private Config $config,
         private RegisterReadiness $readiness,
+        private SessionEventRecorder $sessionEvents,
     ) {}
 
     /**
@@ -136,6 +141,14 @@ final readonly class SessionService
                 userId: $userId,
             );
 
+            $this->sessionEvents->record(
+                $session,
+                SessionEventType::Opened,
+                ['opening_float' => $openingFloat, 'expected' => $expected],
+                employeeId: $employeeId,
+                userId: $userId,
+            );
+
             return $session;
         });
     }
@@ -184,6 +197,13 @@ final readonly class SessionService
                 changes: ['cash_balance_opening' => ['old' => $expected, 'new' => $countedFloat]],
                 config: $session->pos_config_id,
                 session: $session,
+                employeeId: $employeeId,
+            );
+
+            $this->sessionEvents->record(
+                $session,
+                SessionEventType::OpeningControlConfirmed,
+                ['counted_float' => $countedFloat, 'name' => $session->name],
                 employeeId: $employeeId,
             );
 
@@ -269,6 +289,17 @@ final readonly class SessionService
                 );
             }
 
+            // Repeatable by nature: two cash-outs in a shift are two cash-outs, so these append
+            // rather than dedupe. The movement carries the money; this carries the shift's order.
+            $this->sessionEvents->record(
+                $session,
+                $type === CashMovementType::CashIn ? SessionEventType::CashIn : SessionEventType::CashOut,
+                ['amount' => $signed, 'reason' => $reason],
+                employeeId: $employeeId,
+                userId: $userId,
+                deviceId: $deviceId,
+            );
+
             return $movement;
         });
     }
@@ -332,6 +363,105 @@ final readonly class SessionService
                 : (string) $this->config->get('pos.session.default_authorized_difference', 0),
             enforcesMaximumDifference: (bool) ($config?->set_maximum_difference ?? false),
         );
+    }
+
+    /**
+     * The X-report: this session's trading so far, without ending it (REG-020, REG-022).
+     *
+     * A Z-report happens once, at close. An X-report is the same figures asked for mid-service — a
+     * shift handover, a bank run, a manager wanting to know how the day is going — and asking must
+     * not end the day. Nothing here writes to the session; the only side effect is the event row,
+     * because "who pulled a reading, and when" is itself part of the shift's story.
+     *
+     * Every figure comes from {@see SessionSummaryService}'s live aggregations, which are the same
+     * queries `freeze()` persists at close. That is what makes "an X-report matches the totals
+     * computed at close for the same orders" true by construction rather than by test: neither
+     * report has arithmetic of its own to disagree with.
+     */
+    public function xReport(PosSession $session, ?int $employeeId = null): SessionXReport
+    {
+        $id = (int) $session->getKey();
+        $config = $session->posConfig()->first();
+
+        $salesRows = $this->summaries->salesSummaryRows([$id]);
+        $taxRows = $this->summaries->taxSummaryRows([$id]);
+
+        // Refunds are their own rows rather than a negative fold into sales: a service that took
+        // 900 and gave back 100 is a different day from one that took 800, and a report that cannot
+        // tell them apart is the report nobody trusts.
+        $sales = '0';
+        $refunds = '0';
+
+        foreach ($salesRows as $row) {
+            // The **base**, not `total_amount`: tax is reported on its own line below, and the
+            // accounting export means the same thing by "sales" (`session_sales_summaries
+            // .base_amount`). Summing the tax-inclusive column and then printing tax beside it
+            // would show the VAT twice on the same slip.
+            $amount = (string) ($row['base_amount'] ?? '0');
+
+            if ($row['is_refund'] ?? false) {
+                $refunds = bcadd($refunds, $amount, 4);
+
+                continue;
+            }
+
+            $sales = bcadd($sales, $amount, 4);
+        }
+
+        $tax = '0';
+
+        foreach ($taxRows as $row) {
+            $tax = bcadd($tax, (string) ($row['tax_amount'] ?? '0'), 4);
+        }
+
+        // The figures as they stood at the reading, so the row still means something when somebody
+        // reads it back next month against a drawer that went missing at 19:00.
+        $this->sessionEvents->record(
+            $session,
+            SessionEventType::XReport,
+            ['sales' => $sales, 'tax' => $tax, 'refunds' => $refunds, 'expected_cash' => $this->expectedCash($session)],
+            employeeId: $employeeId,
+        );
+
+        return new SessionXReport(
+            sessionId: $id,
+            sessionName: $session->name,
+            configName: (string) ($config?->name ?? ''),
+            openedAt: $session->opened_at?->toIso8601ZuluString(),
+            printedAt: Carbon::now()->toIso8601ZuluString(),
+            cashierName: $employeeId === null
+                ? null
+                : Employee::query()->whereKey($employeeId)->value('name'),
+            orderCount: $this->tradedOrderCount($session),
+            salesTotal: $sales,
+            taxTotal: $tax,
+            refundTotal: $refunds,
+            openingBalance: (string) $session->cash_balance_opening,
+            cashIn: (string) $session->cash_in_total,
+            cashOut: (string) $session->cash_out_total,
+            expectedCash: $this->expectedCash($session),
+            salesRows: $salesRows,
+            taxRows: $taxRows,
+            paymentTotals: $this->summaries->expectedPaymentTotals($session),
+        );
+    }
+
+    /**
+     * Orders that have actually traded, counted live.
+     *
+     * Not `pos_sessions.order_count`, which means two different things depending on when you read
+     * it: {@see SequenceService} increments it for every order that takes a sequence number — a
+     * cancelled sale included — and `freeze()` then *overwrites* it at close with the count of
+     * paid and done orders. Mid-shift it is therefore a sequence high-water mark, and a reading
+     * that used it would quietly disagree with the Z-report it is supposed to match.
+     */
+    private function tradedOrderCount(PosSession $session): int
+    {
+        return (int) $this->connection->table('pos_orders')
+            ->where('pos_session_id', $session->getKey())
+            ->whereIn('state', [OrderState::Paid->value, OrderState::Done->value])
+            ->whereNull('deleted_at')
+            ->count();
     }
 
     /**
@@ -486,6 +616,22 @@ final readonly class SessionService
                 );
             }
 
+            // One or the other, never both: a forced close *is* the close, and recording it twice
+            // would make every forced shift look like it ended twice.
+            $this->sessionEvents->record(
+                $session,
+                $force || ($overThreshold && $managerApproved) ? SessionEventType::ForceClosed : SessionEventType::Closed,
+                array_filter([
+                    'counted_cash' => $countedCash,
+                    'difference' => $difference,
+                    'drafts' => $drafts > 0 ? $drafts : null,
+                    'over_variance' => $overThreshold ? $threshold : null,
+                    'approved_by_employee_id' => $approvedByEmployeeId,
+                ], static fn (mixed $v): bool => $v !== null),
+                employeeId: $employeeId,
+                userId: $userId,
+            );
+
             $config = $config ?? $session->posConfig()->first();
 
             if ($config !== null) {
@@ -577,6 +723,14 @@ final readonly class SessionService
             'session' => $session->getKey(),
             'reason' => $reason,
         ]);
+
+        // On the rescue session, not on the one it rescued: that session is closed and its story
+        // has ended. The link back is `rescued_from_session_id`, and the payload repeats it so the
+        // row reads on its own.
+        $this->sessionEvents->record($session, SessionEventType::Rescued, array_filter([
+            'reason' => $reason,
+            'rescued_from_session_id' => $rescuedFrom,
+        ], static fn (mixed $v): bool => $v !== null));
 
         return $session;
     }

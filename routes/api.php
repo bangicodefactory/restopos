@@ -98,6 +98,7 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::post('sessions', [SessionController::class, 'store'])->name('sessions.store');
         Route::post('sessions/{session}/opening-control', [SessionController::class, 'confirmOpening'])->name('sessions.opening-control');
         Route::get('sessions/{session}/closing-data', [SessionController::class, 'closingData'])->name('sessions.closing-data');
+        Route::get('sessions/{session}/x-report', [SessionController::class, 'xReport'])->name('sessions.x-report');
         Route::post('sessions/{session}/close', [SessionController::class, 'close'])->name('sessions.close');
         Route::get('sessions/{session}/cash-movements', [SessionController::class, 'cashMovements'])->name('sessions.cash-movements.index');
         Route::post('sessions/{session}/cash-movements', [SessionController::class, 'cashMovement'])->name('sessions.cash-movements');

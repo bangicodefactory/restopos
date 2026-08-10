@@ -2,7 +2,13 @@ import { EscPosBuilder } from '../escpos/builder';
 import type { EscPosDoc } from '../escpos/doc';
 import { Decimal } from '../money/decimal';
 import { formatDateTime, formatMoney, formatPercent, formatQuantity } from './format';
-import type { CashMoveView, PrepTicketView, ReceiptConfigView, ReceiptOrderView } from './types';
+import type {
+    CashMoveView,
+    PrepTicketView,
+    ReceiptConfigView,
+    ReceiptOrderView,
+    SessionReportView,
+} from './types';
 
 /**
  * The receipt templates (spec 03 §7.1).
@@ -227,6 +233,93 @@ export function buildCashMoveDoc(move: CashMoveView, config: ReceiptConfigView):
     // to sign.
     b.feed(2);
     b.rule('_');
+
+    if (config.footer) {
+        b.feed(1);
+        b.text(config.footer, { align: 'center' });
+    }
+
+    b.feed(2);
+    b.cut();
+
+    return b.build();
+}
+
+/**
+ * The session reading (REG-020, REG-022).
+ *
+ * An X-report is a Z-report asked for early, and the danger is exactly that: the two are the same
+ * numbers on the same layout, so a cashier holding one and thinking it is the other stops counting
+ * a till that is still trading. The heading names which it is, and an open session says so in
+ * words under it rather than leaving the reader to infer it from a missing counted-cash line.
+ *
+ * No counted cash and no variance, because nobody has counted anything: this is what the *system*
+ * believes is in the drawer. The count, and the difference from it, belong to the close.
+ */
+export function buildSessionReportDoc(report: SessionReportView, config: ReceiptConfigView): EscPosDoc {
+    const b = new EscPosBuilder({
+        width: config.width,
+        codepage: config.codepage,
+        // `DocKind` has carried 'report' since the printing contract was written and nothing had
+        // ever produced one. So has `PrinterRole`, which is how this reaches a back-office printer
+        // rather than the customer-facing one.
+        kind: 'report',
+        title: report.sessionName ?? undefined,
+    });
+    const l = config.labels;
+    const money = (amount: string): string => formatMoney(amount, config.currency);
+
+    if (config.logoKey) b.image({ key: config.logoKey, align: 'center' });
+    b.title(config.companyName);
+    for (const line of config.companyAddress) b.subtitle(line);
+
+    b.feed(1);
+    b.text(report.isOpen ? l.xReport : l.zReport, { align: 'center', bold: true, size: 'lg' });
+    if (report.isOpen) b.text(l.notAClose, { align: 'center' });
+
+    b.rule('=');
+    b.row(report.configName, report.sessionName ?? '');
+    if (report.openedAt) b.row(l.openedAt, formatDateTime(report.openedAt));
+    b.row(l.printedAt, formatDateTime(report.printedAt));
+    if (report.cashierName) b.row(l.cashier, report.cashierName);
+
+    b.rule('-');
+    b.row(l.orders, String(report.orderCount));
+    b.row(l.grossSales, money(report.grossSales));
+
+    // Only when there were some. A zero refund line on every reading trains people to skim past the
+    // one shift where it is not zero.
+    if (!Decimal.of(report.refunds).isZero()) {
+        b.row(l.refunds, money(Decimal.of(report.refunds).negate().toString()));
+    }
+
+    b.row(l.tax, money(report.tax));
+    b.rule('-');
+    b.row(l.netSales, money(Decimal.of(report.grossSales).sub(Decimal.of(report.refunds)).toString()), {
+        bold: true,
+        size: 'lg',
+    });
+
+    if (report.taxes.length > 0) {
+        b.feed(1);
+        b.text(l.taxBreakdown, { bold: true });
+        for (const tax of report.taxes) b.row(`${tax.label} (${money(tax.base)})`, money(tax.amount));
+    }
+
+    if (report.payments.length > 0) {
+        b.feed(1);
+        b.text(l.payments, { bold: true });
+        for (const payment of report.payments) {
+            b.row(`${payment.label} x${payment.count}`, money(payment.amount));
+        }
+    }
+
+    b.feed(1);
+    b.rule('-');
+    b.row(l.openingFloat, money(report.openingFloat));
+    if (!Decimal.of(report.cashIn).isZero()) b.row(l.cashIn, money(report.cashIn));
+    if (!Decimal.of(report.cashOut).isZero()) b.row(l.cashOut, money(report.cashOut));
+    b.row(l.expectedInDrawer, money(report.expectedCash), { bold: true });
 
     if (config.footer) {
         b.feed(1);

@@ -96,7 +96,8 @@ export class PrinterRouter {
      *   2. `prep` jobs go to every enabled prep printer whose `categoryIds` intersect the job's.
      *   3. A prep job matching no printer falls back to any prep printer with an empty category
      *      list (the "everything else" printer), then to the receipt printer. Never nowhere.
-     *   4. Other roles go to the first enabled printer with that role.
+     *   4. `report` jobs go to a report printer if one is bound, otherwise to the receipt printer.
+     *   5. Other roles go to the first enabled printer with that role.
      */
     resolveTargets(job: PrintJob): PrinterBinding[] {
         const enabled = this.bindings.filter((b) => b.enabled);
@@ -117,6 +118,17 @@ export class PrinterRouter {
 
             const receipt = enabled.filter((b) => b.role === 'receipt');
             return receipt.slice(0, 1);
+        }
+
+        // A venue *may* bind a back-office printer for readings, and almost none will. Dropping the
+        // job when they have not would make an X-report a button that silently does nothing — so it
+        // falls back to the receipt printer, which is where a till roll X-report has always come
+        // out anyway. Same shape as the prep fallback above, for the same reason: never nowhere.
+        if (job.role === 'report') {
+            const report = enabled.filter((b) => b.role === 'report');
+            if (report.length > 0) return report.slice(0, 1);
+
+            return enabled.filter((b) => b.role === 'receipt').slice(0, 1);
         }
 
         return enabled.filter((b) => b.role === job.role).slice(0, 1);

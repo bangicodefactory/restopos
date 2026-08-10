@@ -92,6 +92,7 @@ export const registerEn = {
     'reg.session.unsentBlocksClose': 'Some sales have not reached the server yet. Reconnect and try again — closing now would file them outside this session.',
     'reg.session.expectedMoved': 'Queued sales have just synced, so the expected cash has changed. Check the new figure and close again.',
     'reg.session.draftsArrived': 'An unfinished order has just synced from this till. Settle or cancel it, or tick the box to close anyway.',
+    'reg.session.xReport': 'X-report',
     'reg.session.quarantinedAtClose': '{count} queued entr(y/ies) were refused by the server and are not in this session. Check the sync panel.',
 
     // ── products ─────────────────────────────────────────────────────────────
@@ -427,6 +428,7 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.session.unsentBlocksClose': "Des ventes ne sont pas encore parvenues au serveur. Reconnectez-vous puis réessayez — clôturer maintenant les placerait hors de cette session.",
     'reg.session.expectedMoved': "Des ventes en attente viennent d'être synchronisées : le montant attendu a changé. Vérifiez le nouveau chiffre puis clôturez à nouveau.",
     'reg.session.draftsArrived': "Une commande non terminée vient d'être synchronisée depuis cette caisse. Réglez-la ou annulez-la, ou cochez la case pour clôturer quand même.",
+    'reg.session.xReport': 'Rapport X',
     'reg.session.quarantinedAtClose': '{count} entrée(s) en file ont été refusées par le serveur et ne figurent pas dans cette session. Consultez le panneau de synchronisation.',
 
     'reg.products.search': 'Rechercher un produit, une référence, un code-barres',

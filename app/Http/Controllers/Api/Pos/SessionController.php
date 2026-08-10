@@ -123,6 +123,25 @@ final class SessionController extends Controller
         return new JsonResponse($this->sessions->closingData($session)->toArray());
     }
 
+    /**
+     * `GET /api/pos/sessions/{session}/x-report` — this session's trading so far (REG-020, REG-022).
+     *
+     * A reading, not a close: nothing about the session changes, so this is a GET even though it
+     * appends an event row. That row is the point — "who pulled a reading and when" is part of the
+     * shift's story, and a reading taken just before a drawer goes missing is worth having.
+     */
+    public function xReport(Request $request, PosSession $session): JsonResponse
+    {
+        $this->assertOwned($request, $session);
+
+        $employeeId = $request->query('employee_id');
+
+        return new JsonResponse($this->sessions->xReport(
+            $session,
+            $employeeId === null ? null : (int) $employeeId,
+        )->toArray());
+    }
+
     /** `POST /api/pos/sessions/{session}/close` */
     public function close(CloseSessionRequest $request, PosSession $session): JsonResponse
     {
