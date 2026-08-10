@@ -140,7 +140,10 @@ it('records a scripted shift: two voids and a discount produce exactly three row
     push($this->fx, ['orders' => [$this->fx->orderCommand($orderUuid, [
         ['op' => 'delete', 'uuid' => $lineA],
         ['op' => 'delete', 'uuid' => $lineB],
-        ['op' => 'update', 'uuid' => $lineC, 'discount' => '50'],
+        // At the house limit, not over it: an unauthorised discount past
+        // `pos.discount_limit_percent` is now cut back to it (BAN-430), and this test is about
+        // how many rows an edit produces, not about who may grant one.
+        ['op' => 'update', 'uuid' => $lineC, 'discount' => '30'],
     ])]])->assertOk();
 
     $logs = editLogs();
@@ -152,9 +155,9 @@ it('records a scripted shift: two voids and a discount produce exactly three row
     $discount = $logs->last();
 
     expect($discount->old_value)->toBe('0')
-        ->and($discount->new_value)->toBe('50')
-        // Half of a €20 line.
-        ->and((string) $discount->amount_impact)->toBe('-10.0000');
+        ->and($discount->new_value)->toBe('30')
+        // 30% of a €20 line.
+        ->and((string) $discount->amount_impact)->toBe('-6.0000');
 });
 
 it('carries the employee, the device and the order on every row', function (): void {
@@ -608,7 +611,7 @@ it('puts a manager override on the trail', function (): void {
     $command = $this->fx->orderCommand($orderUuid);
     $command['approvals'] = [[
         'uuid' => $approvalUuid,
-        'ability' => 'order.discount',
+        'ability' => 'line.discount.above_limit',
         'manager_employee_id' => $this->fx->manager->getKey(),
         'verified' => 'online',
         'at' => now()->toIso8601ZuluString(),
@@ -621,7 +624,7 @@ it('puts a manager override on the trail', function (): void {
 
     expect($log->uuid)->toBe($approvalUuid)
         ->and((int) $log->actor_employee_id)->toBe((int) $this->fx->manager->getKey())
-        ->and($log->changes['ability']['new'])->toBe('order.discount')
+        ->and($log->changes['ability']['new'])->toBe('line.discount.above_limit')
         ->and($log->severity->value)->toBe('notice');
 });
 
@@ -631,7 +634,7 @@ it('marks an override that could only be checked offline', function (): void {
     $command = $this->fx->orderCommand((string) Str::uuid());
     $command['approvals'] = [[
         'uuid' => (string) Str::uuid(),
-        'ability' => 'order.line.delete',
+        'ability' => 'order.delete_draft',
         'manager_employee_id' => $this->fx->manager->getKey(),
         'verified' => 'offline',
         'at' => now()->toIso8601ZuluString(),
@@ -650,7 +653,7 @@ it('counts one override once, however many times its order is pushed', function 
     $command = $this->fx->orderCommand($orderUuid);
     $command['approvals'] = [[
         'uuid' => (string) Str::uuid(),
-        'ability' => 'order.discount',
+        'ability' => 'line.discount.above_limit',
         'manager_employee_id' => $this->fx->manager->getKey(),
         'verified' => 'online',
         'at' => now()->toIso8601ZuluString(),

@@ -10,6 +10,7 @@ use App\Models\Identity\Employee;
 use App\Models\Pos\Order;
 use App\Models\Pos\PosConfig;
 use App\Services\Identity\EmployeeAuthService;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\ConnectionInterface;
 
 /**
@@ -48,6 +49,7 @@ final readonly class LinePriceAuthority
         private PricingService $pricing,
         private ComboCartPricer $comboPricer,
         private EmployeeAuthService $employees,
+        private ConfigRepository $config,
     ) {}
 
     /**
@@ -66,7 +68,9 @@ final readonly class LinePriceAuthority
         array $lineCommands,
         ?int $employeeId = null,
         array $refundLinks = [],
+        ?ApprovalGrant $grant = null,
     ): PricePlan {
+        $grant ??= new ApprovalGrant;
         $commands = [];
 
         foreach ($lineCommands as $command) {
@@ -78,17 +82,23 @@ final readonly class LinePriceAuthority
         }
 
         if ($commands === []) {
-            return new PricePlan([], [], [], []);
+            return new PricePlan([], [], [], [], []);
         }
 
         $held = $this->linesOnOrder($order);
         $cart = $this->cartView($commands, $held);
         $catalogue = $this->catalogue($cart);
-        $mayOverride = $this->mayOverride($config, $employeeId);
+        // An approval is a manager standing at the till granting exactly this, so it counts the
+        // same as the pusher holding the ability outright (BAN-430).
+        $mayOverride = $this->mayOverride($config, $employeeId) || $grant->allows('line.price_override');
+        $mayDiscountAbove = $this->holds($config, $employeeId, 'line.discount.above_limit')
+            || $grant->allows('line.discount.above_limit');
+        $discountLimit = (string) $this->config->get('pos.discount_limit_percent', 30);
 
         $prices = [];
         $extras = [];
         $refusals = [];
+        $discounts = [];
         // What the client asked for, kept only for lines the server ends up pricing itself. The
         // gap between the two is what the repricing actually changed, and the only bound on a
         // stale-price write-off that a device cannot inflate (BAN-514).
@@ -128,6 +138,26 @@ final readonly class LinePriceAuthority
                     (array) ($command['attribute_line_value_ids'] ?? $line['attribute_value_ids'] ?? []),
                 );
 
+            // A discount past the house limit is a manager's call, and until BAN-430 the server did
+            // not look: `discount` was picked out of the command and written, so a patched till
+            // could send 100 and take the whole sale to zero. Cut back to the limit rather than
+            // refused outright - the cashier is entitled to discount up to it, and a rejected line
+            // is invisible to a client that reads the order's status (the BAN-406 lesson).
+            if (! $mayDiscountAbove) {
+                $asked = (string) ($command['discount'] ?? $command['discount_percent'] ?? $line['discount_percent'] ?? '0');
+
+                if (bccomp($asked, $discountLimit, 4) > 0) {
+                    $discounts[$uuid] = $discountLimit;
+
+                    $refusals[] = [
+                        'code' => 'discount_above_limit_refused',
+                        'line_uuid' => $uuid,
+                        'client' => $asked,
+                        'server' => $discountLimit,
+                    ];
+                }
+            }
+
             // A refund is priced by what was actually charged, not by what the till says now. The
             // cap (BAN-406) bounds how *many* units come back; without this it says nothing about
             // the rate, so one unit of a 1-cent line could be credited at any price at all.
@@ -166,7 +196,7 @@ final readonly class LinePriceAuthority
             }
         }
 
-        return new PricePlan($prices, $extras, $refusals, $proposals);
+        return new PricePlan($prices, $extras, $refusals, $proposals, $discounts);
     }
 
     /**
@@ -197,6 +227,18 @@ final readonly class LinePriceAuthority
 
         return $employee instanceof Employee
             && $this->employees->can($employee, $config, 'line.price_override');
+    }
+
+    /** Does the employee pushing this order hold an ability in their own right? */
+    private function holds(PosConfig $config, ?int $employeeId, string $ability): bool
+    {
+        if ($employeeId === null) {
+            return false;
+        }
+
+        $employee = $this->employees->candidates($config)->firstWhere('id', $employeeId);
+
+        return $employee instanceof Employee && $this->employees->can($employee, $config, $ability);
     }
 
     /**

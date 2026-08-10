@@ -59,13 +59,15 @@ function settleAtStalePrice(
     string $charged,
     string $clientTotal,
     string $tendered,
+    string $discount = '0',
+    ?int $employeeId = null,
 ): TestResponse {
-    return test()->withHeaders($fx->headers())->postJson('/api/pos/sync', ['orders' => [
+    return test()->withHeaders($fx->headers())->postJson('/api/pos/sync', ['employee_id' => $employeeId, 'orders' => [
         $fx->orderCommand(
             $uuid,
             [[
                 'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $fx->variant->getKey(),
-                'qty' => '1', 'price_unit' => $charged, 'discount' => '0',
+                'qty' => '1', 'price_unit' => $charged, 'discount' => $discount,
             ]],
             ['state' => OrderState::Paid->value, 'amount_total_client' => $clientTotal],
             [[
@@ -301,20 +303,10 @@ it('measures the repricing after the line discount, not before it', function ():
 
     $uuid = (string) Str::uuid();
 
-    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', ['orders' => [
-        $this->fx->orderCommand(
-            $uuid,
-            [[
-                'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
-                'qty' => '1', 'price_unit' => '10.00', 'discount' => '50',
-            ]],
-            ['state' => OrderState::Paid->value, 'amount_total_client' => '6.05'],
-            [[
-                'op' => 'create', 'uuid' => (string) Str::uuid(),
-                'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '3.00',
-            ]],
-        ),
-    ]])->assertOk();
+    // Pushed by the manager: 50% is past `pos.discount_limit_percent`, and an unauthorised one
+    // would be cut back to 30 before this test ever got to the arithmetic (BAN-430).
+    settleAtStalePrice($this->fx, $uuid, '10.00', '6.05', '3.00', '50', (int) $this->fx->manager->getKey())
+        ->assertOk();
 
     $order = Order::query()->where('uuid', $uuid)->firstOrFail();
 
