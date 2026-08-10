@@ -780,6 +780,15 @@ final readonly class OrderSyncService
             $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $warning);
         }
 
+        // 5b — the money the repricing above left uncollected on a sale that is already over.
+        $writeOff = $this->absorbStalePriceShortfall($config, $order, $pricePlan, $session, $device, $employeeId);
+
+        if ($writeOff !== null) {
+            $warnings[] = $writeOff;
+
+            $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $writeOff);
+        }
+
         // 6 — sequence + name, gapless per session, assigned once.
         if ($order->sequence_number === null && $this->stateValue($order->state) !== OrderState::Draft->value) {
             $sequence = $this->sequences->nextSessionSequence($session);
@@ -920,6 +929,10 @@ final readonly class OrderSyncService
             // A table transfer, a tip, and an explicit "no tip" (is_tipped=false, tip_amount=0)
             // must all survive an update; the client sends the column names directly.
             'restaurant_table_id', 'is_tipped', 'tip_amount',
+            // How many times the receipt has been printed. Absent from this list entirely until
+            // BAN-514, so it was dropped on every update — not just settled ones — and the column
+            // the back office reads never left 0.
+            'print_count',
         ];
 
         // `tracking_number` is deliberately NOT writable, for the same reason `access_token` is not
@@ -947,6 +960,14 @@ final readonly class OrderSyncService
             if (array_key_exists($field, $attributes)) {
                 $update[$field] = $attributes[$field];
             }
+        }
+
+        // A reprint count only ever goes up. The register re-sends the whole order on every push,
+        // so a queued copy from before the reprint arrives *after* it routinely — and a plain write
+        // would let that stale copy erase the reprint it does not know about. Taking the greater of
+        // the two makes the column safe to trust and the write order-independent.
+        if (isset($update['print_count'])) {
+            $update['print_count'] = max((int) $order->print_count, (int) $update['print_count']);
         }
 
         if (! $settled) {
@@ -2288,6 +2309,157 @@ final readonly class OrderSyncService
         );
     }
 
+    /**
+     * Write off what a settled sale was short because the server repriced it (BAN-514).
+     *
+     * BAN-502 made the server the price authority: the client's `price_unit` is a proposal and the
+     * catalogue decides. That is right, and it stays right. But a till running a stale catalogue
+     * has already taken the customer's money at the price it displayed, and the customer has left.
+     * Repricing then leaves the order permanently short — and `session_sales_summaries` freeze the
+     * *server's* total while `session_payment_totals` freeze what was actually tendered, so the
+     * difference surfaces at the end of the chain as an unexplained `imbalance_amount` on the
+     * accounting export. The drawer still reconciles; the ledger does not.
+     *
+     * So the shortfall is recorded rather than left outstanding — bounded three ways.
+     *
+     * ## The bound has to be the server's own number
+     *
+     * The tempting cap is `amount_total − amount_total_client`: what the order is worth against
+     * what the till thought it was worth. It is also a hole straight through BAN-502. That field is
+     * an unvalidated assertion by the device, so a till that under-declares it has the server
+     * forgive whatever it likes — with a correct catalogue and no repricing at all, a push of ten
+     * items worth 121.00 declaring a total of 12.10 and tendering 12.10 settles in full, writes off
+     * 108.90, and the accounting export *balances*. BAN-502 stopped the device dictating the price;
+     * that would have let it dictate what it owed, which is the same money by another route.
+     *
+     * So the cap is {@see repricingDelta()}: the sum of what *this server* moved each line by,
+     * grossed up at the line's own tax rate. The device cannot inflate it — it is zero exactly when
+     * the server changed nothing, which is precisely the fraud case above.
+     *
+     * ## The other two bounds
+     *
+     * - **Cumulative, not per-push.** The allowance is the delta *less what has already been
+     *   forgiven*. Without that, a second push re-measures the full gap and forgives against it
+     *   again: a tip added after settlement, with the till re-sending its original total, had the
+     *   whole tip written off on top of the genuine 2.42.
+     * - **Only after settlement.** A draft still being built is repriced with nobody's money on the
+     *   counter, and the next push simply charges the right amount.
+     *
+     * Idempotent by construction: the amount lands in `pos_orders.amount_write_off`, which
+     * {@see recompute()} subtracts on every subsequent pass, so a re-push recomputes `amount_due`
+     * to zero, finds no residual, and adds nothing.
+     *
+     * @return array<string, mixed>|null the warning to return to the device, if anything was written off
+     */
+    private function absorbStalePriceShortfall(
+        PosConfig $config,
+        Order $order,
+        PricePlan $pricePlan,
+        PosSession $session,
+        ?PosDevice $device,
+        ?int $employeeId,
+    ): ?array {
+        if (! SettledOrder::isSettled($this->stateValue($order->state))) {
+            return null;
+        }
+
+        $due = (string) $order->amount_due;
+
+        if (bccomp($due, '0', 4) <= 0) {
+            return null;
+        }
+
+        $delta = $this->repricingDelta($order, $pricePlan);
+        $alreadyForgiven = (string) $order->amount_write_off;
+        $allowance = bcsub($delta, $alreadyForgiven, 4);
+
+        if (bccomp($allowance, '0', 4) <= 0) {
+            return null;
+        }
+
+        $writeOff = bccomp($due, $allowance, 4) <= 0 ? $due : $allowance;
+
+        $order->forceFill([
+            'amount_write_off' => bcadd($alreadyForgiven, $writeOff, 4),
+            'amount_due' => bcsub($due, $writeOff, 4),
+        ])->save();
+
+        $this->audit->record(
+            event: AuditEvent::StalePriceWrittenOff,
+            subject: $order,
+            severity: AuditSeverity::Warning,
+            message: 'Settled order repriced above what was collected; shortfall written off',
+            changes: [
+                'amount_write_off' => ['old' => $alreadyForgiven, 'new' => bcadd($alreadyForgiven, $writeOff, 4)],
+                'repricing_delta' => ['old' => null, 'new' => $delta],
+            ],
+            config: $config,
+            session: $session,
+            employeeId: $employeeId,
+            device: $device,
+        );
+
+        return [
+            'code' => 'stale_price_written_off',
+            'amount' => $writeOff,
+            'repricing_delta' => $delta,
+            'server_total' => (string) $order->amount_total,
+        ];
+    }
+
+    /**
+     * How much the server's own repricing added to this order, tax included.
+     *
+     * Only lines this push actually priced count, and only upward: `proposedFor()` is populated
+     * exactly where {@see LinePriceAuthority} overrode the client, so a line whose price the client
+     * was entitled to set — an open-price product, a tip, a permitted manual override — contributes
+     * nothing, which is what makes a tip added after settlement stay owed rather than forgiven.
+     *
+     * Grossed up per line rather than at order level: `price_subtotal_incl / price_subtotal` is that
+     * line's own effective rate, so a zero-rated line and a 21% line are not averaged into each
+     * other. A change of `d` in the unit price moves the subtotal by `d × qty × (1 − discount)`,
+     * because that is how the subtotal is built.
+     */
+    private function repricingDelta(Order $order, PricePlan $pricePlan): string
+    {
+        $delta = '0';
+
+        /** @var list<OrderLine> $lines */
+        $lines = OrderLine::query()->where('pos_order_id', $order->getKey())->get()->all();
+
+        foreach ($lines as $line) {
+            $proposed = $pricePlan->proposedFor((string) $line->uuid);
+
+            if ($proposed === null) {
+                continue;
+            }
+
+            // Signed, deliberately: a line the server priced *down* offsets one it priced up, and
+            // the net is what the customer's tender actually fell short by. Skipping the downward
+            // ones over-forgives — on a push with one line +2.42 and another −1.21 the order is
+            // only 1.21 adrift, and an unrelated under-tender on top would have had 2.42 forgiven
+            // instead of 1.21. The sum is guarded once at the end, where a net-negative delta
+            // forgives nothing at all.
+            $perUnit = bcsub((string) $line->price_unit, $proposed, 4);
+
+            $untaxed = bcmul(
+                bcmul($perUnit, (string) $line->quantity, 6),
+                bcsub('1', bcdiv((string) $line->discount_percent, '100', 8), 8),
+                6,
+            );
+
+            // A fully discounted line moves the subtotal by nothing, so there is no rate to read
+            // off it and nothing to add either.
+            $ratio = bccomp((string) $line->price_subtotal, '0', 4) === 0
+                ? '1'
+                : bcdiv((string) $line->price_subtotal_incl, (string) $line->price_subtotal, 8);
+
+            $delta = bcadd($delta, bcmul($untaxed, $ratio, 4), 4);
+        }
+
+        return $delta;
+    }
+
     // ------------------------------------------------------------ recompute
 
     /**
@@ -2370,6 +2542,16 @@ final readonly class OrderSyncService
             bcsub($totals->roundedTotal, $netPaid, 4),
             $totals->roundingDelta,
         );
+
+        // A stale-price shortfall already written off is settled business, not an outstanding debt
+        // (BAN-514). Subtracting the *persisted* column here rather than re-deciding is what makes
+        // this idempotent: the ingest path below writes the write-off once, and every subsequent
+        // recompute — a re-push, a tip, a back-office edit — reproduces `amount_due = 0` from it
+        // without needing to know why. Clamped at zero so a later credit cannot drive the due
+        // negative and read as an overpayment.
+        $amountDue = bccomp($amountDue, (string) $order->amount_write_off, 4) <= 0
+            ? '0.0000'
+            : bcsub($amountDue, (string) $order->amount_write_off, 4);
 
         $order->forceFill([
             'amount_untaxed' => $totals->totalExcluded,

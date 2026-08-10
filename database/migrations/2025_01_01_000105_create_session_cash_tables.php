@@ -70,6 +70,12 @@ return new class extends Migration
             // figure here, because the accounting export reads these summaries and never the live
             // order rows — the imbalance check needs it and must not go looking for it in orders.
             $table->decimal('rounding_total', 16, 4)->default(0);
+            // Stale-price shortfalls written off across the session (BAN-514), frozen here for the
+            // same reason as `rounding_total`: the export reads the summaries, never the orders.
+            // Kept separate from rounding so `rounding_total` stays the single answer to "what did
+            // cash rounding cost us" — two different concessions netted into one column is a figure
+            // nobody can act on.
+            $table->decimal('write_off_total', 16, 4)->default(0);
             $table->boolean('is_rescue')->default(false)->index();
             $table->foreignId('rescued_from_session_id')->nullable()->constrained('pos_sessions')->nullOnDelete();
             $table->boolean('closing_forced')->default(false);
@@ -199,6 +205,9 @@ return new class extends Migration
             // Without this the export's own figures do not add up on their face: sales + tax will
             // not equal payments on any cash-rounded period, and the reader has no way to see why.
             $table->decimal('total_rounding', 16, 4)->default(0);
+            // Likewise for stale-price write-offs (BAN-514): a period containing one does not add
+            // up on its face without a column naming the amount that was forgiven.
+            $table->decimal('total_write_off', 16, 4)->default(0);
             $table->decimal('imbalance_amount', 16, 4)->default(0);
             $table->foreignId('media_file_id')->nullable()->constrained('media_files')->nullOnDelete();
             $table->foreignId('generated_by_user_id')->nullable()->constrained('users')->nullOnDelete();

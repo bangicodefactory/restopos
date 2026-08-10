@@ -51,6 +51,13 @@ final class AuditEvent
     /** A device tried to change an order that was already paid (BAN-410). */
     public const SettledOrderWriteRejected = 'order.settled_write_rejected';
 
+    /**
+     * A settled sale repriced above what the till collected, and the difference written off
+     * (BAN-514). Not a fraud signal on its own — a stale catalogue does this — but it is money the
+     * venue expected and did not get, so it belongs on the trail with the device that took it.
+     */
+    public const StalePriceWrittenOff = 'order.stale_price_written_off';
+
     // ----------------------------------------------------------------- people
     /** A manager PIN authorising an action the cashier could not take alone (REG-045). */
     public const EmployeeOverride = 'employee.override';

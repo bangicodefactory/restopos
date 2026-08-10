@@ -252,6 +252,11 @@ export type CloseSessionInput = {
     sessionId: number;
     /** What the cashier counted against. If the drain moves it, the close is handed back. */
     expectedCash?: string;
+    /**
+     * How many drafts the pane showed. The drain can *create* one — a queued draft syncs and the
+     * server's draft guard then refuses the close the drain was clearing the way for (BAN-514).
+     */
+    draftOrderCount?: number;
     /** A session that never traded is abandoned rather than closed — the server asks for the word. */
     abandon?: boolean;
     countedCash: string;
@@ -346,14 +351,36 @@ export async function closeSession(input: CloseSessionInput): Promise<CloseSessi
         // like an overage, and on a register with a variance threshold that calls a manager over to
         // authorise a difference that no longer exists. Re-read, and if it moved, hand the pane the
         // new figure and let them press again.
-        if (sent > 0 && input.expectedCash !== undefined) {
+        //
+        // The same re-read answers a second question. `drain()` sends whatever is queued, and a
+        // queued *draft* is an order the server will then refuse to close over — so the drain can
+        // manufacture the very blocker it was run to clear, and the pane, which loaded showing no
+        // drafts, gets back a 422 naming a condition it was told the opposite of. Comparing the
+        // count the cashier was shown against the count that exists now catches it here, where the
+        // pane can offer the force checkbox, instead of at the server as a bare refusal.
+        if (sent > 0 && (input.expectedCash !== undefined || input.draftOrderCount !== undefined)) {
             const fresh = await fetchClosingData(input.sessionId);
 
-            if (fresh && !Decimal.of(fresh.expected_cash).eq(Decimal.of(input.expectedCash))) {
+            if (fresh && input.expectedCash !== undefined && !Decimal.of(fresh.expected_cash).eq(Decimal.of(input.expectedCash))) {
                 const reason = 'expected_changed';
                 store.setError(reason);
 
                 return { ok: false, reason };
+            }
+
+            // Only when the drain added to them: a draft the pane already displayed has been seen,
+            // and the cashier either settled it or ticked force. Handing that one back would be a
+            // second press for something they have already answered.
+            if (
+                fresh &&
+                input.draftOrderCount !== undefined &&
+                fresh.draft_order_count > input.draftOrderCount &&
+                !(input.force ?? false)
+            ) {
+                const reason = 'drafts_arrived';
+                store.setError(reason);
+
+                return { ok: false, reason, closingData: fresh };
             }
         }
 

@@ -53,6 +53,7 @@ final readonly class SessionSummaryService
             'refund_amount_total' => $orderTotals['refund_amount_total'],
             'payments_total' => $orderTotals['payments_total'],
             'rounding_total' => $orderTotals['rounding_total'],
+            'write_off_total' => $orderTotals['write_off_total'],
         ])->save();
 
         return [
@@ -360,7 +361,7 @@ final readonly class SessionSummaryService
         return $out;
     }
 
-    /** @return array{order_count: int, order_amount_total: string, refund_amount_total: string, payments_total: string} */
+    /** @return array{order_count: int, order_amount_total: string, refund_amount_total: string, payments_total: string, rounding_total: string, write_off_total: string} */
     private function orderTotals(PosSession $session): array
     {
         $row = $this->connection->table('pos_orders')
@@ -371,6 +372,7 @@ final readonly class SessionSummaryService
             ->selectRaw('sum(case when is_refund then 0 else amount_total end) as order_amount_total')
             ->selectRaw('sum(case when is_refund then amount_total else 0 end) as refund_amount_total')
             ->selectRaw('sum(amount_rounding) as rounding_total')
+            ->selectRaw('sum(amount_write_off) as write_off_total')
             ->first();
 
         $payments = (string) ($this->connection->table('pos_payments')
@@ -384,6 +386,7 @@ final readonly class SessionSummaryService
             'refund_amount_total' => $this->scale((string) ($row->refund_amount_total ?? '0')),
             'payments_total' => $this->scale($payments),
             'rounding_total' => $this->scale((string) ($row->rounding_total ?? '0')),
+            'write_off_total' => $this->scale((string) ($row->write_off_total ?? '0')),
         ];
     }
 

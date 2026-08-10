@@ -57,6 +57,10 @@ class PosSession extends Model implements PosLoadable
             'order_amount_total' => 'decimal:4',
             'refund_amount_total' => 'decimal:4',
             'payments_total' => 'decimal:4',
+            // `rounding_total` had no cast either; both are money and every other money column here
+            // is cast, so they are added together rather than leaving a new asymmetry behind.
+            'rounding_total' => 'decimal:4',
+            'write_off_total' => 'decimal:4',
             'is_rescue' => 'boolean',
             'closing_forced' => 'boolean',
             'accounting_exported_at' => 'datetime',
