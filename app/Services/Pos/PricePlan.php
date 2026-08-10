@@ -22,12 +22,14 @@ final readonly class PricePlan
      * @param  array<string, string>  $extras  line uuid => the server's attribute extra
      * @param  list<array<string, mixed>>  $refusals  overrides the pushing employee could not make
      * @param  array<string, string>  $proposals  line uuid => the unit price the client asked for
+     * @param  array<string, string>  $discounts  line uuid => the discount the server will allow
      */
     public function __construct(
         private array $prices = [],
         private array $extras = [],
         private array $refusals = [],
         private array $proposals = [],
+        private array $discounts = [],
     ) {}
 
     /** The server's price for this line, or null when the client's stands. */
@@ -55,6 +57,19 @@ final readonly class PricePlan
     public function extraFor(string $uuid): ?string
     {
         return $this->extras[$uuid] ?? null;
+    }
+
+    /**
+     * The discount this line may actually carry, or null when the client's stands.
+     *
+     * Populated only where the server is cutting one back: a discount past
+     * `pos.discount_limit_percent` that nobody with `line.discount.above_limit` authorised
+     * (BAN-430). Same shape as {@see priceFor()} for the same reason - "no opinion" and "the server
+     * says zero" have to be different answers.
+     */
+    public function discountFor(string $uuid): ?string
+    {
+        return $this->discounts[$uuid] ?? null;
     }
 
     /**

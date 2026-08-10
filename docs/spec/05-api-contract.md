@@ -414,6 +414,8 @@ Batch cap: 200 orders (`pos.sync.max_orders_per_batch`).
 | Code | Meaning |
 |---|---|
 | `client_total_mismatch` | The client's proposed total disagrees with the server's recomputation. Informational — a manual price override is a legitimate cause. Recorded in `sync_conflicts`. |
+| `discount_above_limit_refused` | The line asked for a discount past `pos.discount_limit_percent` and nobody with `line.discount.above_limit` authorised it. Cut back to the limit, not rejected. Carries `line_uuid`, `client`, `server`. |
+| `approval_refused` | A manager override the device claimed that did not stand up. Carries `reason` (`unknown_ability`, `no_approver`, `unknown_approver`, `approver_lacks_ability`, `approval_replayed`), `ability` and the claimed `manager_employee_id`. Recorded on the audit trail as `employee.override_refused`. |
 | `stale_price_written_off` | The order arrived **settled** and the server's repricing left it short of what was collected, so the difference was written off to `pos_orders.amount_write_off` rather than left outstanding. Carries `amount`, `repricing_delta`, `server_total`. Recorded in `sync_conflicts` and on the audit trail. |
 | `session_rerouted` | The requested session was closed; the order landed in the config's currently-open session |
 | `session_rescued` | No open session existed; a **rescue session** was created and the order landed there |
@@ -498,9 +500,35 @@ The client's number stands in five cases, each for its own reason:
 | `price_type: manual` | a cashier override — see below |
 | a combo line the push cannot see whole | pricing a meal from a fragment reverses the meal deal |
 
-A manual override is accepted when `pos_configs.restrict_price_control` is off (the default — price entry is then an ordinary part of the job), or when the pushing `employee_id` holds `line.price_override`, re-checked server-side. Otherwise the line is priced from the catalogue and the attempt is reported as a `price_override_refused` warning: the sale goes through at the right money and the attempt is on the record. It is **not** rejected — a rejected line is invisible to a client that reads the order's status.
+A manual override is accepted when `pos_configs.restrict_price_control` is off (the default — price entry is then an ordinary part of the job), or when the pushing `employee_id` holds `line.price_override`, re-checked server-side, or when a validated manager approval on the same push grants it (see **Manager overrides** below). Otherwise the line is priced from the catalogue and the attempt is reported as a `price_override_refused` warning: the sale goes through at the right money and the attempt is on the record. It is **not** rejected — a rejected line is invisible to a client that reads the order's status.
 
 `price_extra` is always the server's: it is the sum of the selected options' own extras and nothing else. On a combo child it is `0`, because `ComboCartPricer` folds the extra into the distributed price.
+
+#### Discounts
+
+`discount` is capped server-side at `pos.discount_limit_percent` (30 by default). Past it the line needs `line.discount.above_limit` — held by the pushing employee, or granted by a validated approval riding on the same push. Otherwise the discount is **cut back to the limit** and reported as `discount_above_limit_refused`, on updates as well as creates.
+
+Enforced only on screen until BAN-430: the server picked `discount` out of the command and wrote it, so a patched till could send `100` and take the sale to zero with the cap intact on every display in the building.
+
+### Manager overrides
+
+`approvals[]` on an order command is a list of `{uuid, ability, manager_employee_id, verified, at}`. Every entry is **re-validated at ingest** — the client's PIN check is not evidence the server has seen. An approval stands only when all four hold:
+
+| Check | Refusal reason |
+| -- | -- |
+| the ability is one `pos.role_abilities` defines, across any role | `unknown_ability` |
+| an approver is named | `no_approver` |
+| that employee is one of this config's, i.e. this company's | `unknown_approver` |
+| that employee actually holds the ability | `approver_lacks_ability` |
+| the approval has not already been spent on a different order | `approval_replayed` |
+
+A valid approval both authorises the mutation and lands on the audit trail as `employee.override`, once, however many times its order is pushed. An invalid one authorises nothing and lands as `employee.override_refused`, attributed to the **pushing** employee rather than to the manager it named — hanging it on them would repeat the forgery in the log.
+
+The PIN itself does not travel with the order and is deliberately not re-checked here; `verified` records whether the device checked it online or against a cached hash, and an offline grant is logged at warning severity.
+
+Refunds are exempt from the discount cap, and their discount is pinned to the original line's alongside its price. A refund is priced by what was actually charged, and history is not subject to today's limit — clamping it refunds *more* than was taken, which is the one direction a refund guard must never fail in.
+
+Approvals are bound to one order, matching what `approval.ts` has always stored. They are **not** bound to a line: `context` is always `{}`, so one approval authorises its ability for every line in the push (tracked as BAN-515). Without that an approval is a bearer token: one 90% discount signed off, the row kept, and replayed on every sale for the rest of the shift — invisibly, because the dedupe that stops one override being counted many times also hid the replays.
 
 #### When repricing arrives too late
 

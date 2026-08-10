@@ -62,6 +62,13 @@ final class AuditEvent
     /** A manager PIN authorising an action the cashier could not take alone (REG-045). */
     public const EmployeeOverride = 'employee.override';
 
+    /**
+     * An override the device claimed and could not justify (BAN-430): an ability nobody defines,
+     * or one the named approver does not hold. Attributed to the till that asked, not to the
+     * manager it named.
+     */
+    public const EmployeeOverrideRefused = 'employee.override_refused';
+
     // ------------------------------------------------------------- back office
     public const ConfigChanged = 'config.changed';
 }

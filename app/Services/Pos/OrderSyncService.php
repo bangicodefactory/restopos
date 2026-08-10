@@ -74,6 +74,7 @@ final readonly class OrderSyncService
         private PreparationService $preparation,
         private RefundService $refunds,
         private LinePriceAuthority $prices,
+        private ApprovalAuthority $approvals,
         private OrderEditRecorder $edits,
         private AuditRecorder $audit,
         private Dispatcher $events,
@@ -480,6 +481,45 @@ final readonly class OrderSyncService
     }
 
     /**
+     * Put a manager override the device could not justify onto the trail (BAN-430).
+     *
+     * Severity `Warning` and attributed to the *pushing* employee, not to the manager named in the
+     * claim — the whole point is that the named manager did not grant it, so hanging the row on
+     * them would repeat the forgery in the audit log. `reason` distinguishes a stale client sending
+     * a permission that no longer exists from a till naming somebody who cannot authorise it.
+     *
+     * @param  array<string, mixed>  $refusal
+     */
+    private function recordRefusedApproval(
+        PosConfig $config,
+        PosSession $session,
+        ?PosDevice $device,
+        Order $order,
+        ?int $employeeId,
+        array $refusal,
+    ): void {
+        $ability = (string) ($refusal['ability'] ?? '');
+        $reason = (string) ($refusal['reason'] ?? '');
+
+        $this->audit->record(
+            event: AuditEvent::EmployeeOverrideRefused,
+            subject: $order,
+            companyId: (int) $order->company_id,
+            severity: AuditSeverity::Warning,
+            message: "Manager override for {$ability} refused ({$reason})",
+            changes: [
+                'ability' => ['old' => null, 'new' => $ability],
+                'reason' => ['old' => null, 'new' => $reason],
+                'claimed_approver' => ['old' => null, 'new' => $refusal['manager_employee_id'] ?? null],
+            ],
+            config: $config,
+            session: $session,
+            employeeId: $employeeId,
+            device: $device,
+        );
+    }
+
+    /**
      * `partner.create` — a customer created offline (REG-153). Idempotent on the partner uuid, and it
      * records the client's negative placeholder id → the real id so an order in this same batch can
      * be reconciled before it is written.
@@ -696,9 +736,14 @@ final readonly class OrderSyncService
             return $refundPlan['rejection'];
         }
 
+        // What a manager actually authorised on this push, checked rather than believed (REG-045,
+        // BAN-430). Decided before the price plan because the plan is one of the things an approval
+        // unlocks: an over-limit discount stands or falls on whether a real manager granted it.
+        $grant = $this->approvals->validate($config, (array) ($command['approvals'] ?? []), $order);
+
         // Who prices each line (XCT-107) — decided once for the whole push, next to the refund
         // preflight it mirrors, because a combo cannot be priced one row at a time.
-        $pricePlan = $this->prices->plan($config, $order, $lineCommands, $employeeId, $refundPlan['links']);
+        $pricePlan = $this->prices->plan($config, $order, $lineCommands, $employeeId, $refundPlan['links'], $grant);
 
         $lineResults = $this->applyLineCommands($config, $order, $lineCommands, $employeeId, $device, $wasSettled, $refundPlan['links'], $pricePlan);
 
@@ -760,7 +805,18 @@ final readonly class OrderSyncService
             $this->withdrawFromKitchen($config, $device, $order);
         }
 
-        $this->recordApprovals($config, $session, $device, $order, (array) ($command['approvals'] ?? []));
+        $this->recordApprovals($config, $session, $device, $order, $grant->accepted());
+
+        // An override the device claimed and could not justify. Reported and recorded rather than
+        // dropped: a till asking for a permission its manager does not have is the single most
+        // interesting thing this mechanism can see.
+        foreach ($grant->refusals() as $refusal) {
+            $warnings[] = $refusal;
+
+            $this->recordRefusedApproval($config, $session, $device, $order, $employeeId, $refusal);
+
+            $this->recordConflict($config, $device, SyncConflictType::PayloadMismatch, SyncResolution::ServerWins, $uuid, $refusal);
+        }
 
         // 5 — recompute every monetary field. This is the authoritative pass.
         $computed = $this->recompute($config, $order);
@@ -1490,7 +1546,8 @@ final readonly class OrderSyncService
             'price_unit' => $plan->priceFor($uuid) ?? (string) ($command['price_unit'] ?? $variant['list_price']),
             'price_extra' => $plan->extraFor($uuid) ?? (string) ($command['price_extra'] ?? '0'),
             'price_type' => (string) ($command['price_type'] ?? PriceType::Original->value),
-            'discount_percent' => (string) ($command['discount'] ?? $command['discount_percent'] ?? '0'),
+            'discount_percent' => $plan->discountFor($uuid)
+                ?? (string) ($command['discount'] ?? $command['discount_percent'] ?? '0'),
             'discount_notice' => $command['discount_notice'] ?? null,
             'tax_signature' => $this->taxSignature($taxIds),
             'unit_cost' => (string) $variant['standard_price'],
@@ -1764,6 +1821,14 @@ final readonly class OrderSyncService
 
         if ($serverExtra !== null) {
             $update['price_extra'] = $serverExtra;
+        }
+
+        // Same on update as on create. Without this an unauthorised discount simply arrives as an
+        // edit instead of a create, which is the route the register uses most (BAN-430).
+        $serverDiscount = $plan->discountFor($uuid);
+
+        if ($serverDiscount !== null) {
+            $update['discount_percent'] = $serverDiscount;
         }
 
         // The link is server-owned: a client may edit a refund's quantity (the preflight has already
