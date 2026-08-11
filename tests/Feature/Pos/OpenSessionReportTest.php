@@ -176,3 +176,123 @@ it('keeps the closing popup reading the same numbers', function (): void {
         ->and($totals[0]['expected_amount'])->toBe('24.2000')
         ->and($totals[0]['payment_method_id'])->toBe($this->fx->cash->getKey());
 });
+
+// ── the register's X-report (BAN-438, REG-020 / REG-022) ─────────────────────
+
+it('hands the register a reading without closing the session', function (): void {
+    // The whole point of the X. A cashier asking where the day stands must not end the day, and a
+    // report endpoint that quietly froze the summaries would do exactly that.
+    sell($this->fx);
+
+    $response = test()->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/sessions/{$this->fx->session->getKey()}/x-report")
+        ->assertOk();
+
+    expect($response->json('sales_total'))->toBe('20.0000')
+        ->and($response->json('tax_total'))->toBe('4.2000')
+        ->and($response->json('order_count'))->toBe(1)
+        // 100 float + 24.20 taken.
+        ->and($response->json('expected_cash'))->toBe('124.2000');
+
+    $session = PosSession::query()->whereKey($this->fx->session->getKey())->firstOrFail();
+
+    expect($session->state->value)->toBe('opened')
+        ->and($session->closed_at)->toBeNull()
+        // Nothing frozen: the summaries are still the close's to write.
+        ->and(DB::table('session_sales_summaries')->where('pos_session_id', $session->getKey())->count())->toBe(0);
+});
+
+it('reads the same numbers the close then freezes', function (): void {
+    // The acceptance criterion, and the reason the aggregation was split out of `freeze` rather
+    // than duplicated: an X at 18:00 and a Z at midnight cannot disagree about the orders they both
+    // cover, because neither has arithmetic of its own.
+    sell($this->fx, '24.20');
+    sell($this->fx, '12.10', '1');
+
+    $x = test()->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/sessions/{$this->fx->session->getKey()}/x-report")
+        ->assertOk();
+
+    test()->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$this->fx->session->getKey()}/close", [
+            'counted_cash' => $x->json('expected_cash'),
+        ])->assertOk();
+
+    $frozenSales = (string) DB::table('session_sales_summaries')
+        ->where('pos_session_id', $this->fx->session->getKey())->sum('base_amount');
+    $frozenTax = (string) DB::table('session_tax_summaries')
+        ->where('pos_session_id', $this->fx->session->getKey())->sum('tax_amount');
+
+    expect(bccomp((string) $x->json('sales_total'), $frozenSales, 2))->toBe(0)
+        ->and(bccomp((string) $x->json('tax_total'), $frozenTax, 2))->toBe(0)
+        ->and((int) $x->json('order_count'))
+        ->toBe((int) PosSession::query()->whereKey($this->fx->session->getKey())->value('order_count'));
+});
+
+it('counts traded orders live rather than off the sequence column', function (): void {
+    // `pos_sessions.order_count` is not the traded-order count mid-shift. `SequenceService`
+    // increments it for every order that takes a sequence number, and `freeze()` overwrites it at
+    // close with the paid-and-done count — two different meanings in one column depending on when
+    // you read it. The reading counts live, so it says the same thing at 18:00 and at midnight.
+    $sold = sell($this->fx);
+    sell($this->fx);
+
+    // Both orders took a sequence number, so the column reads 2. Then one is cancelled — which the
+    // back office can do to a settled order even though a device cannot (BAN-410) — and the column
+    // does not move, because it counts numbers issued rather than sales made.
+    DB::table('pos_orders')->where('uuid', $sold)->update(['state' => OrderState::Cancelled->value]);
+
+    expect((int) PosSession::query()->whereKey($this->fx->session->getKey())->value('order_count'))->toBe(2);
+
+    $live = test()->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/sessions/{$this->fx->session->getKey()}/x-report")->json('order_count');
+
+    // The reading says what actually traded.
+    expect($live)->toBe(1);
+
+    test()->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$this->fx->session->getKey()}/close", ['counted_cash' => '148.4000'])
+        ->assertOk();
+
+    // And the close agrees with the reading, not with the column it overwrites.
+    expect((int) PosSession::query()->whereKey($this->fx->session->getKey())->value('order_count'))
+        ->toBe($live);
+});
+
+it('separates refunds from sales rather than folding them in', function (): void {
+    // A service that took 900 and gave back 100 is a different day from one that took 800, and a
+    // reading that cannot tell them apart is the reading nobody trusts.
+    $sold = sell($this->fx, '24.20');
+    $soldLine = (string) DB::table('pos_order_lines')
+        ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+        ->where('pos_orders.uuid', $sold)
+        ->value('pos_order_lines.uuid');
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand((string) Str::uuid(), [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '-1', 'price_unit' => '10.00', 'discount' => '0',
+            'refunded_line_uuid' => $soldLine,
+        ]], [
+            'state' => OrderState::Paid->value, 'is_refund' => true, 'refunded_order_uuid' => $sold,
+        ], [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(),
+            'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '-12.10',
+        ]])],
+    ])->assertOk()->assertJsonPath('results.0.lines.0.status', 'ok');
+
+    $x = test()->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/sessions/{$this->fx->session->getKey()}/x-report")->assertOk();
+
+    expect($x->json('sales_total'))->toBe('20.0000')
+        ->and($x->json('refund_total'))->toBe('-10.0000');
+});
+
+it('refuses a reading for another venue session', function (): void {
+    // Same boundary every device route carries: the session must belong to this register.
+    $theirs = PosFixtures::make()->withSession();
+
+    test()->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/sessions/{$theirs->session->getKey()}/x-report")
+        ->assertNotFound();
+});

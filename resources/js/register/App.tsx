@@ -1,14 +1,16 @@
 import { useSessionStore } from '@shared/auth';
-import { useIdle } from '@shared/store';
+import { useEcho, useIdle } from '@shared/store';
 import { Button, useToast } from '@shared/ui';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { syncNow } from './boot';
 import { DialogHost } from './components/DialogHost';
 import { StatusStrip } from './components/StatusStrip';
 import { tryRuntime } from './data/runtime';
+import { REGISTER_EVENTS, reverbConfig, sessionChannel } from './realtime';
 import { publishDisplay } from './domain/customer-display-bus';
+import { applySessionClosedBroadcast } from './domain/session-actions';
 import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
 import { cleanCourses, createOrder, markPrinted } from './domain/order-actions';
 import { print } from './domain/printing';
@@ -54,6 +56,29 @@ export function App(): JSX.Element {
     const receiptOrderUuid = useUiStore((state) => state.receiptOrderUuid);
     const selectedOrderUuid = useSelectedOrderUuid();
     const selectOrder = useOrderStore((state) => state.selectOrder);
+
+    // A session closed on another till (REG-024). The register subscribes to nothing else — the
+    // outbox carries everything that originates *here* — but a session ending somewhere else is a
+    // fact this device cannot derive, and a till still ringing sales into frozen summaries is a
+    // reconciliation problem that surfaces days later.
+    const reverb = useMemo(() => reverbConfig(tryRuntime()?.device?.token ?? null), []);
+    const sessionEvents = useMemo(
+        () => ({
+            [REGISTER_EVENTS.sessionClosed]: (payload: unknown) => {
+                if (applySessionClosedBroadcast(payload)) {
+                    toast.show({ tone: 'warn', title: t('error.sessionClosed') });
+                }
+            },
+        }),
+        [t, toast],
+    );
+
+    useEcho({
+        config: reverb,
+        channel: session !== null && session.state !== 'closed' ? sessionChannel(session.id) : null,
+        visibility: 'private',
+        events: sessionEvents,
+    });
 
     const [locked, setLocked] = useState(false);
     const [sessionPane, setSessionPane] = useState<'open' | 'close' | null>(null);

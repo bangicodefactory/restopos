@@ -4,6 +4,8 @@ import type { PosSessionRow } from '@domain/types';
 import { ApiError } from '@shared/sync';
 
 import { getRuntime } from '../data/runtime';
+import { print } from './printing';
+import { buildSessionReport, taxLabelFor } from './receipt';
 import {
     usePosSessionStore,
     type CashMovementRow,
@@ -231,6 +233,145 @@ export async function confirmOpeningControl(
     }
 }
 
+/** The server's answer for a reading, in the shape the printer document wants. */
+export type SessionXReportPayload = {
+    session_id: number;
+    session_name: string | null;
+    config_name: string;
+    opened_at: string | null;
+    printed_at: string;
+    cashier_name: string | null;
+    order_count: number;
+    sales_total: string;
+    tax_total: string;
+    refund_total: string;
+    opening_balance: string;
+    cash_in: string;
+    cash_out: string;
+    expected_cash: string;
+    taxes: Array<{ tax_id: number; base_amount: string; tax_amount: string; tax_rate: string }>;
+    payment_totals: ClosingData['payment_totals'];
+};
+
+/**
+ * Pull an X-report and print it (REG-020, REG-022).
+ *
+ * Server-sourced on purpose. The closing pane already holds most of these numbers, and assembling
+ * the slip from them would work right up until a second till on the same register had taken money —
+ * which is the shift where somebody actually asks for a reading. Online-only for the same reason:
+ * a reading this device invented alone is worse than no reading, because it looks authoritative.
+ *
+ * Drains first. A reading taken with sales still queued would print a figure the cashier is about
+ * to watch change, and the whole point of asking is to know where the day stands.
+ */
+export async function printXReport(input: {
+    sessionId: number;
+    employeeId: number | null;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const { api, printer } = getRuntime();
+    const store = usePosSessionStore.getState();
+    store.setBusy(true);
+
+    try {
+        // A far shorter budget than a close gets. A close must not freeze summaries over a queue
+        // it never sent; a reading only wants the figures to be as fresh as they cheaply can be,
+        // and a cashier standing at a till does not wait a minute for a piece of paper.
+        const { drained } = await drainBeforeClose({ maxPasses: ReadingDrainMaxPasses, deadlineMs: ReadingDrainDeadlineMs });
+
+        // Printed anyway, saying so on the slip. Refusing would mean the one shift where the link
+        // is down — the shift somebody most wants to know where they stand — is the shift that
+        // cannot have a reading at all.
+
+        // `query` rather than a hand-built string: `RouteContractTest` resolves every literal path
+        // the client references against `routes/api.php`, and a template ending in an interpolation
+        // is a path it cannot check — which is exactly the check that has caught a missing route
+        // here before.
+        const response = await api.get<SessionXReportPayload>(`pos/sessions/${input.sessionId}/x-report`, {
+            query: { employee_id: input.employeeId },
+        });
+        const report = response.data;
+
+        // An empty body is a proxy or an offline shim answering, not a reading. Printing a slip of
+        // blanks under an X-REPORT heading is worse than refusing.
+        if (!report) {
+            const reason = 'no_report';
+            store.setError(reason);
+
+            return { ok: false, reason };
+        }
+
+        await print(
+            printer,
+            buildSessionReport({
+                sessionId: report.session_id,
+                sessionName: report.session_name,
+                configName: report.config_name,
+                isOpen: true,
+                openedAt: report.opened_at,
+                printedAt: report.printed_at,
+                cashierName: report.cashier_name,
+                orderCount: report.order_count,
+                grossSales: report.sales_total,
+                refunds: report.refund_total,
+                tax: report.tax_total,
+                openingFloat: report.opening_balance,
+                cashIn: report.cash_in,
+                cashOut: report.cash_out,
+                expectedCash: report.expected_cash,
+                queuedUnsent: !drained,
+                taxes: report.taxes.map((row) => ({
+                    label: taxLabelFor(row.tax_id, row.tax_rate),
+                    base: row.base_amount,
+                    amount: row.tax_amount,
+                })),
+                payments: report.payment_totals.map((row) => ({
+                    label: row.name,
+                    amount: row.expected_amount,
+                    count: row.payment_count,
+                })),
+            }),
+            { role: 'report' },
+        );
+
+        return { ok: true };
+    } catch (error) {
+        const reason = describe(error);
+        store.setError(reason);
+
+        return { ok: false, reason };
+    } finally {
+        store.setBusy(false);
+    }
+}
+
+/**
+ * Another device closed the session this till is trading in (REG-024).
+ *
+ * Returns whether the caller should say so out loud, so the notice and the state change stay one
+ * decision rather than two that can disagree.
+ *
+ * The device that *did* the closing is not a sibling and must not be told about its own action —
+ * but the register does not know its own device uuid, and the broadcast's `emitted_by_device_uuid`
+ * has never been populated by the server. It does not need to be: the closer's own store has
+ * already moved off an open session, so "do I still believe I am open?" answers the same question
+ * with what the client actually has.
+ */
+export function applySessionClosedBroadcast(payload: unknown): boolean {
+    const { session_id: closedId } = (payload ?? {}) as { session_id?: number };
+    const store = usePosSessionStore.getState();
+    const current = store.session;
+
+    if (!current || current.state === 'closed') return false;
+
+    // A stale subscription, or a rescue session's close arriving on a channel this till is still
+    // listening to. Marking the wrong session closed would lock a till that is trading perfectly.
+    if (closedId !== undefined && closedId !== current.id) return false;
+
+    store.setSession({ ...current, state: 'closed' });
+
+    return true;
+}
+
 export async function fetchClosingData(sessionId: number): Promise<ClosingData | null> {
     const { api } = getRuntime();
     const store = usePosSessionStore.getState();
@@ -273,6 +414,11 @@ export type CloseSessionResult =
     | { ok: true; session: PosSessionRow | null; quarantined?: number }
     | { ok: false; reason: string; closingData?: ClosingData };
 
+/** A reading is not a close: it drains what it cheaply can and prints what it has. */
+const ReadingDrainMaxPasses = 5;
+
+const ReadingDrainDeadlineMs = 3_000;
+
 /** At one batch per pass, far beyond any real backlog — a backstop, not a budget. */
 const DrainMaxPasses = 200;
 
@@ -296,7 +442,9 @@ const DrainDeadlineMs = 60_000;
  * `drain()` sends one batch, so this loops — and stops when a pass makes no progress rather than
  * spinning against a queue that cannot move.
  */
-export async function drainBeforeClose(): Promise<{ drained: boolean; quarantined: number; sent: number }> {
+export async function drainBeforeClose(
+    budget: { maxPasses?: number; deadlineMs?: number } = {},
+): Promise<{ drained: boolean; quarantined: number; sent: number }> {
     const { syncer } = getRuntime();
 
     let stats = await syncer.stats();
@@ -307,9 +455,10 @@ export async function drainBeforeClose(): Promise<{ drained: boolean; quarantine
     // satisfied by anything that enqueues while we work (a print's `audit.batch`, a queued cash
     // move), which without a ceiling is a loop that never ends. A close that gives up and says why
     // beats one that spins.
-    const deadline = Date.now() + DrainDeadlineMs;
+    const deadline = Date.now() + (budget.deadlineMs ?? DrainDeadlineMs);
+    const maxPasses = budget.maxPasses ?? DrainMaxPasses;
 
-    for (let pass = 0; stats.blocksSessionClose && pass < DrainMaxPasses; pass++) {
+    for (let pass = 0; stats.blocksSessionClose && pass < maxPasses; pass++) {
         if (Date.now() > deadline) break;
 
         const result = await syncer.drain();

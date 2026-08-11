@@ -617,6 +617,44 @@ that `FiscalPosition::posLoadScope` will actually replicate to the till.
 
 `200` with a `SessionResource` in state `opened`. **This is where the session number is minted** (REG-003) — an opening control that is abandoned never gets one, so it leaves no gap in the sequence. `422 invalid_transition` if the session was not awaiting an opening control.
 
+### `GET /api/pos/sessions/{session}/x-report`
+
+Auth: device, and the session must belong to this register. Optional `?employee_id=` names who
+asked.
+
+This session's trading so far, **without closing it** (REG-020, REG-022). A Z-report ends the shift
+and happens once; an X is the same figures asked for at a handover, before a bank run, or when a
+manager wants to know how the day is going.
+
+```jsonc
+{ "session_id": 881, "session_name": "Bar/00012", "config_name": "Bar",
+  "opened_at": "2026-08-10T08:12:00Z", "printed_at": "2026-08-10T18:30:00Z",
+  "cashier_name": "Amina B.",
+  "order_count": 42,
+  "sales_total": "820.0000", "tax_total": "172.2000", "refund_total": "-40.0000",
+  "opening_balance": "150.0000", "cash_in": "25.0000", "cash_out": "-10.0000",
+  "expected_cash": "989.2000",
+  "sales": [ /* live `session_sales_summaries` rows */ ],
+  "taxes": [ /* live `session_tax_summaries` rows */ ],
+  "payment_totals": [ /* as `closing-data` */ ] }
+```
+
+`sales_total` is the tax-**exclusive** base, the same thing the accounting export means by sales;
+tax is its own line. `refund_total` is reported separately rather than folded in — a service that
+took 900 and gave back 100 is a different day from one that took 800 — and it is **negative**,
+carrying the refund lines' own sign, so a consumer nets it by adding rather than subtracting.
+
+Every figure comes from `SessionSummaryService`'s live aggregations, which are the queries
+`freeze()` persists at close. That is what makes "an X-report matches the totals computed at close
+for the same orders" true by construction: neither report has arithmetic of its own.
+
+`order_count` is counted live and is **not** `pos_sessions.order_count`, which means two different
+things depending on when it is read — `SequenceService` increments it for every order that takes a
+sequence number, and `freeze()` overwrites it at close with the paid-and-done count.
+
+A GET that appends a `session_events` row is deliberate: nothing about the session changes, and who
+pulled a reading and when is part of the shift's story.
+
 ### `GET /api/pos/sessions/{session}/closing-data`
 
 Everything the closing popup needs:
@@ -1202,6 +1240,7 @@ GET    /api/pos/orders/{order}
 GET    /api/pos/sessions/current
 POST   /api/pos/sessions
 POST   /api/pos/sessions/{session}/opening-control
+GET    /api/pos/sessions/{session}/x-report
 GET    /api/pos/sessions/{session}/closing-data
 POST   /api/pos/sessions/{session}/close
 POST   /api/pos/sessions/{session}/cash-movements

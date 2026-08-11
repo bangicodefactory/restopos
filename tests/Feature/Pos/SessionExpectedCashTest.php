@@ -6,6 +6,7 @@ use App\Enums\OrderState;
 use App\Models\Pos\Order;
 use App\Models\Pos\Payment;
 use App\Services\Pos\SessionService;
+use App\Services\Pos\SessionSummaryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Feature\PosFixtures;
@@ -65,4 +66,14 @@ it('a positive-signed change row does not inflate expected cash (defensive, REG-
     // With the naive sum this would be inflated by 2× the change (100 + 30 + 5.80); normalisation
     // keeps it at 100 + 24.20.
     expect($actual)->toBe($expected);
+
+    // And the per-method figure, which is the number the closing pane actually puts in front of the
+    // cashier. `expectedCash` and `expectedPaymentTotals` are separate queries, so pinning one says
+    // nothing about the other — and a pane showing an inflated card or cash line sends somebody
+    // looking for money that was never in the drawer (BAN-438 verifies REG-204).
+    $method = collect(app(SessionSummaryService::class)->expectedPaymentTotals($this->fx->session))
+        ->firstWhere('payment_method_id', $this->fx->cash->getKey());
+
+    expect(round((float) $method['expected_amount'], 2))->toBe(round((float) $order->amount_total, 2))
+        ->and(round((float) $method['change_amount'], 2))->toBe(-$changeGiven);
 });
