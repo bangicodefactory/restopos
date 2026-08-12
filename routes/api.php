@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Kitchen\PrepDisplayController;
 use App\Http\Controllers\Api\Kitchen\PrintJobController;
 use App\Http\Controllers\Api\Pos\BootstrapController;
 use App\Http\Controllers\Api\Pos\CatalogController;
+use App\Http\Controllers\Api\Pos\CustomerAccountController;
 use App\Http\Controllers\Api\Pos\DeltaController;
 use App\Http\Controllers\Api\Pos\EmployeeAuthController;
 use App\Http\Controllers\Api\Pos\MediaController;
@@ -90,6 +91,14 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
     Route::middleware('device.can:pos:sync')->group(function (): void {
         Route::get('orders', [OrderController::class, 'index'])->name('orders.index');
         Route::get('orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+    });
+
+    // Customer accounts / pay-later tabs (REG-208). Under `pos:sync` rather than `pos:catalog`:
+    // reading a balance is catalogue-ish, but settling one moves money, and the two live together
+    // so a device cannot be granted the read without the write being considered.
+    Route::middleware('device.can:pos:sync')->group(function (): void {
+        Route::get('customers/{customer}/account', [CustomerAccountController::class, 'show'])->name('customers.account');
+        Route::post('customers/{customer}/account/settle', [CustomerAccountController::class, 'settle'])->name('customers.account.settle');
     });
 
     // Sessions & cash (spec 02 REG-001…039)

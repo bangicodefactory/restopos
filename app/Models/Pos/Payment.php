@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -98,6 +99,19 @@ class Payment extends Model implements PosLoadable
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class, 'payment_method_id');
+    }
+
+    /**
+     * The tab movement this payment produced, if it was an on-account tender (REG-208).
+     *
+     * `hasOne` rather than `hasMany` is the schema talking: `customer_account_moves.pos_payment_id`
+     * is unique, so one payment can never be charged twice.
+     *
+     * @return HasOne<CustomerAccountMove, $this>
+     */
+    public function accountMove(): HasOne
+    {
+        return $this->hasOne(CustomerAccountMove::class, 'pos_payment_id');
     }
 
     /** @return BelongsTo<Currency, $this> */

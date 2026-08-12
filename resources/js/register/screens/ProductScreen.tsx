@@ -28,6 +28,8 @@ import { useUiStore } from '../state/ui-store';
 
 export type ProductScreenProps = {
     onPay: () => void;
+    /** REG-209 — a fast-payment tap settled the order; go to the receipt. */
+    onFastPaid: () => void;
     onSend: () => void;
     onFireCourse: (courseUuid: string) => void;
     onBill: () => void;
@@ -35,7 +37,15 @@ export type ProductScreenProps = {
     onTransfer: () => void;
 };
 
-export function ProductScreen({ onPay, onSend, onFireCourse, onBill, onSplit, onTransfer }: ProductScreenProps): JSX.Element {
+export function ProductScreen({
+    onPay,
+    onFastPaid,
+    onSend,
+    onFireCourse,
+    onBill,
+    onSplit,
+    onTransfer,
+}: ProductScreenProps): JSX.Element {
     const t = useT();
     const catalog = useCatalog();
     const orderUuid = useSelectedOrderUuid();
@@ -136,6 +146,7 @@ export function ProductScreen({ onPay, onSend, onFireCourse, onBill, onSplit, on
                 <OrderPanel
                     orderUuid={orderUuid}
                     onPay={onPay}
+                    onFastPaid={onFastPaid}
                     onSend={onSend}
                     onFireCourse={onFireCourse}
                     onBill={onBill}

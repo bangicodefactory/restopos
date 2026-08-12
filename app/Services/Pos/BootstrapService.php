@@ -466,6 +466,15 @@ final readonly class BootstrapService
         }
 
         $row['payment_method_ids'] = $config->paymentMethods()->pluck('payment_methods.id')->all();
+
+        // REG-209 — the pivot flattened for a client that has no pivot. The relation already orders
+        // by the pivot's `sequence`, so the buttons come out in the order the back office arranged
+        // them rather than by id.
+        $row['fast_payment_method_ids'] = $config->paymentMethods()
+            ->wherePivot('is_fast_payment', true)
+            ->pluck('payment_methods.id')
+            ->all();
+
         $row['pricelist_ids'] = $config->pricelists()->pluck('pricelists.id')->all();
         $row['fiscal_position_ids'] = $config->fiscalPositions()->pluck('fiscal_positions.id')->all();
         $row['preset_ids'] = $config->presets()->pluck('pos_presets.id')->all();

@@ -214,6 +214,11 @@ return new class extends Migration
             $table->unsignedBigInteger('pricelist_id')->nullable()->index();        // FK deferred
             $table->unsignedBigInteger('fiscal_position_id')->nullable()->index();  // FK deferred
             $table->decimal('loyalty_points_cache', 16, 3)->default(0);
+            // What this customer owes on account (REG-208). Positive = owed to the house. A cache
+            // of sum(customer_account_moves.amount), maintained in the same transaction as the
+            // move and asserted equal to it by CustomerAccountLedgerTest — the moves are the
+            // record, this column is what a customer list can sort on without a join.
+            $table->decimal('account_balance', 16, 4)->default(0)->index();
             $table->unsignedInteger('order_count')->default(0)->index();
             $table->timestamp('last_order_at')->nullable()->index();
             $table->boolean('marketing_opt_in')->default(false);

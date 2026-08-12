@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Tables created here:
  *   pos_orders, pos_order_lines, pos_order_line_attribute_value,
  *   pos_order_line_custom_attribute_values, payment_transactions, pos_payments,
- *   pos_invoices, pos_invoice_lines
+ *   pos_invoices, pos_invoice_lines, customer_account_moves
  *
  * uuid-first: the client mints every uuid, the server never re-issues one, and
  * `POST /api/pos/sync` is a pure upsert keyed on it.
@@ -18,6 +18,7 @@ declare(strict_types=1);
  *   pos_order_lines.loyalty_reward_id / loyalty_card_id (loyalty domain runs later).
  */
 
+use App\Enums\CustomerAccountMoveType;
 use App\Enums\InvoiceLineType;
 use App\Enums\InvoiceState;
 use App\Enums\InvoiceType;
@@ -327,10 +328,51 @@ return new class extends Migration
         });
 
         $this->applyChecks('pos_invoice_lines', ['line_type' => InvoiceLineType::values()]);
+
+        // Immutable ledger of a customer's running tab (REG-208). Modelled on
+        // `loyalty_card_histories`: `balance_after` is stored rather than derived so a statement
+        // prints without replaying the table, and `customers.account_balance` caches the head.
+        //
+        // Lives in the order domain rather than identity because it points at `pos_payments`, and
+        // identity runs first. The FK direction is what places it, not the subject matter.
+        Schema::create('customer_account_moves', function (Blueprint $table): void {
+            $table->id();
+            $table->char('uuid', 36)->unique();
+            $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained('customers')->restrictOnDelete();
+            $table->string('move_type', 16)->default(CustomerAccountMoveType::Charge->value)->index();
+
+            // Signed, positive = the customer owes more. `balance` is the plain sum of this column.
+            $table->decimal('amount', 16, 4);
+            $table->decimal('balance_after', 16, 4);
+
+            $table->foreignId('pos_order_id')->nullable()->constrained('pos_orders')->nullOnDelete();
+
+            // One move per payment, enforced in the database rather than by a service that
+            // remembers to check: `POST /api/pos/sync` is a pure upsert and the register retries,
+            // so the same pay-later payment arrives more than once as a matter of course. NULL for
+            // settlements, and repeated NULLs are permitted by every engine we target.
+            $table->foreignId('pos_payment_id')->nullable()->unique()->constrained('pos_payments')->nullOnDelete();
+
+            // How a settlement was taken. Null on a charge — the order's own payments say that.
+            $table->foreignId('payment_method_id')->nullable()->constrained('payment_methods')->nullOnDelete();
+            $table->foreignId('pos_session_id')->nullable()->constrained('pos_sessions')->nullOnDelete();
+            $table->foreignId('employee_id')->nullable()->constrained('employees')->nullOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+
+            $table->string('description', 160)->nullable();
+            $table->timestamp('occurred_at', 3)->index();
+            $table->timestamps();
+
+            $table->index(['customer_id', 'occurred_at'], 'customer_account_moves_statement_index');
+        });
+
+        $this->applyChecks('customer_account_moves', ['move_type' => CustomerAccountMoveType::values()]);
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('customer_account_moves');
         Schema::dropIfExists('pos_invoice_lines');
         Schema::dropIfExists('pos_invoices');
         Schema::dropIfExists('pos_payments');

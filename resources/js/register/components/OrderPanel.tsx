@@ -1,13 +1,25 @@
 import { Decimal } from '@domain/money/decimal';
-import type { CourseRow, OrderLineRow } from '@domain/types';
+import type { CourseRow, OrderLineRow, PaymentMethodRow } from '@domain/types';
 import { useCan } from '@shared/auth';
 import { Button, cn } from '@shared/ui';
 import type { JSX } from 'react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
+import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
+import { fastPayVerdict, fastPaymentMethods } from '../domain/fast-payment';
 import { currentDelta } from '../domain/kitchen-send';
-import { addCourse, prepKeyOf, reduceQuantity, removeLine, setPreset, setPricelist } from '../domain/order-actions';
+import {
+    addCourse,
+    addPayment,
+    commitPaidOrder,
+    prepKeyOf,
+    reduceQuantity,
+    removeLine,
+    setPreset,
+    setPricelist,
+} from '../domain/order-actions';
+import { prefillAmount } from '../screens/PaymentScreen';
 import { effectiveUnitPrice } from '../domain/totals';
 import {
     useCatalog,
@@ -31,6 +43,8 @@ import { useUiStore } from '../state/ui-store';
 export type OrderPanelProps = {
     orderUuid: string | null;
     onPay: () => void;
+    /** REG-209 — a one-tap tender settled without a trip to the payment screen. */
+    onFastPaid: () => void;
     onSend: () => void;
     onFireCourse: (courseUuid: string) => void;
     onBill: () => void;
@@ -42,6 +56,7 @@ export type OrderPanelProps = {
 export function OrderPanel({
     orderUuid,
     onPay,
+    onFastPaid,
     onSend,
     onFireCourse,
     onBill,
@@ -86,6 +101,45 @@ export function OrderPanel({
     const unsent = order ? currentDelta(order.uuid).nbrOfChanges : 0;
 
     const payNeedsPrompt = needsKitchenPromptBeforePay({ restaurant, unsent });
+
+    // REG-209 — the config flag and the pivot behind these have been in the schema and the back
+    // office since the config tables were written; nothing read them until now.
+    const fastMethods = fastPaymentMethods(catalog.config, catalog.paymentMethods);
+
+    /**
+     * Settle in one tap.
+     *
+     * Runs the same RST-143 gate as Pay, deliberately: fast payment is the easiest possible way to
+     * settle for food the kitchen was never told about, which is the failure that prompt exists to
+     * prevent. Awaited to the flush for the REG-217 reason — a crash between "paid" and "written"
+     * loses the sale, and the 250 ms debounce is exactly long enough for that.
+     */
+    const fastPay = useCallback(
+        async (method: PaymentMethodRow) => {
+            if (order === null) return;
+
+            const verdict = fastPayVerdict({ lines, restaurant, unsent });
+
+            if (!verdict.ok) {
+                if (verdict.reason === 'ask_kitchen') openDialog('sendBeforePay', {});
+
+                return;
+            }
+
+            addPayment(order.uuid, method.id, prefillAmount(totals.due, method, catalog.cashRounding));
+
+            const runtime = tryRuntime();
+            const flushed = await commitPaidOrder(
+                order.uuid,
+                runtime
+                    ? { flushNow: runtime.persistence.flushNow, drain: () => runtime.syncer.drain() }
+                    : null,
+            );
+
+            if (flushed) onFastPaid();
+        },
+        [catalog.cashRounding, lines, onFastPaid, openDialog, order, restaurant, totals.due, unsent],
+    );
 
     return (
         <section className={cn('flex min-h-0 flex-col bg-white', className)} aria-label={t('reg.nav.order')}>
@@ -256,6 +310,22 @@ export function OrderPanel({
                     )}
                 </div>
 
+                {fastMethods.length > 0 ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2" data-testid="fast-payment">
+                        {fastMethods.map((method) => (
+                            <Button
+                                key={method.id}
+                                size="xl"
+                                variant="secondary"
+                                disabled={lines.length === 0}
+                                onClick={() => void fastPay(method)}
+                            >
+                                {method.name}
+                            </Button>
+                        ))}
+                    </div>
+                ) : null}
+
                 <div className="mt-2 grid grid-cols-2 gap-2">
                     {restaurant ? (
                         <Button size="xl" variant={unsent > 0 ? 'primary' : 'secondary'} onClick={onSend}>
@@ -404,9 +474,11 @@ function LineRow({
  *
  * Only in restaurant mode — a counter sale has no kitchen step to skip.
  *
- * Exported as a plain predicate so it is testable without rendering: the repo has no
- * component-testing library, and the house pattern (`quickAmountsFor`, `settlesOrder`,
- * `aggregateState`) is to keep the decision out of the JSX and unit-test it directly.
+ * Exported as a plain predicate so it is testable without rendering, which is the house pattern
+ * (`quickAmountsFor`, `settlesOrder`, `aggregateState`): keep the decision out of the JSX and
+ * unit-test it directly. `OrderPanel.test.tsx` then covers the wiring through the DOM — the claim
+ * that once stood here, that the repo has no component-testing library, stopped being true when
+ * that file was added.
  */
 export function needsKitchenPromptBeforePay({
     restaurant,

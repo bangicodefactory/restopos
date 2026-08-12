@@ -6,6 +6,7 @@ import type {
     BarcodeRuleRow,
     CurrencyRow,
     EmployeeRow,
+    PaymentMethodRow,
     PosCategoryRow,
     PosConfigRow,
     PosPresetRow,
@@ -161,6 +162,24 @@ export function makeCurrency(partial: Partial<CurrencyRow> = {}): CurrencyRow {
     };
 }
 
+/** A payment method with the flat defaults; override `method_type` for the interesting ones. */
+export function makePaymentMethod(partial: Partial<PaymentMethodRow> & Pick<PaymentMethodRow, 'id'>): PaymentMethodRow {
+    return {
+        company_id: 1,
+        name: 'Espèces',
+        method_type: 'cash',
+        is_cash_count: true,
+        identify_customer: false,
+        split_transactions: false,
+        payment_provider_id: null,
+        terminal_provider: null,
+        image_media_id: null,
+        sequence: 1,
+        active: true,
+        ...partial,
+    };
+}
+
 export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
     return {
         id: 1,
@@ -183,6 +202,8 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         default_fiscal_position_id: null,
         available_fiscal_position_ids: [],
         payment_method_ids: [1],
+        use_fast_payment: false,
+        fast_payment_method_ids: [],
         pos_category_ids: [],
         limit_categories: false,
         limited_product_count: 500,
@@ -297,6 +318,7 @@ export type CatalogParts = {
     fallbackNomenclature?: Nomenclature | null;
     employees?: readonly EmployeeRow[];
     presets?: readonly PosPresetRow[];
+    paymentMethods?: readonly PaymentMethodRow[];
     attributeValues?: readonly ProductAttributeValueRow[];
     attributeLineValues?: readonly ProductAttributeLineValueRow[];
 };
@@ -368,6 +390,7 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
             parts.pricelists === undefined ? null : PricelistResolver.fromArray([...parts.pricelists]),
 
         presets: parts.presets ?? [],
+        paymentMethods: parts.paymentMethods ?? [],
         employees: parts.employees ?? [],
         uoms: new Map(uoms.map((u) => [u.id, u])),
         decimalPrecisions: parts.decimalPrecisions ?? new Map<string, number>(),

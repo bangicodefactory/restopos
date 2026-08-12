@@ -8,6 +8,7 @@ use App\Enums\AuditSeverity;
 use App\Enums\CashMovementType;
 use App\Enums\OrderSource;
 use App\Enums\OrderState;
+use App\Enums\PaymentMethodType;
 use App\Enums\PaymentStatus;
 use App\Enums\PriceType;
 use App\Enums\SyncConflictType;
@@ -20,6 +21,7 @@ use App\Models\Identity\Customer;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\Payment as OrderPayment;
+use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
@@ -80,6 +82,7 @@ final readonly class OrderSyncService
         private Dispatcher $events,
         private LoggerInterface $logger,
         private Config $config,
+        private CustomerAccountLedger $accounts,
     ) {}
 
     /**
@@ -855,6 +858,12 @@ final readonly class OrderSyncService
         }
 
         $order->forceFill(['synced_at' => now()])->save();
+
+        // 7 — the customer's tab (REG-208). After the state is final, not inside the payment loop:
+        // the register may push payments in one batch and the state change that settles the order
+        // in the next, and a hook on the payment command would never fire for the second. Idempotent
+        // on `pos_payment_id`, which matters because this is the retry path.
+        $this->accounts->syncOrder($order);
 
         $this->broadcast($config, $device, $order, $previousState, $isNew);
 
@@ -2117,6 +2126,7 @@ final readonly class OrderSyncService
             ->map(static fn (mixed $v): int => (int) $v)
             ->all();
 
+        $accountMethods = $this->accountMethodIds();
         $results = [];
 
         foreach ($commands as $command) {
@@ -2200,6 +2210,16 @@ final readonly class OrderSyncService
                 continue;
             }
 
+            // REG-208 — an on-account tender with nobody to bill is money that vanishes: the order
+            // settles, no drawer took it, and no tab carries it. The register blocks this too, but
+            // the server is the one that has to be right, and `customer_id` here is the order's, so
+            // a client cannot smuggle one in on the payment alone.
+            if ($order->customer_id === null && ($accountMethods[(int) ($command['payment_method_id'] ?? 0)] ?? false)) {
+                $results[] = ['uuid' => $uuid, 'status' => 'rejected', 'code' => 'account_needs_customer'];
+
+                continue;
+            }
+
             /** @var OrderPayment|null $wasPaid */
             $wasPaid = isset($existing[$uuid]) ? OrderPayment::query()->find($existing[$uuid]) : null;
 
@@ -2238,6 +2258,23 @@ final readonly class OrderSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * Ids of every on-account method (REG-208).
+     *
+     * Read once per batch into a set rather than per command: the service is `readonly`, so there
+     * is nowhere to memoise it, and the caller loops over payments.
+     *
+     * @return array<int, bool>
+     */
+    private function accountMethodIds(): array
+    {
+        return PaymentMethod::query()
+            ->where('method_type', PaymentMethodType::CustomerAccount->value)
+            ->pluck('id')
+            ->mapWithKeys(static fn (mixed $id): array => [(int) $id => true])
+            ->all();
     }
 
     /**

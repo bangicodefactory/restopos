@@ -524,6 +524,16 @@ export type PosConfigRow = {
     default_fiscal_position_id: number | null;
     available_fiscal_position_ids: number[];
     payment_method_ids: number[];
+    /** Master switch for the one-tap tender buttons on the product screen (REG-209). */
+    use_fast_payment: boolean;
+    /**
+     * Which of `payment_method_ids` get a one-tap button, in `sequence` order.
+     *
+     * Flattened by the server from the `pos_config_payment_methods.is_fast_payment` pivot, because
+     * the register holds payment methods as flat rows and has no pivot to read. Always a subset of
+     * `payment_method_ids`; a method removed from the config drops out of both.
+     */
+    fast_payment_method_ids: number[];
     pos_category_ids: number[];
     limit_categories: boolean;
     limited_product_count: number;
@@ -698,6 +708,15 @@ export type CustomerRow = {
     pricelist_id: number | null;
     fiscal_position_id: number | null;
     loyalty_card_ids: number[];
+    /**
+     * What this customer owes on account (REG-208). Positive = owed to the house; negative means
+     * they are in credit, which is a real state and not an error.
+     *
+     * Server-owned. The register displays it and never writes it: the authority is
+     * `customer_account_moves`, and a till that has been offline all afternoon is holding a figure
+     * that predates whatever the other till took.
+     */
+    account_balance: Money;
     order_count: number;
     updated_at: Iso;
 
