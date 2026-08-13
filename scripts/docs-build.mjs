@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import MarkdownIt from 'markdown-it';
 
-import { parseFrontMatter, slugify, uniqueId } from './docs-check.mjs';
+import { htmlHref, parseFrontMatter, slugify, uniqueId } from './docs-check.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = path.join(ROOT, 'docs/manual');
@@ -40,6 +40,17 @@ md.renderer.rules.heading_open = (tokens, i) => {
     const id = uniqueId(slugify(text), seen);
 
     return `<${level} id="${id}"><a class="anchor" href="#${id}">#</a>`;
+};
+
+// Pages cross-link as `refunds.md` so the source reads correctly on GitHub. The site needs `.html`.
+const defaultLink = md.renderer.rules.link_open ?? ((tokens, i, options, env, self) => self.renderToken(tokens, i, options));
+
+md.renderer.rules.link_open = (tokens, i, options, env, self) => {
+    const href = tokens[i].attrGet('href');
+
+    if (href !== null) tokens[i].attrSet('href', htmlHref(href));
+
+    return defaultLink(tokens, i, options, env, self);
 };
 
 function render(body) {

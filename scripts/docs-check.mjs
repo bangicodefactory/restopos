@@ -112,6 +112,41 @@ export function uniqueId(base, seen) {
     return count === 0 ? base : `${base}-${count}`;
 }
 
+/**
+ * Where a link in the source markdown points once rendered.
+ *
+ * Pages link to each other as `refunds.md`, which is right: that is what works when the manual is
+ * read on GitHub, and the source is the primary artefact. The published site needs `.html`, and
+ * nothing was rewriting them — every in-prose cross-link 404'd, including all five on the index,
+ * which is the manual's main navigation.
+ *
+ * External and absolute links are left exactly as written.
+ */
+export function htmlHref(href) {
+    if (/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) return href;
+
+    return href.replace(/\.md(?=$|[#?])/i, '.html');
+}
+
+/** Relative `.md` links a page makes, with any anchor stripped. */
+export function markdownLinks(body) {
+    return [...body.matchAll(/\]\(([^)\s]+\.md)(#[^)\s]*)?\)/g)].map((m) => m[1]);
+}
+
+/** Resolve a link relative to the page that makes it, as a manual-root-relative path. */
+export function resolveLink(fromPage, href) {
+    const parts = fromPage.split('/').slice(0, -1);
+
+    for (const segment of href.split('/')) {
+        if (segment === '.' || segment === '') continue;
+        if (segment === '..') parts.pop();
+        else parts.push(segment);
+    }
+
+    return parts.join('/');
+}
+
+
 /** Split `---\nyaml\n---\nbody` into its parts. Front-matter is optional; body always present. */
 export function parseFrontMatter(source) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(source);
@@ -238,6 +273,16 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, skip
         if (!page.data.title) {
             errors.push(`${MANUAL_DIR}/${file}: front-matter needs a \`title\`.`);
         }
+
+        // A cross-link to a page that does not exist is a 404 on the published site, and the index
+        // page is nothing but cross-links.
+        for (const href of page.links ?? []) {
+            const target = resolveLink(file, href);
+
+            if (!manual.has(target)) {
+                errors.push(`${MANUAL_DIR}/${file}: links to "${href}", which is not a page (resolved: ${target}).`);
+            }
+        }
     }
 
     // The ratchet. Nobody has to document 173 features before the gate can start protecting the
@@ -312,7 +357,7 @@ function readManual(dir = path.join(ROOT, MANUAL_DIR), prefix = '') {
             for (const [k, v] of readManual(full, rel)) pages.set(k, v);
         } else if (name.endsWith('.md')) {
             const { data, body } = parseFrontMatter(readFileSync(full, 'utf8'));
-            pages.set(rel, { data, slugs: headingSlugs(body) });
+            pages.set(rel, { data, slugs: headingSlugs(body), links: markdownLinks(body) });
         }
     }
 

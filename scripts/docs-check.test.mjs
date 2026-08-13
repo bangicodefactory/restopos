@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkDocs, headingSlugs, isDoc, isWatched, parseFrontMatter, parseSkip, readSpecIds, slugify, uniqueId } from './docs-check.mjs';
+import {
+    checkDocs,
+    headingSlugs,
+    htmlHref,
+    isDoc,
+    isWatched,
+    markdownLinks,
+    parseFrontMatter,
+    parseSkip,
+    readSpecIds,
+    resolveLink,
+    slugify,
+    uniqueId,
+} from './docs-check.mjs';
 
 /**
  * BAN-517 — the documentation gate.
@@ -377,5 +390,58 @@ describe('heading ids are unique within a page', () => {
 
     it('starts over for a new page', () => {
         expect(uniqueId('cash', new Map())).toBe('cash');
+    });
+});
+
+describe('cross-links survive publication (review of #52)', () => {
+    // Pages link each other as `refunds.md` so the source reads correctly on GitHub. Nothing
+    // rewrote them for the site, so every in-prose cross-link 404'd — including all five on the
+    // index, which is the manual's entire navigation.
+    it('rewrites a relative markdown link to html', () => {
+        expect(htmlHref('refunds.md')).toBe('refunds.html');
+        expect(htmlHref('register/sessions.md')).toBe('register/sessions.html');
+        expect(htmlHref('../index.md')).toBe('../index.html');
+    });
+
+    it('keeps the anchor', () => {
+        expect(htmlHref('refunds.md#giving-money-back')).toBe('refunds.html#giving-money-back');
+    });
+
+    it('leaves external and in-page links exactly as written', () => {
+        expect(htmlHref('https://example.com/a.md')).toBe('https://example.com/a.md');
+        expect(htmlHref('mailto:someone@example.com')).toBe('mailto:someone@example.com');
+        expect(htmlHref('#count-the-opening-float')).toBe('#count-the-opening-float');
+    });
+
+    it('leaves anything that is not markdown alone', () => {
+        expect(htmlHref('img/shot.png')).toBe('img/shot.png');
+    });
+
+    it('finds the links a page makes', () => {
+        expect(markdownLinks('See [refunds](refunds.md) and [orders](../register/orders.md#x).')).toEqual([
+            'refunds.md',
+            '../register/orders.md',
+        ]);
+    });
+
+    it('resolves a link against the page that makes it', () => {
+        expect(resolveLink('register/orders.md', 'refunds.md')).toBe('register/refunds.md');
+        expect(resolveLink('index.md', 'register/sessions.md')).toBe('register/sessions.md');
+        expect(resolveLink('register/orders.md', '../index.md')).toBe('index.md');
+    });
+
+    it('fails a link to a page that does not exist', () => {
+        const manual = new Map([['index.md', { data: { title: 'I', features: [] }, slugs: [], links: ['register/tips.md'] }]]);
+
+        expect(run({ manual }).errors[0]).toContain('which is not a page');
+    });
+
+    it('passes a link that lands', () => {
+        const manual = new Map([
+            ['index.md', { data: { title: 'I', features: [] }, slugs: [], links: ['register/a.md'] }],
+            ['register/a.md', { data: { title: 'A', features: [] }, slugs: [], links: [] }],
+        ]);
+
+        expect(run({ manual }).errors).toEqual([]);
     });
 });
