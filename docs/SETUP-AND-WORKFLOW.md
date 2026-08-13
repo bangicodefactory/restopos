@@ -33,6 +33,11 @@ One Laravel app, one database, one domain layer — four front‑ends, each a fi
 The register is the heart: after its first bootstrap it runs entirely from IndexedDB and only the
 network‑dependent bits (pairing, first data load, sync replay) touch the server.
 
+**This document is for whoever runs the stack.** The people who run a *service* on it — cashiers,
+managers, kitchen staff — read [`docs/manual/`](manual/index.md), which is published as a site by
+the `Publish Manual` workflow. What is in it, and what CI requires of it, is described in
+[`docs/CONVENTIONS.md`](CONVENTIONS.md) §"Documentation".
+
 ---
 
 ## 2. Prerequisites

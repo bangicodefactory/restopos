@@ -187,3 +187,81 @@ command that hangs for six hours, with the caveat in a doc file, is a trap rathe
 Mutation testing pays where code is a pure function of its inputs. Where behaviour is a conversation
 with a database, the hand-written guard tests are what has actually been finding the defects — and
 this codebase has the record to show it.
+
+## Documentation (BAN-517)
+
+Three files answer three different questions, and keeping them apart is what stops any of them
+rotting:
+
+| File | Question | Churns |
+|---|---|---|
+| `docs/spec/02-features.md` | What does *Odoo* do? | Almost never — it is the parity reference |
+| `docs/features.yml` | What have *we* built? | Every ticket |
+| `docs/manual/**` | How does someone *use* it? | Whenever behaviour a user can see changes |
+
+`npm run docs:check` enforces the joins between them, and CI runs it on every PR.
+
+### The ledger
+
+`docs/features.yml` records one entry per feature we have built:
+
+```yaml
+REG-208: { status: shipped, surface: user, manual: register/payments.md#paying-on-account }
+```
+
+- `status` — `shipped` | `partial` | `planned`. Absence means planned.
+- `surface` — `user` if a cashier, manager, cook or guest can see it; `internal` otherwise.
+  Internal features owe no manual page: "the server re-prices the line" is not something anyone
+  reads about. **Nothing can check this claim**, and it is the one field that quietly shrinks the
+  debt ceiling — flipping a feature to `internal` removes its obligation *and* lowers the count. A
+  diff that changes `surface` deserves a second look for that reason alone.
+- `manual` — a path under `docs/manual/`, optionally `#anchored`, or `todo`.
+
+The page has to name the feature back, in its front-matter `features:` list. One-way links rot
+silently — the ledger keeps pointing at a page that was rewritten to be about something else.
+
+### The debt ratchet
+
+There were 173 shipped user-facing features with no manual page when this was introduced.
+Documenting all of them before the gate could protect anything would have meant the gate never
+arrived, so `meta.manual_debt` records the number and the check fails if it *rises*. Write a page,
+lower the number. It may only ever fall.
+
+### What CI actually checks on a PR
+
+1. Every ID in the ledger is a feature `02-features.md` defines. Twenty IDs were already being
+   cited in source docblocks that turned out not to exist — mostly range endpoints like
+   `BOF-030 … BOF-079` read as though they were features.
+2. Every shipped, user-facing feature names a page — or is counted as debt.
+3. Every ID a manual page claims is real, recorded, and not still `planned`.
+4. **Behaviour that changed was documented.** A diff touching `app/`, `resources/js/`,
+   `packages/domain/src/`, `routes/` or `database/migrations/` must also touch `docs/`. Tests and
+   fixtures are exempt.
+5. **A migration moved with `docs/spec/01-schema.md`.** This project already followed that rule on
+   every ticket; it had simply never been written down or checked.
+
+### The opt-out
+
+Refactors, dependency bumps and CI fixes genuinely change no behaviour. Put `[skip docs]` **on a
+line of its own** in the PR body (a reason may follow it on the same line), or add the `docs: none`
+label. It waives rules 4 and 5 only — the ledger still has to be internally consistent — and the
+waiver is printed in the log whether or not a rule ends up firing.
+
+The token must start the line because matching it anywhere meant any PR that *mentioned* the escape
+hatch silently had no gate. This feature's own pull request described the opt-out twice in its
+body; so would any reviewer quoting it.
+
+Use it. A gate that fires on everything gets bypassed by reflex, and then it protects nothing.
+
+### What this does not do
+
+It enforces **coverage and referential integrity**. It cannot tell whether a manual page is *true*.
+Accuracy is a reviewer's job, and the green tick is not evidence of it.
+
+Rule 4 is also satisfied by touching *any* file under `docs/`, including one unrelated line in a
+spec. That is deliberate — inferring which doc a given code change owes is guesswork, and a gate
+that guesses wrong gets disabled. It asks "did you consider the docs?", not "are the docs right".
+
+The run prints what it examined (`18 changed, 4 behaviour, 6 docs`) so a diff that resolved to
+nothing — a shallow clone, a renamed default branch, a bad base ref — cannot look like a pass. It
+looked like one three times while this was being built.

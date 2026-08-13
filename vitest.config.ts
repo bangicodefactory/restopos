@@ -38,6 +38,10 @@ export default defineConfig({
             'resources/js/selforder/**/*.test.ts',
             'resources/js/backoffice/**/*.test.ts',
             'resources/js/backoffice/**/*.test.tsx',
+            // Repo tooling that gates a merge (BAN-517). Same lesson as the service worker above:
+            // a test outside this list does not fail, it simply never runs, and the thing it was
+            // written to protect is protected by nothing.
+            'scripts/**/*.test.mjs',
         ],
         exclude: ['**/node_modules/**', 'vendor/**', 'tools/**', 'public/**', 'storage/**'],
         setupFiles: ['packages/domain/test/setup.ts', 'resources/js/test/setup-dom.ts'],

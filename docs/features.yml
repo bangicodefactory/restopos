@@ -1,0 +1,339 @@
+# RestoPOS — implementation ledger
+#
+# What we have actually built. `docs/spec/02-features.md` is the *parity reference* — 549 rows
+# describing what Odoo 19 does — and it deliberately says nothing about our progress. This file is
+# the other half of that question, and it is machine-readable so CI can hold it to account.
+#
+# Checked by `npm run docs:check` (scripts/docs-check.mjs). The rules:
+#
+#   * every key must be a feature ID that `02-features.md` actually defines. Twenty IDs cited in
+#     source docblocks turned out not to exist — mostly range endpoints like "BOF-030 … BOF-079"
+#     read as if they were features. An ID nobody validates is an ID that drifts.
+#   * `status: shipped` + `surface: user` must name a manual page, or `manual: todo`.
+#   * the number of `manual: todo` entries may not exceed `meta.manual_debt`. Write docs, lower the
+#     number. Nobody has to document 173 features before the gate can start protecting the next one.
+#
+# Fields
+#   status   shipped | partial | planned      absence of a key means planned
+#   surface  user | internal                  internal = no user-visible behaviour, no manual owed
+#   manual   <path>#<anchor> | <path> | todo  relative to docs/manual/
+#   note     anything a reader of the manual would be misled without
+#
+# Seeded from feature IDs annotated in source docblocks, which is the honest evidence of what is
+# wired up — commit messages name almost none (3 of the first 22 tickets).
+
+meta:
+  # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
+  manual_debt: 173
+
+features:
+  # Session lifecycle & cash control (REG-001 … REG-039) — user
+  REG-001: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-002: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-003: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-004: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-005: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-010: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-011: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-012: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-013: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-014: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-015: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-016: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-017: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-018: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-020: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-021: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-022: { status: shipped, surface: user, manual: register/sessions.md }
+  REG-024: { status: shipped, surface: user, manual: register/sessions.md }
+
+  # Cashier identity, roles & permissions (REG-040 … REG-059) — user
+  REG-040: { status: shipped, surface: user, manual: register/approvals.md }
+  REG-042: { status: shipped, surface: user, manual: register/approvals.md }
+  REG-045: { status: shipped, surface: user, manual: register/approvals.md }
+  REG-046: { status: shipped, surface: user, manual: register/approvals.md }
+  REG-049: { status: shipped, surface: user, manual: register/approvals.md }
+
+  # Product catalogue: browse, search, scan (REG-060 … REG-099) — user
+  REG-060: { status: shipped, surface: user, manual: todo }
+  REG-063: { status: shipped, surface: user, manual: todo }
+  REG-064: { status: shipped, surface: user, manual: todo }
+  REG-065: { status: shipped, surface: user, manual: todo }
+  REG-067: { status: shipped, surface: user, manual: todo }
+  REG-068: { status: shipped, surface: user, manual: todo }
+  REG-072: { status: shipped, surface: user, manual: todo }
+  REG-073: { status: shipped, surface: user, manual: todo }
+  REG-075: { status: shipped, surface: user, manual: todo }
+  REG-077: { status: shipped, surface: user, manual: todo }
+  REG-080: { status: shipped, surface: user, manual: todo }
+  REG-083: { status: shipped, surface: user, manual: todo }
+  REG-087: { status: shipped, surface: user, manual: todo }
+  REG-089: { status: shipped, surface: user, manual: todo }
+
+  # Order lines & order operations (REG-100 … REG-149) — user
+  REG-100: { status: shipped, surface: user, manual: register/orders.md }
+  REG-101: { status: shipped, surface: user, manual: register/orders.md }
+  REG-103: { status: shipped, surface: user, manual: register/orders.md }
+  REG-104: { status: shipped, surface: user, manual: register/orders.md }
+  REG-105: { status: shipped, surface: user, manual: register/orders.md }
+  REG-107: { status: shipped, surface: user, manual: register/orders.md }
+  REG-109: { status: shipped, surface: user, manual: register/orders.md }
+  REG-110: { status: shipped, surface: user, manual: register/orders.md }
+  REG-111: { status: shipped, surface: user, manual: register/orders.md }
+  REG-112: { status: shipped, surface: user, manual: register/orders.md }
+  REG-113: { status: shipped, surface: user, manual: register/orders.md }
+  REG-119: { status: shipped, surface: user, manual: register/orders.md }
+  REG-120: { status: shipped, surface: user, manual: register/orders.md }
+  REG-123: { status: shipped, surface: user, manual: register/orders.md }
+  REG-125: { status: shipped, surface: user, manual: register/orders.md }
+
+  # Customer management (REG-150 … REG-169) — user
+  REG-150: { status: shipped, surface: user, manual: todo }
+  REG-153: { status: shipped, surface: user, manual: todo }
+  REG-155: { status: shipped, surface: user, manual: todo }
+  REG-158: { status: shipped, surface: user, manual: todo }
+
+  # Pricing, taxes, discounts (REG-170 … REG-199) — user
+  REG-170: { status: shipped, surface: user, manual: todo }
+  REG-173: { status: shipped, surface: user, manual: todo }
+  REG-176: { status: shipped, surface: user, manual: todo }
+  REG-177: { status: shipped, surface: user, manual: todo }
+  REG-182: { status: shipped, surface: user, manual: todo }
+
+  # Payments (REG-200 … REG-239) — user
+  REG-200: { status: shipped, surface: user, manual: register/payments.md }
+  REG-201: { status: shipped, surface: user, manual: register/payments.md }
+  REG-202: { status: shipped, surface: user, manual: register/payments.md }
+  REG-203: { status: shipped, surface: user, manual: register/payments.md }
+  REG-204: { status: shipped, surface: user, manual: register/payments.md }
+  REG-205: { status: shipped, surface: user, manual: register/payments.md }
+  REG-206: { status: shipped, surface: user, manual: register/payments.md }
+  REG-216: { status: shipped, surface: user, manual: register/payments.md }
+  REG-217: { status: shipped, surface: user, manual: register/payments.md }
+  REG-218: { status: shipped, surface: user, manual: register/payments.md }
+  REG-220: { status: shipped, surface: user, manual: register/payments.md }
+
+  # Receipts (REG-240 … REG-269) — user
+  REG-240: { status: shipped, surface: user, manual: todo }
+  REG-242: { status: shipped, surface: user, manual: todo }
+  REG-244: { status: shipped, surface: user, manual: todo }
+  REG-245: { status: shipped, surface: user, manual: todo }
+  REG-247: { status: shipped, surface: user, manual: todo }
+  REG-248: { status: shipped, surface: user, manual: todo }
+
+  # Refunds (REG-270 … REG-289) — user
+  REG-270: { status: shipped, surface: user, manual: register/refunds.md }
+  REG-271: { status: shipped, surface: user, manual: register/refunds.md }
+  REG-272: { status: shipped, surface: user, manual: register/refunds.md }
+  REG-273: { status: shipped, surface: user, manual: register/refunds.md }
+  REG-274: { status: shipped, surface: user, manual: register/refunds.md }
+  REG-276: { status: shipped, surface: user, manual: register/refunds.md }
+
+  # Order list / ticket screen (REG-290 … REG-309) — user
+  REG-290: { status: shipped, surface: user, manual: register/orders.md }
+  REG-292: { status: shipped, surface: user, manual: register/orders.md }
+  REG-293: { status: shipped, surface: user, manual: register/orders.md }
+  REG-295: { status: shipped, surface: user, manual: register/orders.md }
+  REG-300: { status: shipped, surface: user, manual: register/orders.md }
+  REG-301: { status: shipped, surface: user, manual: register/orders.md }
+
+  # Presets / service modes & scheduling (REG-335 … REG-349) — user
+  REG-335: { status: shipped, surface: user, manual: todo }
+  REG-336: { status: shipped, surface: user, manual: todo }
+
+  # Customer display (REG-350 … REG-364) — user
+  REG-350: { status: shipped, surface: user, manual: todo }
+  REG-351: { status: shipped, surface: user, manual: todo }
+  REG-352: { status: shipped, surface: user, manual: todo }
+  REG-354: { status: shipped, surface: user, manual: todo }
+
+  # Multi-device synchronisation (REG-365 … REG-384) — internal
+  REG-375: { status: shipped, surface: internal }
+  REG-376: { status: shipped, surface: internal }
+
+  # Floors & floor plan (RST-001 … RST-029) — user
+  RST-001: { status: shipped, surface: user, manual: todo }
+  RST-002: { status: shipped, surface: user, manual: todo }
+  RST-003: { status: shipped, surface: user, manual: todo }
+  RST-009: { status: shipped, surface: user, manual: todo }
+  RST-014: { status: shipped, surface: user, manual: todo }
+  RST-016: { status: shipped, surface: user, manual: todo }
+
+  # Floor editor (RST-030 … RST-049) — user
+  RST-030: { status: shipped, surface: user, manual: todo }
+
+  # Tables: linking, transfer, merge (RST-050 … RST-069) — user
+  RST-050: { status: shipped, surface: user, manual: todo }
+  RST-051: { status: shipped, surface: user, manual: todo }
+  RST-052: { status: shipped, surface: user, manual: todo }
+  RST-054: { status: shipped, surface: user, manual: todo }
+  RST-055: { status: shipped, surface: user, manual: todo }
+  RST-056: { status: shipped, surface: user, manual: todo }
+  RST-058: { status: shipped, surface: user, manual: todo }
+  RST-059: { status: shipped, surface: user, manual: todo }
+
+  # Guest count (RST-070 … RST-079) — user
+  RST-070: { status: shipped, surface: user, manual: todo }
+  RST-071: { status: shipped, surface: user, manual: todo }
+  RST-073: { status: shipped, surface: user, manual: todo }
+  RST-074: { status: shipped, surface: user, manual: todo }
+
+  # Courses (RST-080 … RST-099) — user
+  RST-080: { status: shipped, surface: user, manual: todo }
+  RST-081: { status: shipped, surface: user, manual: todo }
+  RST-082: { status: shipped, surface: user, manual: todo }
+  RST-083: { status: shipped, surface: user, manual: todo }
+  RST-084: { status: shipped, surface: user, manual: todo }
+  RST-087: { status: shipped, surface: user, manual: todo }
+  RST-089: { status: shipped, surface: user, manual: todo }
+  RST-090: { status: shipped, surface: user, manual: todo }
+
+  # Bill splitting & proforma (RST-100 … RST-119) — user
+  RST-100: { status: shipped, surface: user, manual: todo }
+  RST-101: { status: shipped, surface: user, manual: todo }
+  RST-102: { status: shipped, surface: user, manual: todo }
+  RST-103: { status: shipped, surface: user, manual: todo }
+  RST-106: { status: shipped, surface: user, manual: todo }
+  RST-110: { status: shipped, surface: user, manual: todo }
+
+  # Tips (RST-120 … RST-139) — user
+  RST-121: { status: shipped, surface: user, manual: todo }
+  RST-127: { status: shipped, surface: user, manual: todo }
+
+  # Restaurant order lifecycle extras (RST-140 … RST-159) — user
+  RST-142: { status: shipped, surface: user, manual: todo }
+  RST-143: { status: shipped, surface: user, manual: todo }
+  RST-144: { status: shipped, surface: user, manual: todo }
+  RST-146: { status: shipped, surface: user, manual: todo }
+
+  # Preparation display (KDS-001 … KDS-049) — user
+  KDS-001: { status: shipped, surface: user, manual: todo }
+  KDS-002: { status: shipped, surface: user, manual: todo }
+  KDS-003: { status: shipped, surface: user, manual: todo }
+  KDS-004: { status: shipped, surface: user, manual: todo }
+  KDS-005: { status: shipped, surface: user, manual: todo }
+  KDS-006: { status: shipped, surface: user, manual: todo }
+  KDS-007: { status: shipped, surface: user, manual: todo }
+  KDS-008: { status: shipped, surface: user, manual: todo }
+  KDS-009: { status: shipped, surface: user, manual: todo }
+  KDS-010: { status: shipped, surface: user, manual: todo }
+  KDS-011: { status: shipped, surface: user, manual: todo }
+  KDS-012: { status: shipped, surface: user, manual: todo }
+  KDS-013: { status: shipped, surface: user, manual: todo }
+  KDS-014: { status: shipped, surface: user, manual: todo }
+  KDS-015: { status: shipped, surface: user, manual: todo }
+  KDS-016: { status: shipped, surface: user, manual: todo }
+  KDS-017: { status: shipped, surface: user, manual: todo }
+  KDS-018: { status: shipped, surface: user, manual: todo }
+  KDS-019: { status: shipped, surface: user, manual: todo }
+  KDS-020: { status: shipped, surface: user, manual: todo }
+  KDS-021: { status: shipped, surface: user, manual: todo }
+  KDS-022: { status: shipped, surface: user, manual: todo }
+
+  # Preparation printing & the change-delta engine (KDS-050 … KDS-089) — user
+  KDS-050: { status: shipped, surface: user, manual: todo }
+  KDS-051: { status: shipped, surface: user, manual: todo }
+  KDS-052: { status: shipped, surface: user, manual: todo }
+  KDS-053: { status: shipped, surface: user, manual: todo }
+  KDS-054: { status: shipped, surface: user, manual: todo }
+  KDS-055: { status: shipped, surface: user, manual: todo }
+  KDS-056: { status: shipped, surface: user, manual: todo }
+  KDS-057: { status: shipped, surface: user, manual: todo }
+  KDS-058: { status: shipped, surface: user, manual: todo }
+  KDS-060: { status: shipped, surface: user, manual: todo }
+  KDS-062: { status: shipped, surface: user, manual: todo }
+  KDS-063: { status: shipped, surface: user, manual: todo }
+
+  # Modes, entry & tokens (SLF-001 … SLF-019) — user
+  SLF-001: { status: shipped, surface: user, manual: todo }
+  SLF-002: { status: shipped, surface: user, manual: todo }
+  SLF-004: { status: shipped, surface: user, manual: todo }
+  SLF-014: { status: shipped, surface: user, manual: todo }
+  SLF-015: { status: shipped, surface: user, manual: todo }
+
+  # Customer menu & ordering flow (SLF-020 … SLF-059) — user
+  SLF-020: { status: shipped, surface: user, manual: todo }
+  SLF-021: { status: shipped, surface: user, manual: todo }
+  SLF-022: { status: shipped, surface: user, manual: todo }
+  SLF-023: { status: shipped, surface: user, manual: todo }
+  SLF-024: { status: shipped, surface: user, manual: todo }
+  SLF-025: { status: shipped, surface: user, manual: todo }
+  SLF-026: { status: shipped, surface: user, manual: todo }
+  SLF-027: { status: shipped, surface: user, manual: todo }
+  SLF-028: { status: shipped, surface: user, manual: todo }
+  SLF-029: { status: shipped, surface: user, manual: todo }
+  SLF-030: { status: shipped, surface: user, manual: todo }
+  SLF-031: { status: shipped, surface: user, manual: todo }
+  SLF-033: { status: shipped, surface: user, manual: todo }
+  SLF-036: { status: shipped, surface: user, manual: todo }
+  SLF-037: { status: shipped, surface: user, manual: todo }
+  SLF-038: { status: shipped, surface: user, manual: todo }
+  SLF-040: { status: shipped, surface: user, manual: todo }
+  SLF-043: { status: shipped, surface: user, manual: todo }
+
+  # Self-order payment (SLF-060 … SLF-079) — user
+  SLF-060: { status: shipped, surface: user, manual: todo }
+  SLF-061: { status: shipped, surface: user, manual: todo }
+  SLF-065: { status: shipped, surface: user, manual: todo }
+
+  # Confirmation, status tracking & kiosk specifics (SLF-080 … SLF-109) — user
+  SLF-080: { status: shipped, surface: user, manual: todo }
+  SLF-081: { status: shipped, surface: user, manual: todo }
+  SLF-082: { status: shipped, surface: user, manual: todo }
+  SLF-083: { status: shipped, surface: user, manual: todo }
+  SLF-090: { status: shipped, surface: user, manual: todo }
+  SLF-094: { status: shipped, surface: user, manual: todo }
+  SLF-095: { status: shipped, surface: user, manual: todo }
+  SLF-098: { status: shipped, surface: user, manual: todo }
+
+  # Self-order and register integration (SLF-110 … SLF-129) — user
+  SLF-110: { status: shipped, surface: user, manual: todo }
+
+  # Dashboard & registers (BOF-001 … BOF-029) — user
+  BOF-001: { status: shipped, surface: user, manual: todo }
+  BOF-005: { status: shipped, surface: user, manual: todo }
+  BOF-006: { status: shipped, surface: user, manual: todo }
+  BOF-008: { status: shipped, surface: user, manual: todo }
+
+  # Register settings (BOF-030 … BOF-079) — user
+  BOF-030: { status: shipped, surface: user, manual: todo }
+  BOF-034: { status: shipped, surface: user, manual: todo }
+  BOF-037: { status: shipped, surface: user, manual: todo }
+
+  # Catalogue / menu management (BOF-080 … BOF-109) — user
+  BOF-080: { status: shipped, surface: user, manual: todo }
+  BOF-081: { status: shipped, surface: user, manual: todo }
+  BOF-082: { status: shipped, surface: user, manual: todo }
+  BOF-083: { status: shipped, surface: user, manual: todo }
+  BOF-084: { status: shipped, surface: user, manual: todo }
+  BOF-085: { status: shipped, surface: user, manual: todo }
+  BOF-087: { status: shipped, surface: user, manual: todo }
+  BOF-090: { status: shipped, surface: user, manual: todo }
+  BOF-091: { status: shipped, surface: user, manual: todo }
+  BOF-092: { status: shipped, surface: user, manual: todo }
+  BOF-094: { status: shipped, surface: user, manual: todo }
+
+  # Operational configuration (BOF-110 … BOF-129) — user
+  BOF-110: { status: shipped, surface: user, manual: todo }
+  BOF-115: { status: shipped, surface: user, manual: todo }
+  BOF-116: { status: shipped, surface: user, manual: todo }
+  BOF-119: { status: shipped, surface: user, manual: todo }
+  BOF-120: { status: shipped, surface: user, manual: todo }
+
+  # Orders, sessions & payments administration (BOF-130 … BOF-159) — user
+  BOF-130: { status: shipped, surface: user, manual: todo }
+  BOF-131: { status: shipped, surface: user, manual: todo }
+  BOF-139: { status: shipped, surface: user, manual: todo }
+
+  # Reporting (BOF-160 … BOF-189) — user
+  BOF-160: { status: shipped, surface: user, manual: todo }
+  BOF-169: { status: shipped, surface: user, manual: todo }
+  BOF-170: { status: shipped, surface: user, manual: todo }
+  BOF-177: { status: shipped, surface: user, manual: todo }
+
+  # Offline & PWA (XCT-001 … XCT-029) — internal
+  XCT-016: { status: shipped, surface: internal }
+
+  # Tenancy, security & audit (XCT-100 … XCT-129) — internal
+  XCT-101: { status: shipped, surface: internal }
+  XCT-107: { status: shipped, surface: internal }

@@ -6,6 +6,7 @@ on:
       - master
       - '*.x'
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   schedule:
     - cron: '0 0 * * *'
 
@@ -77,3 +78,41 @@ jobs:
 
       - name: Vitest
         run: npm run test
+
+  docs:
+    runs-on: ubuntu-latest
+
+    name: Docs (ledger + manual coverage)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          # The diff gate needs a base to compare against; a shallow clone has no merge-base.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Always: the ledger, the manual and the spec must agree with each other.
+      - name: Check the documentation ledger
+        run: npm run docs:check
+
+      # On a pull request, also: behaviour that changed must have been documented. The opt-out
+      # reaches the script through the environment rather than a flag, so the same script runs
+      # locally with no GitHub in the loop.
+      - name: Check this change documented itself
+        if: github.event_name == 'pull_request'
+        env:
+          DOCS_SKIP_CONTEXT: ${{ github.event.pull_request.body }}
+          DOCS_SKIP_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: node scripts/docs-check.mjs --since=origin/${{ github.event.pull_request.base.ref }}
+
+      - name: Build the manual
+        run: npm run docs:build
