@@ -7,10 +7,11 @@ import type { OrderLineRow, PaymentMethodRow, PosConfigRow } from '@domain/types
  * checks the payment screen would have run have to happen here instead. Two of them are structural
  * and are why this is a decision rather than a button:
  *
- *  - **Terminal and split methods are excluded.** The spec says so, and the reason is that neither
- *    can complete in one tap: a terminal has a conversation to hold and a split method has an
- *    amount to be told. A one-tap button for either would settle the order against a payment that
- *    has not happened yet.
+ *  - **Terminal, split and customer-identifying methods are excluded.** The spec names the first
+ *    two, and the reason is that neither can complete in one tap: a terminal has a conversation to
+ *    hold and a split method has an amount to be told. A one-tap button for either would settle the
+ *    order against a payment that has not happened yet. Anything needing a customer is excluded for
+ *    the same shape of reason — there is nowhere to ask.
  *
  *  - **Restaurant mode still asks about unsent kitchen changes (RST-143).** Fast payment is the
  *    easiest possible way to settle for food the kitchen was never told about, which is the exact
@@ -46,8 +47,15 @@ export function isOneTap(method: PaymentMethodRow): boolean {
     if (method.method_type === 'card_terminal') return false;
     if (method.split_transactions) return false;
 
-    // An on-account tender needs a customer, which the product screen has no way to prompt for
-    // without becoming the payment screen. Left to the full flow.
+    // Anything that needs a name on it. `customer_account` is structural; `identify_customer` is the
+    // configurable flag a meal-voucher method typically carries. Both need a customer the product
+    // screen has no way to prompt for without becoming the payment screen.
+    //
+    // `identify_customer` matters more than it looks: it is enforced *only* on the client — there is
+    // no server-side check anywhere in `app/` — so a one-tap button that skipped it was the whole
+    // rule gone, and the sale settled with nobody attached and nothing to say so.
+    if (method.identify_customer) return false;
+
     return method.method_type !== 'customer_account';
 }
 

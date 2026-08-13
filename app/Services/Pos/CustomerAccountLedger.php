@@ -120,6 +120,18 @@ final class CustomerAccountLedger
         }
 
         DB::transaction(function () use ($order, $payment): void {
+            /** @var Customer|null $customer */
+            $customer = Customer::query()->whereKey($order->customer_id)->first();
+
+            // Belt and braces over the company check the sync path already does. The ledger stamps
+            // `company_id` on every row, and taking it from the payment — as this first did — meant
+            // a cross-company `customer_id` produced a move filed under the *device's* company while
+            // pointing at another company's customer: visible to the wrong tenant, invisible to the
+            // one whose balance moved. Take it from the customer, and refuse when they disagree.
+            if ($customer === null || (int) $customer->company_id !== (int) $payment->company_id) {
+                return;
+            }
+
             // Re-checked inside the transaction: the `whereDoesntHave` that selected this row ran
             // outside it, and two devices can push the same order at once.
             if (CustomerAccountMove::query()->where('pos_payment_id', $payment->getKey())->exists()) {
@@ -127,8 +139,8 @@ final class CustomerAccountLedger
             }
 
             $this->write(
-                customerId: (int) $order->customer_id,
-                companyId: (int) $payment->company_id,
+                customerId: (int) $customer->getKey(),
+                companyId: (int) $customer->company_id,
                 type: CustomerAccountMoveType::Charge,
                 // Signed straight through: a refund order's payment is negative, so returning an
                 // on-account sale lowers the tab without a second code path deciding the sign.

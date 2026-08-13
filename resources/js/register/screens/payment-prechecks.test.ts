@@ -87,11 +87,8 @@ function input(overrides: Partial<PrecheckInput> = {}): PrecheckInput {
         payments: [payment(CASH.id, '12.10')],
         methods: METHODS,
         cashRounding: null,
-        due: '0.00',
-        change: '0.00',
         total: '12.10',
         customerId: null,
-        settled: true,
         hasCashMethod: true,
         ...overrides,
     };
@@ -181,12 +178,12 @@ describe('a tender that looks like a typo (REG-216)', () => {
         // €12.10 taken as €12 110 — change 12 097.90, a ratio of about 1001×. Note that €12 100
         // exactly is *not* flagged: it is 1000×, which the boundary test below pins.
         expect(isLargeOverpay('12.10', '12097.90')).toBe(true);
-        expect(precheckPayment(input({ total: '12.10', change: '12097.90' })).confirm).toBe('large_overpay');
+        expect(precheckPayment(input({ payments: [payment(CASH.id, '12110.00')] })).confirm).toBe('large_overpay');
     });
 
     it('leaves an ordinary large note alone', () => {
         expect(isLargeOverpay('12.10', '37.90')).toBe(false);
-        expect(precheckPayment(input({ total: '12.10', change: '37.90' })).confirm).toBeNull();
+        expect(precheckPayment(input({ payments: [payment(CASH.id, '50.00')] })).confirm).toBeNull();
     });
 
     it('sits exactly on the boundary without firing', () => {
@@ -202,7 +199,8 @@ describe('a tender that looks like a typo (REG-216)', () => {
     it('does not ask for a confirmation while something else blocks', () => {
         // Confirming a huge tender on an order about to be refused for another reason is a prompt
         // the cashier learns to dismiss.
-        const result = precheckPayment(input({ total: '12.10', change: '12087.90', settled: false }));
+        // A huge *pending* tender: stripped, so nothing is settled and nothing is confirmed.
+        const result = precheckPayment(input({ payments: [payment(CASH.id, '12110.00', 'pending')] }));
 
         expect(result.block).toBe('not_enough');
         expect(result.confirm).toBeNull();
@@ -226,9 +224,61 @@ describe('tenders that need a name attached', () => {
 
     it('does not demand a customer for a line that is about to be stripped', () => {
         // A pending on-account line is not a tender yet, so it cannot be what forces the prompt.
-        const result = precheckPayment(input({ payments: [payment(ACCOUNT.id, '12.10', 'pending')], settled: false }));
+        const result = precheckPayment(input({ payments: [payment(ACCOUNT.id, '12.10', 'pending')] }));
 
         expect(result.block).toBe('not_enough');
+    });
+});
+
+describe('an uncaptured tender never settles an order (review of #51)', () => {
+    it('does not validate an order whose only tender is still on the terminal', () => {
+        // The bug this exists for: `useTotals` counts a pending line as paid (`settledPayments`
+        // excludes only failed/cancelled), so the screen used to hand in `settled: true`. The
+        // precheck then stripped the line *and* saw nothing blocking — and the order validated with
+        // no payment rows at all. A sale recorded as settled that nobody paid for.
+        const result = precheckPayment(input({ payments: [payment(CARD.id, '12.10', 'pending')] }));
+
+        expect(result.strip).toHaveLength(1);
+        expect(result.block).toBe('not_enough');
+        expect(result.due).toBe('12.10');
+    });
+
+    it('does not validate one whose only tender is authorised but uncaptured', () => {
+        // `isInFlight` refuses to let this line be deleted without a terminal cancel, so it cannot
+        // also be solid enough to settle the order.
+        const result = precheckPayment(input({ payments: [payment(CARD.id, '12.10', 'authorized')] }));
+
+        expect(result.strip).toHaveLength(1);
+        expect(result.block).toBe('not_enough');
+    });
+
+    it('settles on the cash that is really there when a pending line sits beside it', () => {
+        const result = precheckPayment(
+            input({ payments: [payment(CASH.id, '12.10'), payment(CARD.id, '99.00', 'pending')] }),
+        );
+
+        expect(result.strip).toHaveLength(1);
+        expect(result.block).toBeNull();
+        // The pending 99.00 must not become change out of the drawer.
+        expect(result.change).toBe('0.00');
+    });
+
+    it('reports the due left behind once the stripped lines are gone', () => {
+        const result = precheckPayment(
+            input({ payments: [payment(CASH.id, '5.00'), payment(CARD.id, '7.10', 'pending')] }),
+        );
+
+        expect(result.due).toBe('7.10');
+        expect(result.block).toBe('not_enough');
+    });
+
+    it('still tolerates a cash-rounded short close, which is a real concession', () => {
+        // 12.10 owed, 12.10 taken in cash against a 0.05 step — the tolerance survives the rewrite.
+        const result = precheckPayment(
+            input({ payments: [payment(CASH.id, '12.10')], cashRounding: HALF_UP_5C }),
+        );
+
+        expect(result.block).toBeNull();
     });
 });
 
@@ -264,11 +314,12 @@ describe('the checks that were already there', () => {
     });
 
     it('still refuses a settlement that does not cover the order', () => {
-        expect(precheckPayment(input({ settled: false })).block).toBe('not_enough');
+        expect(precheckPayment(input({ payments: [payment(CASH.id, '5.00')] })).block).toBe('not_enough');
     });
 
     it('still refuses change with no cash method to give it from', () => {
-        expect(precheckPayment(input({ change: '5.00', hasCashMethod: false })).block).toBe('overpay_no_cash');
+        expect(precheckPayment(input({ payments: [payment(CARD.id, '20.00')], hasCashMethod: false })).block)
+            .toBe('overpay_no_cash');
     });
 
     it('passes a plain, fully-tendered cash sale', () => {

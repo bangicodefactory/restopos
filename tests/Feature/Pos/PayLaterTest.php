@@ -11,6 +11,7 @@ use App\Enums\CustomerAccountMoveType;
 use App\Enums\OrderState;
 use App\Models\Identity\Customer;
 use App\Models\Pos\CustomerAccountMove;
+use App\Models\Pos\Order;
 use App\Models\Pos\PaymentMethod;
 use App\Services\Pos\CustomerAccountLedger;
 use Illuminate\Database\QueryException;
@@ -307,6 +308,87 @@ describe('settling a tab', function (): void {
             ->assertNotFound();
 
         expect(CustomerAccountMove::query()->count())->toBe(0);
+    });
+});
+
+describe('a tab belongs to one company (review of #51)', function (): void {
+    it('refuses to charge a customer belonging to another company', function (): void {
+        // `customers` is not globally scoped and `BelongsToCompany` is opt-in, so a positive
+        // `customer_id` used to be trusted outright. Once a money ledger sat behind it, that stopped
+        // being a mislabelled ticket and became one company billing another company's regular —
+        // with the move filed under the *device's* company, so it was visible to the wrong tenant
+        // and invisible to the one whose balance had moved.
+        $stranger = Customer::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'company_id' => PosFixtures::make()->company->getKey(),
+            'name' => 'Other company regular',
+        ]);
+
+        $response = pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $stranger->getKey())->assertOk();
+
+        // The foreign id is dropped, so the on-account tender has nobody to bill and is refused
+        // loudly rather than charging a stranger quietly.
+        expect($response->json('results.0.payments.0.status'))->toBe('rejected')
+            ->and($response->json('results.0.payments.0.code'))->toBe('account_needs_customer')
+            ->and(CustomerAccountMove::query()->count())->toBe(0)
+            ->and((string) $stranger->refresh()->account_balance)->toBe('0.0000');
+    });
+
+    it('does not leave another company customer on the order at all', function (): void {
+        $stranger = Customer::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'company_id' => PosFixtures::make()->company->getKey(),
+            'name' => 'Other company regular',
+        ]);
+
+        $orderUuid = (string) Str::uuid();
+
+        pushOnAccount($this->fx, $orderUuid, '12.10', $stranger->getKey(), $this->fx->cash->getKey())->assertOk();
+
+        expect(Order::query()->where('uuid', $orderUuid)->value('customer_id'))->toBeNull();
+    });
+
+    it('still accepts this company own customer', function (): void {
+        pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
+
+        expect((string) $this->regular->refresh()->account_balance)->toBe('12.1000');
+    });
+
+    it('refuses at the ledger too, not only at the sync boundary', function (): void {
+        // Defence in depth, and it needs its own test for the same reason the unique index did:
+        // the sync check filters every foreign customer out before `charge()` ever sees one, so
+        // removing this guard breaks no other test. Reached here by putting the order into the
+        // state the sync path refuses to produce, then asking the ledger directly.
+        $ledger = app(CustomerAccountLedger::class);
+
+        $orderUuid = (string) Str::uuid();
+        pushOnAccount($this->fx, $orderUuid, '12.10', $this->regular->getKey())->assertOk();
+
+        $stranger = Customer::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'company_id' => PosFixtures::make()->company->getKey(),
+            'name' => 'Other company regular',
+        ]);
+
+        CustomerAccountMove::query()->delete();
+        $this->regular->forceFill(['account_balance' => '0'])->save();
+
+        /** @var Order $order */
+        $order = Order::query()->where('uuid', $orderUuid)->sole();
+        $order->forceFill(['customer_id' => $stranger->getKey()])->save();
+
+        $ledger->syncOrder($order->refresh());
+
+        expect(CustomerAccountMove::query()->count())->toBe(0)
+            ->and((string) $stranger->refresh()->account_balance)->toBe('0.0000');
+    });
+
+    it('files the move under the customer company, not the device one', function (): void {
+        pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
+
+        $move = CustomerAccountMove::query()->sole();
+
+        expect((int) $move->company_id)->toBe((int) $this->regular->company_id);
     });
 });
 

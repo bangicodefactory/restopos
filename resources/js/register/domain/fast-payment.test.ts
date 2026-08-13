@@ -11,10 +11,11 @@ import { fastPayVerdict, fastPaymentMethods, isOneTap } from './fast-payment';
  * back-office form since the config tables were written. Nothing read either: the register's
  * `PosConfigRow` never declared them, so the flag a manager could tick did nothing at all.
  *
- * The two exclusions are what make this safe rather than just fast. A terminal has a conversation
- * to hold and a split method has an amount to be told, so neither can settle in one tap; and in
- * restaurant mode the RST-143 prompt still has to fire, because fast payment is the easiest
- * possible way to settle for food the kitchen was never told about.
+ * The exclusions are what make this safe rather than just fast. A terminal has a conversation to
+ * hold and a split method has an amount to be told, so neither can settle in one tap; an on-account
+ * or `identify_customer` method needs a name the product screen cannot prompt for. And in restaurant
+ * mode the RST-143 prompt still has to fire, because fast payment is the easiest possible way to
+ * settle for food the kitchen was never told about.
  */
 
 const CASH: PaymentMethodRow = {
@@ -35,7 +36,9 @@ const CARD: PaymentMethodRow = { ...CASH, id: 2, name: 'Carte', method_type: 'ca
 const VOUCHER: PaymentMethodRow = { ...CASH, id: 3, name: 'Titre', method_type: 'voucher', is_cash_count: false, split_transactions: true };
 const ACCOUNT: PaymentMethodRow = { ...CASH, id: 4, name: 'Compte', method_type: 'customer_account', is_cash_count: false };
 const BANK: PaymentMethodRow = { ...CASH, id: 5, name: 'Virement', method_type: 'bank', is_cash_count: false };
-const METHODS = [CASH, CARD, VOUCHER, ACCOUNT, BANK];
+/** Not split, not a terminal — but it needs a name on it, and only the client enforces that. */
+const IDENTIFIED: PaymentMethodRow = { ...CASH, id: 6, name: 'Titre resto', method_type: 'voucher', is_cash_count: false, identify_customer: true };
+const METHODS = [CASH, CARD, VOUCHER, ACCOUNT, BANK, IDENTIFIED];
 
 type FastConfig = Pick<PosConfigRow, 'use_fast_payment' | 'fast_payment_method_ids' | 'payment_method_ids'>;
 
@@ -43,7 +46,7 @@ function config(overrides: Partial<FastConfig> = {}): FastConfig {
     return {
         use_fast_payment: true,
         fast_payment_method_ids: [CASH.id],
-        payment_method_ids: [CASH.id, CARD.id, VOUCHER.id, ACCOUNT.id, BANK.id],
+        payment_method_ids: [CASH.id, CARD.id, VOUCHER.id, ACCOUNT.id, BANK.id, IDENTIFIED.id],
         ...overrides,
     };
 }
@@ -82,6 +85,12 @@ describe('which methods get a button', () => {
         expect(fastPaymentMethods(config({ fast_payment_method_ids: [ACCOUNT.id] }), METHODS)).toEqual([]);
     });
 
+    it('excludes a method flagged identify_customer (review of #51)', () => {
+        // Nothing on the server enforces `identify_customer` — the payment screen is the only place
+        // it is checked — so a one-tap button that skipped it settled the sale with nobody attached.
+        expect(fastPaymentMethods(config({ fast_payment_method_ids: [IDENTIFIED.id] }), METHODS)).toEqual([]);
+    });
+
     it('drops a method that is on the fast list but no longer on the register', () => {
         // Otherwise the button is on screen and the payment screen refuses what it tenders.
         const shown = fastPaymentMethods(
@@ -103,10 +112,11 @@ describe('isOneTap', () => {
         expect(isOneTap(BANK)).toBe(true);
     });
 
-    it('rejects the three that cannot complete in a tap', () => {
+    it('rejects the four that cannot complete in a tap', () => {
         expect(isOneTap(CARD)).toBe(false);
         expect(isOneTap(VOUCHER)).toBe(false);
         expect(isOneTap(ACCOUNT)).toBe(false);
+        expect(isOneTap(IDENTIFIED)).toBe(false);
     });
 });
 

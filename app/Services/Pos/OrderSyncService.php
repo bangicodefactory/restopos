@@ -181,7 +181,7 @@ final readonly class OrderSyncService
         // command earlier in this batch. An unresolved placeholder is dropped to null rather than
         // left to violate the foreign key (REG-153).
         if (isset($command['order']) && is_array($command['order'])) {
-            $command['order'] = $this->resolvePlaceholderCustomer($command['order'], $customerIdMap);
+            $command['order'] = $this->resolvePlaceholderCustomer($config, $command['order'], $customerIdMap);
         }
 
         try {
@@ -215,13 +215,30 @@ final readonly class OrderSyncService
         }
     }
 
-    /** Drop an unresolved client-placeholder (negative) customer id to null; remap a resolved one.
+    /**
+     * Resolve the order's customer, and refuse one that is not this company's.
+     *
+     * A client-local (negative) placeholder is remapped to the real id created by a `partner.create`
+     * earlier in this batch, and an unresolved one is dropped to null rather than left to violate
+     * the foreign key (REG-153).
+     *
+     * A **positive** id used to be trusted outright, which was a cross-tenant write: `customers` is
+     * not globally scoped, `BelongsToCompany` is opt-in, and nothing downstream re-checked. A device
+     * could name any customer id in the database and the order carried it. Once BAN-434 put a money
+     * ledger behind `customer_id` that stopped being a mislabelled ticket and became one company
+     * billing another company's regular.
+     *
+     * Dropped to null rather than rejecting the order, which is the same treatment an unresolved
+     * placeholder gets: the sale is real and still has to sync. An on-account tender then fails the
+     * `account_needs_customer` check rather than silently charging a stranger, so the money is
+     * refused loudly instead of vanishing quietly. A legitimate client cannot reach this — the
+     * replica it picks ids from is already company-scoped.
      *
      * @param  array<string, mixed>  $order
      * @param  array<int, int>  $customerIdMap
      * @return array<string, mixed>
      */
-    private function resolvePlaceholderCustomer(array $order, array $customerIdMap): array
+    private function resolvePlaceholderCustomer(PosConfig $config, array $order, array $customerIdMap): array
     {
         if (! isset($order['customer_id'])) {
             return $order;
@@ -229,11 +246,22 @@ final readonly class OrderSyncService
 
         $customerId = (int) $order['customer_id'];
 
-        if ($customerId >= 0) {
-            return $order;
+        if ($customerId < 0) {
+            $customerId = $customerIdMap[$customerId] ?? null;
+
+            if ($customerId === null) {
+                $order['customer_id'] = null;
+
+                return $order;
+            }
         }
 
-        $order['customer_id'] = $customerIdMap[$customerId] ?? null;
+        $owned = Customer::query()
+            ->whereKey($customerId)
+            ->where('company_id', $config->company_id)
+            ->exists();
+
+        $order['customer_id'] = $owned ? $customerId : null;
 
         return $order;
     }
@@ -2126,7 +2154,10 @@ final readonly class OrderSyncService
             ->map(static fn (mixed $v): int => (int) $v)
             ->all();
 
-        $accountMethods = $this->accountMethodIds();
+        // Only when there is something to judge. Read once per order that actually carries payment
+        // commands rather than once per order in the batch — a 50-order push of line edits should
+        // not pay 50 times for a table with a handful of rows in it.
+        $accountMethods = $commands === [] ? [] : $this->accountMethodIds();
         $results = [];
 
         foreach ($commands as $command) {

@@ -1,5 +1,5 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
-import { CashRoundingCalculator, isFullyPaid } from '@domain/tax/rounder';
+import { CashRoundingCalculator } from '@domain/tax/rounder';
 import type { CashRounding } from '@domain/tax/types';
 import type { PaymentMethodRow, PaymentRow } from '@domain/types';
 import { Button, NumPad, cn } from '@shared/ui';
@@ -29,7 +29,7 @@ import {
     useTotals,
 } from '../hooks/use-register';
 import { useUiStore } from '../state/ui-store';
-import { orphanedPayments, precheckPayment } from './payment-prechecks';
+import { orphanedPayments, precheckPayment, settlesOrder } from './payment-prechecks';
 import type { PrecheckBlock } from './payment-prechecks';
 
 /**
@@ -89,6 +89,8 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const [buffer, setBuffer] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [pendingOverpay, setPendingOverpay] = useState(false);
+    /** A terminal cancel in flight. Re-tapping would send a second reversal for one authorisation. */
+    const [cancelling, setCancelling] = useState<string | null>(null);
 
     const methods = catalog.paymentMethods.filter((method) =>
         (catalog.config?.payment_method_ids ?? []).includes(method.id),
@@ -160,24 +162,32 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
      */
     const removeLine = useCallback(
         async (payment: PaymentRow) => {
+            if (cancelling !== null) return;
+
             setError(null);
 
             const method = catalog.paymentMethods.find(
                 (candidate) => candidate.id === payment.payment_method_id,
             );
 
-            const cancelled = await cancelOnTerminal(payment, method);
+            setCancelling(payment.uuid);
 
-            if (!cancelled.ok) {
-                setError(t(cancelled.reason));
+            try {
+                const cancelled = await cancelOnTerminal(payment, method);
 
-                return;
+                if (!cancelled.ok) {
+                    setError(t(cancelled.reason));
+
+                    return;
+                }
+
+                removePayment(payment.uuid);
+                setSelectedPayment((current) => (current === payment.uuid ? null : current));
+            } finally {
+                setCancelling(null);
             }
-
-            removePayment(payment.uuid);
-            setSelectedPayment((current) => (current === payment.uuid ? null : current));
         },
-        [catalog.paymentMethods, t],
+        [cancelling, catalog.paymentMethods, t],
     );
 
     const applyBuffer = useCallback(
@@ -192,17 +202,17 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const validate = useCallback(async (confirmedOverpay = false) => {
         setError(null);
 
-        // REG-216 — strip first, then judge. The decision itself lives in `payment-prechecks.ts`.
+        // REG-216 — strip first, then judge. The decision lives in `payment-prechecks.ts`, and it
+        // is handed the raw rows rather than `totals`: `useTotals` counts a pending line as paid,
+        // so passing its verdict in let a lone uncaptured tender be stripped *and* pass as settled,
+        // validating an order with no payment rows on it.
         const verdict = precheckPayment({
             lines,
             payments,
             methods: catalog.paymentMethods,
             cashRounding,
-            due: totals.due,
-            change: totals.change,
             total: totals.roundedTotal,
             customerId: order?.customer_id ?? null,
-            settled: paidInFull,
             hasCashMethod: hasCash,
         });
 
@@ -256,11 +266,8 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         openDialog,
         order?.customer_id,
         orderUuid,
-        paidInFull,
         payments,
         t,
-        totals.change,
-        totals.due,
         totals.roundedTotal,
     ]);
 
@@ -323,7 +330,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                                 setSelectedPayment(payment.uuid);
                                 setBuffer('');
                             }}
-                            frozen={frozen}
+                            frozen={frozen || cancelling !== null}
                             onRemove={() => void removeLine(payment)}
                             onTerminal={(status) => setPaymentStatus(payment.uuid, status)}
                             terminal={
@@ -487,46 +494,11 @@ export function cashRounded(due: Decimal, cashRounding: CashRounding | null): De
     return new CashRoundingCalculator(cashRounding).apply(due).roundedTotal;
 }
 
-/**
- * Whether any live payment line on the order was tendered with a cash method (REG-176).
- *
- * Same exclusions as `settledPayments` in `totals.ts`, and for the same reason: a change line is
- * money going back out of the drawer, and a failed or cancelled line was never taken at all.
- * Neither is a tender, so neither earns the rounding concession.
- */
-export function hasCashTender(
-    payments: readonly PaymentRow[],
-    methods: readonly PaymentMethodRow[],
-): boolean {
-    return payments.some(
-        (payment) =>
-            !payment.is_change &&
-            payment.payment_status !== 'failed' &&
-            payment.payment_status !== 'cancelled' &&
-            methods.find((method) => method.id === payment.payment_method_id)?.is_cash_count === true,
-    );
-}
-
-/**
- * The validate decision (REG-176) — exported so the tests exercise *this*, not a copy of it.
- *
- * The tolerance is a cash concession: it exists because the drawer has no coin smaller than the
- * step. A card can be charged the exact amount, so a settlement with no cash in it stays on the
- * strict `due <= 0` test and cannot be closed a few cents short.
- */
-export function settlesOrder(
-    due: string,
-    payments: readonly PaymentRow[],
-    methods: readonly PaymentMethodRow[],
-    cashRounding: CashRounding | null,
-): boolean {
-    const tolerated = cashRounding !== null && hasCashTender(payments, methods);
-    return isFullyPaid(
-        due,
-        tolerated ? cashRounding.rounding : null,
-        tolerated ? cashRounding.method : undefined,
-    );
-}
+// `hasCashTender` and `settlesOrder` moved to `payment-prechecks.ts` — the precheck now derives
+// the settlement itself, so they had to live where it could reach them without an import cycle.
+// Re-exported because they are the screen's published decision and the tolerance tests import
+// them from here.
+export { hasCashTender, settlesOrder } from './payment-prechecks';
 
 /**
  * What a new payment line pre-fills with (REG-202) — exported for the same reason.
