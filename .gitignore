@@ -40,3 +40,6 @@ Thumbs.db
 /storage/logs/stryker.json
 /storage/logs/stryker.html
 /storage/framework/stryker
+
+# Rendered user manual (BAN-517). Built by `npm run docs:build`, published by CI — never committed.
+/docs/.dist

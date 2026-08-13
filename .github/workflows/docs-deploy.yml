@@ -1,0 +1,74 @@
+name: Publish Manual
+
+# The user manual is for restaurant staff, who will not open GitHub. Published from master so the
+# site always reflects what is actually running, never a branch in progress.
+#
+# Requires GitHub Pages to be enabled with "GitHub Actions" as the source
+# (Settings -> Pages). Until that is done this workflow fails at the deploy step and nothing else.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/manual/**'
+      - 'docs/features.yml'
+      - 'scripts/docs-build.mjs'
+      - 'scripts/docs-check.mjs'
+      - '.github/workflows/docs-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time; a queued run supersedes an older one rather than racing it. Not
+# `cancel-in-progress` — a half-deployed site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Publishing a manual that contradicts the ledger would put the inconsistency in front of
+      # staff rather than in front of a reviewer.
+      - name: Check the documentation ledger
+        run: npm run docs:check
+
+      - name: Build the manual
+        run: npm run docs:build
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
