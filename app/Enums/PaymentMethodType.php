@@ -59,3 +59,5 @@ enum PaymentMethodType: string
         };
     }
 }
+
+// scratch: verifying the docs gate fires in CI
