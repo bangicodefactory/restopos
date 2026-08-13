@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkDocs, headingSlugs, isDoc, isWatched, parseFrontMatter, readSpecIds, slugify } from './docs-check.mjs';
+import { checkDocs, headingSlugs, isDoc, isWatched, parseFrontMatter, parseSkip, readSpecIds, slugify, uniqueId } from './docs-check.mjs';
 
 /**
  * BAN-517 — the documentation gate.
@@ -297,5 +297,85 @@ describe('parsing helpers', () => {
         const ids = readSpecIds('| REG-001 | Open register | ref | P0 | M | note |\n| not-a-row |\n| BOF-160 | Report | x | P1 | S | |');
 
         expect([...ids]).toEqual(['REG-001', 'BOF-160']);
+    });
+});
+
+describe('the opt-out has to be a directive, not a mention (review of #52)', () => {
+    // The bug this exists for: the token was matched anywhere in the PR body, so a PR that merely
+    // *described* the escape hatch silently had no gate. This feature's own description documents
+    // it twice, and any reviewer quoting it would have done the same — while the waiver only
+    // announces itself when a rule fires, so nobody would have noticed.
+    it('ignores the token inside prose', () => {
+        expect(parseSkip({ body: 'Say [skip docs] in the PR body to waive the diff rules.' }).waived).toBe(false);
+        expect(parseSkip({ body: 'Why not [skip docs] here?' }).waived).toBe(false);
+        expect(parseSkip({ body: '| `[skip docs]` | waives the last two |' }).waived).toBe(false);
+    });
+
+    it('honours it on a line of its own', () => {
+        const { waived, reason } = parseSkip({ body: `chore: bump deps
+
+[skip docs]` });
+
+        expect(waived).toBe(true);
+        expect(reason).toContain('own line');
+    });
+
+    it('lets the directive carry a reason', () => {
+        const { waived, reason } = parseSkip({ body: '[skip docs] pure refactor, no behaviour change' });
+
+        expect(waived).toBe(true);
+        expect(reason).toContain('pure refactor');
+    });
+
+    it('honours the label, whitespace and neighbours notwithstanding', () => {
+        expect(parseSkip({ labels: 'bug, docs: none ,frontend' }).waived).toBe(true);
+        expect(parseSkip({ labels: 'DOCS: NONE' }).waived).toBe(true);
+    });
+
+    it('is not fooled by a label that merely contains the words', () => {
+        expect(parseSkip({ labels: 'docs: none please, bug' }).waived).toBe(false);
+        expect(parseSkip({ labels: 'needs docs' }).waived).toBe(false);
+    });
+
+    it('waives nothing by default', () => {
+        expect(parseSkip().waived).toBe(false);
+        expect(parseSkip({ body: 'Fixes the rounding bug.' }).waived).toBe(false);
+    });
+});
+
+describe('the run reports what it examined', () => {
+    // A misconfigured base ref used to produce output identical to a real pass. It happened three
+    // times while this script was being reviewed, and each time the gate looked green while
+    // checking nothing.
+    it('counts the diff it judged', () => {
+        const { diff } = run({
+            changedFiles: ['app/A.php', 'tests/B.php', 'docs/features.yml', 'database/migrations/c.php', 'docs/spec/01-schema.md'],
+        });
+
+        expect(diff).toEqual({ changed: 5, watched: 2, docs: 2, migrations: 1 });
+    });
+
+    it('reports nothing when no diff was requested', () => {
+        expect(run().diff).toBeNull();
+    });
+
+    it('reports an empty diff rather than passing silently', () => {
+        expect(run({ changedFiles: [] }).diff).toEqual({ changed: 0, watched: 0, docs: 0, migrations: 0 });
+    });
+});
+
+describe('heading ids are unique within a page', () => {
+    it('leaves the first of a name alone and suffixes the rest', () => {
+        // Otherwise a `manual: page.md#anchor` deep link lands on whichever heading came first.
+        const seen = new Map();
+
+        expect(uniqueId('cash', seen)).toBe('cash');
+        expect(uniqueId('cash', seen)).toBe('cash-1');
+        expect(uniqueId('cash', seen)).toBe('cash-2');
+        expect(uniqueId('tips', seen)).toBe('tips');
+    });
+
+    it('starts over for a new page', () => {
+        expect(uniqueId('cash', new Map())).toBe('cash');
     });
 });

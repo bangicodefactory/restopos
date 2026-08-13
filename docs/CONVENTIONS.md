@@ -212,7 +212,9 @@ REG-208: { status: shipped, surface: user, manual: register/payments.md#paying-o
 - `status` — `shipped` | `partial` | `planned`. Absence means planned.
 - `surface` — `user` if a cashier, manager, cook or guest can see it; `internal` otherwise.
   Internal features owe no manual page: "the server re-prices the line" is not something anyone
-  reads about.
+  reads about. **Nothing can check this claim**, and it is the one field that quietly shrinks the
+  debt ceiling — flipping a feature to `internal` removes its obligation *and* lowers the count. A
+  diff that changes `surface` deserves a second look for that reason alone.
 - `manual` — a path under `docs/manual/`, optionally `#anchored`, or `todo`.
 
 The page has to name the feature back, in its front-matter `features:` list. One-way links rot
@@ -240,9 +242,14 @@ lower the number. It may only ever fall.
 
 ### The opt-out
 
-Refactors, dependency bumps and CI fixes genuinely change no behaviour. Put `[skip docs]` in the PR
-body, or add the `docs: none` label. It waives rules 4 and 5 only — the ledger still has to be
-internally consistent — and the waiver is printed in the log rather than passing silently.
+Refactors, dependency bumps and CI fixes genuinely change no behaviour. Put `[skip docs]` **on a
+line of its own** in the PR body (a reason may follow it on the same line), or add the `docs: none`
+label. It waives rules 4 and 5 only — the ledger still has to be internally consistent — and the
+waiver is printed in the log whether or not a rule ends up firing.
+
+The token must start the line because matching it anywhere meant any PR that *mentioned* the escape
+hatch silently had no gate. This feature's own pull request described the opt-out twice in its
+body; so would any reviewer quoting it.
 
 Use it. A gate that fires on everything gets bypassed by reflex, and then it protects nothing.
 
@@ -250,3 +257,11 @@ Use it. A gate that fires on everything gets bypassed by reflex, and then it pro
 
 It enforces **coverage and referential integrity**. It cannot tell whether a manual page is *true*.
 Accuracy is a reviewer's job, and the green tick is not evidence of it.
+
+Rule 4 is also satisfied by touching *any* file under `docs/`, including one unrelated line in a
+spec. That is deliberate — inferring which doc a given code change owes is guesswork, and a gate
+that guesses wrong gets disabled. It asks "did you consider the docs?", not "are the docs right".
+
+The run prints what it examined (`18 changed, 4 behaviour, 6 docs`) so a diff that resolved to
+nothing — a shallow clone, a renamed default branch, a bad base ref — cannot look like a pass. It
+looked like one three times while this was being built.

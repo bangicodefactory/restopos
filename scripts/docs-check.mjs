@@ -50,6 +50,42 @@ export const WATCH_EXCEPTIONS = [/(^|\/)tests\//, /\.test\.[cm]?[jt]sx?$/, /__fi
 /** Touching any of these counts as documenting the change. */
 export const DOC_PATHS = ['docs/features.yml', 'docs/manual/', 'docs/spec/'];
 
+/** The label that waives the diff rules. Structured, and applying it is a deliberate act. */
+export const SKIP_LABEL = 'docs: none';
+
+/**
+ * Is the diff gate waived, and by what?
+ *
+ * The body token is **anchored to the start of a line**, and that is the whole point. Matching it
+ * anywhere turned every PR that so much as *mentioned* the escape hatch into a PR with no gate —
+ * including this feature's own, whose description documents the opt-out twice, and any review
+ * comment quoting it. The failure was silent, because a waiver only announces itself when a rule
+ * would otherwise have fired.
+ *
+ * A line may carry a reason after the directive; anything before it means the line is prose.
+ *
+ * @param {{body?: string, labels?: string}} context
+ * @returns {{waived: boolean, reason: string|null}}
+ */
+export function parseSkip({ body = '', labels = '' } = {}) {
+    const labelled = labels
+        .split(',')
+        .map((name) => name.trim().toLowerCase())
+        .includes(SKIP_LABEL);
+
+    if (labelled) return { waived: true, reason: `the "${SKIP_LABEL}" label` };
+
+    const directive = /^[ 	]*\[skip docs\][ 	]*(.*)$/im.exec(body);
+
+    if (directive !== null) {
+        const why = directive[1].trim();
+
+        return { waived: true, reason: why === '' ? '[skip docs] on its own line' : `[skip docs] — ${why}` };
+    }
+
+    return { waived: false, reason: null };
+}
+
 /** GitHub's heading slug, near enough for anchors we author ourselves. */
 export function slugify(heading) {
     return heading
@@ -57,6 +93,23 @@ export function slugify(heading) {
         .toLowerCase()
         .replace(/[^\w\s-]/g, '')
         .replace(/\s+/g, '-');
+}
+
+/**
+ * A heading id that is unique within one page.
+ *
+ * Two pages may legitimately share a heading; two headings on *one* page may not, or the anchor the
+ * ledger points at lands on whichever came first. `seen` is mutated, so pass a fresh Map per page.
+ *
+ * @param {string} base   the slug
+ * @param {Map<string, number>} seen
+ */
+export function uniqueId(base, seen) {
+    const count = seen.get(base) ?? 0;
+
+    seen.set(base, count + 1);
+
+    return count === 0 ? base : `${base}-${count}`;
 }
 
 /** Split `---\nyaml\n---\nbody` into its parts. Front-matter is optional; body always present. */
@@ -96,7 +149,7 @@ export function isDoc(file) {
  * @param {Map<string, {data: object, slugs: string[]}>} input.manual  path (relative to docs/manual) => page
  * @param {string[]|null} input.changedFiles     null disables the diff gate
  * @param {boolean} input.skipDiffGate           the `[skip docs]` / `docs: none` opt-out
- * @returns {{errors: string[], warnings: string[], debt: number}}
+ * @returns {{errors: string[], warnings: string[], debt: number, diff: object|null}}
  */
 export function checkDocs({ features, specIds, manual, changedFiles = null, skipDiffGate = false }) {
     const errors = [];
@@ -198,6 +251,8 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, skip
         warnings.push(`meta.manual_debt is ${declaredDebt} but only ${debt} remain — lower it to ${debt} to hold the gain.`);
     }
 
+    let diff = null;
+
     if (changedFiles !== null) {
         const watched = changedFiles.filter(isWatched);
         const docs = changedFiles.filter(isDoc);
@@ -222,9 +277,16 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, skip
 
             skipDiffGate ? warnings.push(`(waived) ${message}`) : errors.push(message);
         }
+
+        diff = {
+            changed: changedFiles.length,
+            watched: watched.length,
+            docs: docs.length,
+            migrations: migrations.length,
+        };
     }
 
-    return { errors, warnings, debt };
+    return { errors, warnings, debt, diff };
 }
 
 // ---------------------------------------------------------------- the IO half
@@ -269,12 +331,13 @@ function changedSince(ref) {
 function main(argv) {
     const since = argv.find((a) => a.startsWith('--since='))?.slice('--since='.length);
 
-    // CI passes the PR body and labels through the environment; `[skip docs]` in a local commit
-    // message works too, so the same escape hatch exists without GitHub in the loop.
-    const skipDiffGate =
-        argv.includes('--skip-diff') ||
-        /\[skip docs\]/i.test(process.env.DOCS_SKIP_CONTEXT ?? '') ||
-        /(^|,)\s*docs:\s*none\s*(,|$)/i.test(process.env.DOCS_SKIP_LABELS ?? '');
+    // CI passes the PR body and labels through the environment; `[skip docs]` on its own line in a
+    // local commit message works too, so the same escape hatch exists without GitHub in the loop.
+    const skip = parseSkip({
+        body: process.env.DOCS_SKIP_CONTEXT ?? '',
+        labels: process.env.DOCS_SKIP_LABELS ?? '',
+    });
+    const skipDiffGate = argv.includes('--skip-diff') || skip.waived;
 
     let changedFiles = null;
 
@@ -287,13 +350,32 @@ function main(argv) {
         }
     }
 
-    const { errors, warnings, debt } = checkDocs({
+    // Announced whether or not a rule ends up firing. A waiver that only surfaces when something
+    // was actually waived is a waiver nobody notices was in force.
+    if (skip.waived) console.log(`docs-check: diff rules waived by ${skip.reason}.`);
+
+    const { errors, warnings, debt, diff } = checkDocs({
         features: parseYaml(read(FEATURES_FILE)),
         specIds: readSpecIds(read(SPEC_FILE)),
         manual: readManual(),
         changedFiles,
         skipDiffGate,
     });
+
+    // What was actually examined. Without this a misconfigured base ref — a shallow clone, a
+    // renamed default branch, a diff that resolved to nothing — produces output identical to a
+    // real pass, and the gate looks green while checking air. That is not hypothetical: it
+    // happened three times while this script was being reviewed.
+    if (diff !== null) {
+        console.log(
+            `docs-check: diff vs ${since} — ${diff.changed} changed, ${diff.watched} behaviour, ` +
+                `${diff.docs} docs, ${diff.migrations} migration(s).`,
+        );
+
+        if (diff.changed === 0) {
+            console.warn(`warning: the diff against "${since}" was empty — the change gate checked nothing.`);
+        }
+    }
 
     for (const warning of warnings) console.warn(`warning: ${warning}`);
 

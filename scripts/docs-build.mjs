@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import MarkdownIt from 'markdown-it';
 
-import { parseFrontMatter, slugify } from './docs-check.mjs';
+import { parseFrontMatter, slugify, uniqueId } from './docs-check.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = path.join(ROOT, 'docs/manual');
@@ -30,13 +30,23 @@ const OUT = path.join(ROOT, 'docs/.dist');
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 
 // Anchor every heading so `manual: page.md#anchor` in the ledger is a link that actually lands.
+// Per-render, because two pages may legitimately share a heading; two headings on *one* page may
+// not, or the anchor the ledger points at lands on whichever came first.
+let seen = new Map();
+
 md.renderer.rules.heading_open = (tokens, i) => {
     const level = tokens[i].tag;
     const text = tokens[i + 1]?.content ?? '';
-    const id = slugify(text);
+    const id = uniqueId(slugify(text), seen);
 
     return `<${level} id="${id}"><a class="anchor" href="#${id}">#</a>`;
 };
+
+function render(body) {
+    seen = new Map();
+
+    return md.render(body);
+}
 
 function pages(dir = SOURCE, prefix = '') {
     const found = [];
@@ -108,7 +118,7 @@ function layout({ page, all, css }) {
 </header>
 <div class="shell">
   <nav id="nav">${sidebar(all, page)}</nav>
-  <main>${md.render(page.body)}</main>
+  <main>${render(page.body)}</main>
 </div>
 <script>
   const b = document.getElementById('menu');
@@ -170,6 +180,27 @@ h1:hover .anchor, h2:hover .anchor, h3:hover .anchor { color:var(--muted); }
 }
 `;
 
+/** Mirror every non-markdown file into the output, preserving the tree. */
+function copyAssets(dir = SOURCE, prefix = '') {
+    let copied = 0;
+
+    for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        const rel = prefix === '' ? name : `${prefix}/${name}`;
+
+        if (statSync(full).isDirectory()) {
+            copied += copyAssets(full, rel);
+        } else if (!name.endsWith('.md')) {
+            const target = path.join(OUT, rel);
+            mkdirSync(path.dirname(target), { recursive: true });
+            cpSync(full, target);
+            copied += 1;
+        }
+    }
+
+    return copied;
+}
+
 function main() {
     if (!existsSync(SOURCE)) {
         console.error(`docs-build: ${SOURCE} does not exist.`);
@@ -187,14 +218,12 @@ function main() {
         writeFileSync(target, layout({ page, all, css: CSS }), 'utf8');
     }
 
-    // Anything alongside the markdown — screenshots, mostly — ships as-is.
-    for (const name of readdirSync(SOURCE)) {
-        const full = path.join(SOURCE, name);
-        if (statSync(full).isDirectory() || name.endsWith('.md')) continue;
-        cpSync(full, path.join(OUT, name));
-    }
+    // Anything alongside the markdown — screenshots, mostly — ships as-is, at whatever depth it
+    // sits. Copying only the root silently dropped `register/img/shot.png` and rendered a broken
+    // image with no build error, which for a *user* manual is the most likely asset there is.
+    const assets = copyAssets();
 
-    console.log(`docs-build: ${all.length} page(s) → ${path.relative(ROOT, OUT)}`);
+    console.log(`docs-build: ${all.length} page(s), ${assets} asset(s) → ${path.relative(ROOT, OUT)}`);
 }
 
 main();
