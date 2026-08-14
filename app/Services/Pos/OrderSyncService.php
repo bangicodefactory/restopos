@@ -1188,6 +1188,21 @@ final readonly class OrderSyncService
             ->map(static fn (mixed $v): int => (int) $v)
             ->all();
 
+        // A high-water mark, not a count (BAN-442). `count($existing) + 1` reused a number the
+        // moment any line was deleted: delete the second of three, add one, and the new line is
+        // number 3 beside the existing number 3. Nothing catches it — the index on
+        // (`pos_order_id`, `line_number`) is not unique — so the duplicate reaches the receipt and
+        // the kitchen ticket, where two different products claim the same line.
+        //
+        // Trashed rows count: a soft-deleted line still occupies its number, and reissuing it makes
+        // the audit trail read as though the line had been edited rather than replaced.
+        //
+        // Allocated once per batch and incremented locally. The order row is locked for the whole
+        // ingest, so nothing else can be numbering this order at the same time.
+        $nextLineNumber = 1 + (int) OrderLine::withTrashed()
+            ->where('pos_order_id', $order->getKey())
+            ->max('line_number');
+
         $results = [];
 
         foreach ($commands as $command) {
@@ -1232,7 +1247,7 @@ final readonly class OrderSyncService
             $results[] = match ($op) {
                 'delete' => $this->deleteLine($config, $order, $existing[$uuid] ?? null, $uuid, $employeeId, $device),
                 'update' => $this->updateLine($config, $order, $existing[$uuid], $command, $uuid, $employeeId, $device, $refundLinks[$uuid] ?? null, $plan),
-                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device, $refundLinks[$uuid] ?? null, $plan),
+                default => $this->createLine($config, $order, $command, $uuid, $existing, $employeeId, $device, $refundLinks[$uuid] ?? null, $plan, $nextLineNumber),
             };
         }
 
@@ -1557,6 +1572,7 @@ final readonly class OrderSyncService
         ?PosDevice $device,
         ?int $refundedLineId,
         PricePlan $plan,
+        int &$nextLineNumber,
     ): array {
         $variantId = (int) ($command['variant_id'] ?? $command['product_variant_id'] ?? 0);
         $variant = $this->variantMeta($variantId);
@@ -1572,7 +1588,7 @@ final readonly class OrderSyncService
             'uuid' => $uuid,
             'pos_order_id' => $order->getKey(),
             'company_id' => $order->company_id,
-            'line_number' => count($existing) + 1,
+            'line_number' => $nextLineNumber++,
             'product_variant_id' => $variantId,
             'product_id' => $variant['product_id'],
             'pos_category_id' => $variant['pos_category_id'],

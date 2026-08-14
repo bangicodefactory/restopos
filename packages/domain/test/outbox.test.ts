@@ -71,6 +71,35 @@ describe('error classification', () => {
     it('retries 5xx', () => {
         expect(isRetryable(classifyHttpError(503))).toBe(true);
     });
+
+    // BAN-442 — the server can now say *this one will never work*.
+    it('still retries a 5xx that names no code, which is the default and the safe one', () => {
+        // A till must not discard a sale because the server had a bad minute.
+        expect(isRetryable(classifyHttpError(500))).toBe(true);
+        expect(isRetryable(classifyHttpError(500, { error: { code: 'server_error' } }))).toBe(true);
+    });
+
+    it('quarantines a 5xx the server marks permanent', () => {
+        // A constraint violation fails identically on every retry, and an entry that retries
+        // forever blocks the session close forever — `blocksSessionClose` counts everything not
+        // quarantined. Quarantine is not discard: it surfaces to a manager.
+        const error = classifyHttpError(500, { error: { code: 'server_data_error', message: 'nope' } });
+
+        expect(error.kind).toBe('rejected');
+        expect(isRetryable(error)).toBe(false);
+    });
+
+    it('carries the code through so a manager sees why', () => {
+        const error = classifyHttpError(500, { error: { code: 'server_data_error', message: 'nope' } });
+
+        expect(error).toMatchObject({ code: 'server_data_error', message: 'nope' });
+    });
+
+    it('does not treat an unrecognised code as permanent', () => {
+        // Anything not on the published list keeps retrying — the list is the contract, not the
+        // presence of a code.
+        expect(isRetryable(classifyHttpError(500, { error: { code: 'something_new' } }))).toBe(true);
+    });
 });
 
 describe('Outbox', () => {

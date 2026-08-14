@@ -13,6 +13,7 @@ use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Throwable;
 
 /**
@@ -30,6 +31,9 @@ use Throwable;
  */
 final readonly class SequenceService
 {
+    /** Digits in a session name — `Bar/00001`. Matches the order-name default. */
+    private const SessionNamePadding = 5;
+
     public function __construct(
         private ConnectionInterface $connection,
         private Config $config,
@@ -73,22 +77,73 @@ final readonly class SequenceService
      */
     public function allocate(PosConfig $config, SequencePurpose $purpose, ?string $periodKey = null): string
     {
-        /** @var Sequence $sequence */
-        $sequence = Sequence::query()->firstOrCreate(
-            [
-                'company_id' => $config->company_id,
-                'pos_config_id' => $config->getKey(),
-                'purpose' => $purpose->value,
-                'period_key' => $periodKey,
-            ],
-            [
-                'prefix' => strtoupper(substr($purpose->value, 0, 3)).'/',
-                'padding' => 6,
-                'next_value' => 1,
-            ],
-        );
+        $sequence = $this->sequenceFor($config, $purpose, $periodKey, strtoupper(substr($purpose->value, 0, 3)).'/', 6);
 
         return $sequence->format($sequence->allocate());
+    }
+
+    /**
+     * `Bar/00001` — the human-facing session name (REG-001).
+     *
+     * Previously `count(sessions where name is not null) + 1`, which is two defects wearing one
+     * hat. Two devices opening in the same instant both counted the same rows and both produced
+     * `Bar/00007`; and clearing a name later shifts every number after it, so the sequence a
+     * manager reads back is not the sequence that was issued.
+     *
+     * A count answers "how many are there", which is not the question being asked. The question is
+     * "what is the next one", and only an allocator answers that — the same one the order numbers
+     * already use, under the same row lock (spec §6.5).
+     */
+    public function nextSessionName(PosConfig $config): string
+    {
+        $sequence = $this->sequenceFor($config, SequencePurpose::Session, null, $this->prefixFor($config).'/', self::SessionNamePadding);
+
+        // The counter comes from the row; the **prefix does not**. `sequences.prefix` is written
+        // once, when the row is first created, so formatting through it froze the register's name
+        // at whatever it was called on the day it first opened — rename "Bar" to "Terrace" and the
+        // orders said `Terrace/00412` while the sessions carried on saying `Bar/00013`. Two
+        // numbering schemes on one register disagreeing about the name of the venue.
+        //
+        // Derived live here, exactly as {@see orderName()} does, so the two always agree. Note the
+        // shared truncation: `prefixFor` caps at 8 characters, so two registers named "Restaurant
+        // Downtown Bar" and "Restaurant Downtown Terrace" both read `Restaura/…`. Their sequences
+        // are per-config so the numbers never collide, but the names are ambiguous to a human —
+        // which is already true of order names and is not worth diverging from here.
+        return $this->prefixFor($config).'/'.str_pad((string) $sequence->allocate(), self::SessionNamePadding, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * The counter row for a scope, created on first use.
+     *
+     * `firstOrCreate` is not atomic and `sequences_scope_unique` is, so the loser of a race gets a
+     * constraint violation rather than a row. Re-read on that: the winner has created exactly the
+     * row this call wanted, so there is nothing to do but pick it up.
+     */
+    private function sequenceFor(
+        PosConfig $config,
+        SequencePurpose $purpose,
+        ?string $periodKey,
+        string $prefix,
+        int $padding,
+    ): Sequence {
+        $scope = [
+            'company_id' => $config->company_id,
+            'pos_config_id' => $config->getKey(),
+            'purpose' => $purpose->value,
+            'period_key' => $periodKey,
+        ];
+
+        try {
+            /** @var Sequence */
+            return Sequence::query()->firstOrCreate($scope, [
+                'prefix' => $prefix,
+                'padding' => $padding,
+                'next_value' => 1,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            /** @var Sequence */
+            return Sequence::query()->where($scope)->firstOrFail();
+        }
     }
 
     /**
