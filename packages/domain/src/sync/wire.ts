@@ -241,8 +241,24 @@ export type SyncPushResponse = {
 
 export type SyncError = SyncErrorShape;
 
+/**
+ * Server error codes that will fail identically on every retry (BAN-442).
+ *
+ * The list is deliberately tiny and lives on both sides — `App\Support\Http\ErrorEnvelope` is the
+ * other half. Getting a permanent error wrong in this direction stops a sale from retrying; getting
+ * a transient one wrong only shows a banner. Only one of those loses money, so anything not named
+ * here keeps retrying.
+ */
+export const PERMANENT_SERVER_CODES: readonly string[] = ['server_data_error'];
+
+type ErrorBody = {
+    message?: string;
+    min_client_version?: string;
+    error?: { code?: string; message?: string };
+};
+
 /** Map an HTTP failure onto the classified error the UI knows how to present (spec 03 §3.6.6). */
-export function classifyHttpError(status: number | undefined, body?: { message?: string; min_client_version?: string }): SyncError {
+export function classifyHttpError(status: number | undefined, body?: ErrorBody): SyncError {
     if (status === undefined) return { kind: 'offline' };
     if (status === 401) return { kind: 'auth', detail: 'expired' };
     if (status === 403 || status === 410) return { kind: 'auth', detail: 'revoked' };
@@ -251,8 +267,22 @@ export function classifyHttpError(status: number | undefined, body?: { message?:
         return { kind: 'validation', field: '', message: body?.message ?? 'Validation failed' };
     }
     if (status === 426) return { kind: 'version', min: body?.min_client_version ?? '0.0.0' };
-    if (status >= 500) return { kind: 'server_unreachable', status };
-    return { kind: 'unknown', message: body?.message ?? `HTTP ${status}` };
+
+    if (status >= 500) {
+        const code = body?.error?.code;
+
+        // A 500 retries by default and always has — a till must not discard a sale because the
+        // server had a bad minute. What the envelope adds is the server's ability to say *this one
+        // will never work*: a constraint violation or a malformed number fails the same way every
+        // time, and an entry retrying forever blocks the session close forever.
+        if (code !== undefined && PERMANENT_SERVER_CODES.includes(code)) {
+            return { kind: 'rejected', code, message: body?.error?.message ?? 'The server refused this record.' };
+        }
+
+        return { kind: 'server_unreachable', status };
+    }
+
+    return { kind: 'unknown', message: body?.error?.message ?? body?.message ?? `HTTP ${status}` };
 }
 
 /** `true` when retrying could plausibly succeed. `rejected` results are never retried blindly. */

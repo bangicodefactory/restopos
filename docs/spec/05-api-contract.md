@@ -41,6 +41,42 @@ Every non-2xx JSON response has the same envelope:
 | `410` | `device_revoked` | Wipe local data, show the pairing screen |
 | `422` | `unprocessable`, plus Laravel's `{message, errors}` for validation | Per-record chip; edit-and-retry |
 | `429` | `rate_limited` | Back off |
+| `5xx` | `server_error`, `server_data_error` | See below |
+
+Validation (`422`) is the one deliberate exception to the envelope: Laravel's `{message, errors}`
+is kept because it carries the per-field detail the back office renders against each input, and the
+client classifies a 422 from the status rather than from the body.
+
+#### 5xx and what "permanent" means
+
+Until BAN-442 an unhandled `ValueError` or `QueryException` fell through to Laravel's default body —
+or, with debug off and the wrong `Accept` header, an HTML page. The sentence above was true of
+everything except the failures hardest to diagnose. Every throwable is now wrapped, and the message
+for a 5xx is fixed text rather than the exception's own: an unhandled message is written for a
+developer reading a log and names tables, columns and occasionally values. The trace stays in the
+log.
+
+**A 5xx retries by default, and always has** — `classifyHttpError` keys on the status, so `>= 500`
+means `server_unreachable`, which is retryable. That is the right default: a till must not discard a
+sale because the server had a bad minute.
+
+What the code adds is the server's ability to say *this one will never work*:
+
+| `error.code` | Meaning | Outbox |
+|---|---|---|
+| `server_error` | Something failed; retrying may work | Backs off and retries, indefinitely |
+| `server_data_error` | This payload fails identically every time — an integrity-constraint violation (SQLSTATE `23xxx`), a malformed number reaching bcmath | **Quarantined**, surfaced to a manager |
+
+The permanent list is deliberately tiny and is published on both sides —
+`App\Support\Http\ErrorEnvelope::Permanent` and `PERMANENT_SERVER_CODES` in
+`packages/domain/src/sync/wire.ts`. A code absent from it keeps retrying, because getting this
+wrong in the permanent direction stops a sale from retrying and getting it wrong the other way only
+shows a banner. A deadlock (SQLSTATE `40001`) is explicitly *not* permanent — it is the one failure
+certain to succeed on retry.
+
+Quarantine is not discard: the entry stays, stops retrying, and appears in the sync panel. It
+matters because `blocksSessionClose` counts everything that is not quarantined, so an entry
+retrying forever would keep a till from ever closing.
 
 **`POST /api/pos/sync` is the exception**: it answers `200` whenever the envelope is well formed, and the per-order verdict lives inside `results[]`. A transport-level failure code there would make the outbox retry the whole batch including the orders that already succeeded.
 

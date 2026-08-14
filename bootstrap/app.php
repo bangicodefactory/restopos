@@ -7,10 +7,13 @@ use App\Http\Middleware\EnsureDeviceAbility;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\ResolveSelfOrderContext;
 use App\Http\Middleware\TouchDeviceLastSeen;
+use App\Support\Http\ErrorEnvelope;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -59,25 +62,31 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
-            if (! $e instanceof HttpExceptionInterface) {
+            // Laravel maps these to a status itself, *after* this callback runs, so taking them
+            // over here turns a 401 into a 500 — which the accounting-export auth test caught
+            // immediately. Everything Laravel converts in `prepareException` (model-not-found,
+            // authorization, CSRF) has already become an `HttpException` by now and needs no entry.
+            //
+            // Validation is also the one deliberate exception to the envelope: `{message, errors}`
+            // carries per-field detail the envelope has nowhere to put, and the client classifies a
+            // 422 from the status rather than from the body.
+            if ($e instanceof ValidationException || $e instanceof AuthenticationException) {
                 return null;
             }
 
-            $status = $e->getStatusCode();
+            $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
+
+            // Everything else used to fall through to Laravel's `{"message": …}` — or an HTML page,
+            // with debug off and the wrong Accept header. A till can act on neither (BAN-442).
+            if ($status >= 500) {
+                // The trace goes to the log, not over the wire.
+                report($e);
+            }
 
             return response()->json([
                 'error' => [
-                    'code' => match ($status) {
-                        401 => 'unauthenticated',
-                        403 => 'forbidden',
-                        404 => 'not_found',
-                        409 => 'conflict',
-                        410 => 'gone',
-                        422 => 'unprocessable',
-                        429 => 'rate_limited',
-                        default => 'http_error',
-                    },
-                    'message' => $e->getMessage() !== '' ? $e->getMessage() : 'Request failed.',
+                    'code' => ErrorEnvelope::codeForThrowable($e),
+                    'message' => ErrorEnvelope::messageFor($e, $status),
                 ],
             ], $status);
         });

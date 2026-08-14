@@ -54,6 +54,7 @@ final readonly class SessionService
         private Config $config,
         private RegisterReadiness $readiness,
         private SessionEventRecorder $sessionEvents,
+        private SequenceService $sequences,
     ) {}
 
     /**
@@ -914,14 +915,15 @@ final readonly class SessionService
      * skipping it here is the whole point: numbering off the row count would leave a hole in the
      * sequence for a session that never traded.
      */
+    /**
+     * The next session name, allocated rather than counted (BAN-442).
+     *
+     * See {@see SequenceService::nextSessionName()} for why a count was the wrong shape: two tills
+     * opening at once both counted the same rows and got the same name.
+     */
     private function nextName(PosConfig $config): string
     {
-        $count = PosSession::query()
-            ->where('pos_config_id', $config->getKey())
-            ->whereNotNull('name')
-            ->count() + 1;
-
-        return sprintf('%s/%05d', preg_replace('/[^A-Za-z0-9]/', '', (string) $config->name) ?: 'POS', $count);
+        return $this->sequences->nextSessionName($config);
     }
 
     private function abs(string $value): string

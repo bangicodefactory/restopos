@@ -13,6 +13,7 @@ use DomainException;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Throwable;
 
 /**
@@ -73,22 +74,62 @@ final readonly class SequenceService
      */
     public function allocate(PosConfig $config, SequencePurpose $purpose, ?string $periodKey = null): string
     {
-        /** @var Sequence $sequence */
-        $sequence = Sequence::query()->firstOrCreate(
-            [
-                'company_id' => $config->company_id,
-                'pos_config_id' => $config->getKey(),
-                'purpose' => $purpose->value,
-                'period_key' => $periodKey,
-            ],
-            [
-                'prefix' => strtoupper(substr($purpose->value, 0, 3)).'/',
-                'padding' => 6,
-                'next_value' => 1,
-            ],
-        );
+        $sequence = $this->sequenceFor($config, $purpose, $periodKey, strtoupper(substr($purpose->value, 0, 3)).'/', 6);
 
         return $sequence->format($sequence->allocate());
+    }
+
+    /**
+     * `Bar/00001` — the human-facing session name (REG-001).
+     *
+     * Previously `count(sessions where name is not null) + 1`, which is two defects wearing one
+     * hat. Two devices opening in the same instant both counted the same rows and both produced
+     * `Bar/00007`; and clearing a name later shifts every number after it, so the sequence a
+     * manager reads back is not the sequence that was issued.
+     *
+     * A count answers "how many are there", which is not the question being asked. The question is
+     * "what is the next one", and only an allocator answers that — the same one the order numbers
+     * already use, under the same row lock (spec §6.5).
+     */
+    public function nextSessionName(PosConfig $config): string
+    {
+        $sequence = $this->sequenceFor($config, SequencePurpose::Session, null, $this->prefixFor($config).'/', 5);
+
+        return $sequence->format($sequence->allocate());
+    }
+
+    /**
+     * The counter row for a scope, created on first use.
+     *
+     * `firstOrCreate` is not atomic and `sequences_scope_unique` is, so the loser of a race gets a
+     * constraint violation rather than a row. Re-read on that: the winner has created exactly the
+     * row this call wanted, so there is nothing to do but pick it up.
+     */
+    private function sequenceFor(
+        PosConfig $config,
+        SequencePurpose $purpose,
+        ?string $periodKey,
+        string $prefix,
+        int $padding,
+    ): Sequence {
+        $scope = [
+            'company_id' => $config->company_id,
+            'pos_config_id' => $config->getKey(),
+            'purpose' => $purpose->value,
+            'period_key' => $periodKey,
+        ];
+
+        try {
+            /** @var Sequence */
+            return Sequence::query()->firstOrCreate($scope, [
+                'prefix' => $prefix,
+                'padding' => $padding,
+                'next_value' => 1,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            /** @var Sequence */
+            return Sequence::query()->where($scope)->firstOrFail();
+        }
     }
 
     /**
