@@ -7,13 +7,17 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Pos\PayLater;
 
+use App\Enums\CashMovementType;
 use App\Enums\CustomerAccountMoveType;
 use App\Enums\OrderState;
 use App\Models\Identity\Customer;
+use App\Models\Identity\Employee;
+use App\Models\Pos\CashMovement;
 use App\Models\Pos\CustomerAccountMove;
 use App\Models\Pos\Order;
 use App\Models\Pos\PaymentMethod;
 use App\Services\Pos\CustomerAccountLedger;
+use App\Services\Pos\SessionService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -261,7 +265,7 @@ describe('settling a tab', function (): void {
         pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
 
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '10.00'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '10.00', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertCreated();
 
         expect((string) CustomerAccountMove::query()->where('move_type', 'settlement')->sole()->amount)
@@ -274,7 +278,7 @@ describe('settling a tab', function (): void {
         pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
 
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '20.00'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '20.00', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertCreated();
 
         expect((string) $this->regular->refresh()->account_balance)->toBe('-7.9000');
@@ -282,7 +286,7 @@ describe('settling a tab', function (): void {
 
     it('refuses a settlement of nothing', function (): void {
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '0'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '0', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'settlement_refused');
     });
@@ -290,7 +294,7 @@ describe('settling a tab', function (): void {
     it('refuses exponent notation before it reaches bcmath', function (): void {
         // `is_numeric('1e2')` is true and `bccomp('1e2', …)` throws — the trap `Amount` exists for.
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '1e2'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '1e2', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertStatus(422);
     });
 
@@ -304,7 +308,7 @@ describe('settling a tab', function (): void {
         ]);
 
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$stranger->uuid}/account/settle", ['amount' => '5.00'])
+            ->postJson("/api/pos/customers/{$stranger->uuid}/account/settle", ['amount' => '5.00', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertNotFound();
 
         expect(CustomerAccountMove::query()->count())->toBe(0);
@@ -392,6 +396,118 @@ describe('a tab belongs to one company (review of #51)', function (): void {
     });
 });
 
+describe('money taken against a tab reaches the drawer (review of #51)', function (): void {
+    it('raises expected cash by what the customer handed over', function (): void {
+        // The bug: the settlement wrote the tab movement and stopped. `expectedCash()` is opening
+        // float + `pos_payments` + `cash_movements`, and a settlement wrote none of those — so the
+        // tab reconciled while the till counted over by the same amount every time, with nothing on
+        // the closing screen to point at.
+        $sessions = app(SessionService::class);
+
+        pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
+
+        expect($sessions->expectedCash($this->fx->session->refresh()))->toBe('0.0000');
+
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '12.10',
+                'payment_method_id' => $this->fx->cash->getKey(),
+            ])->assertCreated();
+
+        expect($sessions->expectedCash($this->fx->session->refresh()))->toBe('12.1000')
+            ->and((string) $this->regular->refresh()->account_balance)->toBe('0.0000');
+    });
+
+    it('records it as a cash movement a manager can read back', function (): void {
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '5.00',
+                'payment_method_id' => $this->fx->cash->getKey(),
+                'employee_id' => $this->fx->cashier->getKey(),
+            ])->assertCreated();
+
+        $movement = CashMovement::query()->sole();
+
+        expect($movement->movement_type)->toBe(CashMovementType::CashIn)
+            ->and((string) $movement->amount)->toBe('5.0000')
+            ->and($movement->reason)->toContain('Sofia R.')
+            ->and((int) $movement->employee_id)->toBe((int) $this->fx->cashier->getKey());
+    });
+
+    it('refuses a settlement in anything but cash, rather than taking it uncounted', function (): void {
+        // A card settlement wants a `pos_payments` row so it reaches `session_payment_totals`, and
+        // that table's `pos_order_id` is not nullable — there is no order to hang it on. Refused
+        // rather than recorded somewhere nothing will count it.
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '5.00',
+                'payment_method_id' => $this->fx->card->getKey(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'settlement_refused');
+
+        expect(CustomerAccountMove::query()->count())->toBe(0)
+            ->and(CashMovement::query()->count())->toBe(0);
+    });
+
+    it('refuses a method that is not on this register', function (): void {
+        $elsewhere = PaymentMethod::query()->create([
+            'company_id' => $this->fx->company->getKey(),
+            'name' => 'Not on this till',
+            'method_type' => 'cash',
+            'is_cash_count' => true,
+            'currency_id' => $this->fx->currency->getKey(),
+            'sequence' => 90,
+            'active' => true,
+        ]);
+
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '5.00',
+                'payment_method_id' => $elsewhere->getKey(),
+            ])->assertStatus(422);
+
+        expect(CashMovement::query()->count())->toBe(0);
+    });
+
+    it('refuses when there is no open session to count the money into', function (): void {
+        $this->fx->session->forceFill(['state' => 'closed'])->save();
+
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '5.00',
+                'payment_method_id' => $this->fx->cash->getKey(),
+            ])->assertStatus(422);
+
+        expect(CustomerAccountMove::query()->count())->toBe(0);
+    });
+
+    it('leaves the tab untouched when the cash movement is rejected', function (): void {
+        // Both or neither. A tab cleared against money the drawer never recorded is the same defect
+        // in the other direction, and it is only the transaction that makes that true — reached
+        // here through an employee who does not work here, which `cashMove` refuses *after* the tab
+        // row has already been written.
+        $stranger = Employee::query()->create([
+            'company_id' => PosFixtures::make()->company->getKey(),
+            'name' => 'Someone else',
+            'default_role' => 'cashier',
+            'pin_hash' => hash('sha256', '0000'),
+            'active' => true,
+        ]);
+
+        test()->withHeaders($this->fx->headers())
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", [
+                'amount' => '5.00',
+                'payment_method_id' => $this->fx->cash->getKey(),
+                'employee_id' => $stranger->getKey(),
+            ])->assertStatus(422);
+
+        expect(CustomerAccountMove::query()->count())->toBe(0)
+            ->and(CashMovement::query()->count())->toBe(0)
+            ->and((string) $this->regular->refresh()->account_balance)->toBe('0.0000');
+    });
+});
+
 describe('the cache and the ledger', function (): void {
     it('keeps account_balance equal to the sum of the moves through a full cycle', function (): void {
         // The invariant the whole design rests on.
@@ -401,7 +517,7 @@ describe('the cache and the ledger', function (): void {
         pushOnAccount($this->fx, (string) Str::uuid(), '7.90', $this->regular->getKey())->assertOk();
 
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '5.00'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '5.00', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertCreated();
 
         $customer = $this->regular->refresh();
@@ -434,7 +550,7 @@ describe('the cache and the ledger', function (): void {
         pushOnAccount($this->fx, (string) Str::uuid(), '12.10', $this->regular->getKey())->assertOk();
 
         test()->withHeaders($this->fx->headers())
-            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '2.10'])
+            ->postJson("/api/pos/customers/{$this->regular->uuid}/account/settle", ['amount' => '2.10', 'payment_method_id' => $this->fx->cash->getKey()])
             ->assertCreated();
 
         $response = test()->withHeaders($this->fx->headers())

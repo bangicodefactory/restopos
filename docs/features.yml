@@ -108,7 +108,14 @@ features:
   REG-204: { status: shipped, surface: user, manual: register/payments.md }
   REG-205: { status: shipped, surface: user, manual: register/payments.md }
   REG-206: { status: shipped, surface: user, manual: register/payments.md }
+  REG-208: { status: shipped, surface: user, manual: register/payments.md }
+  REG-209: { status: shipped, surface: user, manual: register/payments.md }
+  # The driver registry exists and no driver does (REG-210 is Phase 5). What a cashier meets today
+  # is the *absence* case, which is REG-212's refusal — so this is partial, and internal.
+  REG-210: { status: partial, surface: internal }
+  REG-212: { status: shipped, surface: user, manual: register/payments.md }
   REG-216: { status: shipped, surface: user, manual: register/payments.md }
+  REG-219: { status: shipped, surface: user, manual: register/payments.md }
   REG-217: { status: shipped, surface: user, manual: register/payments.md }
   REG-218: { status: shipped, surface: user, manual: register/payments.md }
   REG-220: { status: shipped, surface: user, manual: register/payments.md }

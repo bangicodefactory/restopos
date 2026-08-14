@@ -9,9 +9,13 @@ features:
   - REG-204
   - REG-205
   - REG-206
+  - REG-208
+  - REG-209
+  - REG-212
   - REG-216
   - REG-217
   - REG-218
+  - REG-219
   - REG-220
 ---
 
@@ -59,6 +63,41 @@ something the drawer can actually make. Two consequences:
 An order settled in cash can therefore close a couple of cents under the arithmetic total. That is
 correct and expected, not a shortfall.
 
+## Put it on a customer's account
+
+A regular can settle later instead of paying now. Tap the on-account method; the order closes and
+the amount goes on their tab rather than in the drawer.
+
+**It needs a customer on the order.** Without one there is nobody to bill, so the till refuses —
+attach the customer first.
+
+### Settle a tab
+
+From the customer's record, take the money and clear what they owe. Three things to know:
+
+- **Cash only, for now.** Money settled any other way would be taken without the shift counting it,
+  so the till refuses rather than losing track of it.
+- **It needs an open shift**, because the cash has to land in a drawer that someone will count.
+- **It is recorded as a cash movement**, named after the customer — so the end-of-shift count
+  includes it and the reason is on the drawer ledger.
+
+Paying more than is owed is allowed: the balance simply goes below zero and the house owes them.
+
+> Settling needs a connection. Putting a sale *on* a tab works offline like any other payment —
+> taking money *off* one does not, because two tills must not both decide what a balance became.
+
+## One-tap payment from the product screen
+
+If the back office has turned it on, common payment methods appear as buttons on the product
+screen. One tap settles the order and goes straight to the receipt — no trip to this screen.
+
+Only methods that can complete in a single tap are offered. A card terminal has a conversation to
+hold, a gift card needs an amount, and an on-account sale needs a customer — none of those can be
+one tap, so they are not offered as one.
+
+**In a restaurant, the unsent-changes prompt still applies.** Paying in one tap is the easiest way
+to settle for food the kitchen was never told about, so the same question is asked.
+
 ## Turn the change into a tip
 
 If a customer says "keep the change", tap **Tip**. The change becomes a tip on the order instead of
@@ -77,9 +116,12 @@ The till checks a few things first, and tells you which one failed:
 | The order is not fully paid | The remaining amount is still owed |
 | Change is due but no cash method is configured | Reduce the tender to the exact amount |
 | This payment method needs a customer | Attach a customer, then validate |
+| A cash amount must be one the drawer can make | Round the cash line to a real coin |
+| That is more than a thousand times the total | Confirm if it is genuine, or correct the amount |
 
 **Payment lines that are not really tenders are dropped before the sale goes through** — a line
-opened and left at zero, for instance. You do not need to tidy them up first.
+opened and left at zero, or a card line still waiting for the terminal. You do not need to tidy them
+up first, and an order whose only tender is still waiting will not settle.
 
 > Validating writes the sale to the device *before* moving to the receipt. If the till dies at that
 > exact moment the sale is already safe. It is the one moment worth the half-second wait.
@@ -92,3 +134,17 @@ kind of adjustment the system exists to prevent.
 
 If something is genuinely wrong after the fact, the answer is a [refund](refunds.md), which leaves
 a trail, rather than an edit, which does not.
+
+## Cancelling a card payment
+
+If a payment has been sent to the terminal and not yet completed, the line cannot simply be
+deleted — the till has no way to know whether the terminal took the money.
+
+**Cancel it on the terminal first**, then mark the line cancelled here. The delete goes through once
+the line says it took nothing.
+
+## A payment method that has been removed
+
+An order left open across a change to the till's settings can come back holding a payment method
+the restaurant no longer accepts. Those lines are dropped when the payment screen opens; the amount
+returns as owed and you tender it again with something that exists.

@@ -9,7 +9,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Pos\SettleAccountRequest;
 use App\Models\Identity\Customer;
 use App\Models\Pos\CustomerAccountMove;
+use App\Models\Pos\PaymentMethod;
+use App\Models\Pos\PosSession;
 use App\Services\Pos\CustomerAccountLedger;
+use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -47,18 +50,39 @@ final class CustomerAccountController extends Controller
         [$device, $config] = $this->deviceContext($request);
         $this->assertOwned($request, $customer);
 
+        /** @var PaymentMethod|null $method */
+        $method = $config->paymentMethods()
+            ->wherePivot('pos_config_id', $config->getKey())
+            ->where('payment_methods.id', (int) $request->validated('payment_method_id'))
+            ->first();
+
+        if ($method === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'settlement_refused', 'message' => 'That payment method is not on this register.']],
+                422,
+            );
+        }
+
+        /** @var PosSession|null $session */
+        $session = $config->currentSession()->first();
+
+        if ($session === null) {
+            // Without a session there is nowhere for the money to be counted, which is the whole
+            // point of taking it here rather than in a back office.
+            return new JsonResponse(
+                ['error' => ['code' => 'settlement_refused', 'message' => 'Settling a tab needs an open session.']],
+                422,
+            );
+        }
+
         try {
-            $move = $this->ledger->settle($customer, (string) $request->validated('amount'), [
-                'payment_method_id' => $request->validated('payment_method_id') === null
-                    ? null
-                    : (int) $request->validated('payment_method_id'),
-                'pos_session_id' => $config->currentSession()->value('id'),
+            $move = $this->ledger->settle($customer, (string) $request->validated('amount'), $method, $session, [
                 'employee_id' => $request->validated('employee_id') === null
                     ? null
                     : (int) $request->validated('employee_id'),
                 'description' => $request->validated('description'),
-            ]);
-        } catch (InvalidArgumentException $e) {
+            ], deviceId: (int) $device->getKey());
+        } catch (InvalidArgumentException|DomainException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'settlement_refused', 'message' => $e->getMessage()]],
                 422,

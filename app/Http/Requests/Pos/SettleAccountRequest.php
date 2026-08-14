@@ -22,7 +22,9 @@ final class SettleAccountRequest extends FormRequest
             // The magnitude handed over. The ledger applies the sign, because "positive means owed"
             // is the ledger's invariant to keep and not something a client gets a vote on.
             'amount' => ['required', ...Amount::unsigned()],
-            'payment_method_id' => ['nullable', 'integer'],
+            // Required: money that arrives has to say how, or it cannot be made visible to the
+            // session that took it.
+            'payment_method_id' => ['required', 'integer'],
             'employee_id' => ['nullable', 'integer'],
             'description' => ['nullable', 'string', 'max:160'],
         ];
