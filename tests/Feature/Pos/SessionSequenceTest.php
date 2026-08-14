@@ -93,6 +93,42 @@ describe('session names are allocated', function (): void {
             ->and(PosSession::query()->count())->toBe(1);
     });
 
+    it('follows a rename, because the prefix is derived and not stored (review of #54)', function (): void {
+        // `sequences.prefix` is written once, when the row is created, so formatting through it
+        // froze the register's name at whatever it was called the day it first opened. Orders
+        // derive the prefix live, so the same register said `Terrace/00412` and `Bar/00013` at the
+        // same time — two numbering schemes disagreeing about the name of the venue.
+        $sequences = app(SequenceService::class);
+
+        expect($sequences->nextSessionName($this->fx->config))->toBe('Bar/00001');
+
+        $this->fx->config->forceFill(['name' => 'Terrace'])->save();
+
+        expect($sequences->nextSessionName($this->fx->config->refresh()))->toBe('Terrace/00002');
+    });
+
+    it('keeps numbering where it left off across the rename', function (): void {
+        // The counter is the row's; only the prefix is derived. A rename must not restart the run.
+        $sequences = app(SequenceService::class);
+
+        $sequences->nextSessionName($this->fx->config);
+        $sequences->nextSessionName($this->fx->config);
+        $this->fx->config->forceFill(['name' => 'Terrace'])->save();
+
+        expect($sequences->nextSessionName($this->fx->config->refresh()))->toBe('Terrace/00003');
+    });
+
+    it('names sessions and orders with the same prefix', function (): void {
+        // The property the frozen prefix broke: whatever a register is called, both schemes agree.
+        $sequences = app(SequenceService::class);
+        $this->fx->config->forceFill(['name' => 'Terrace'])->save();
+
+        $session = $sequences->nextSessionName($this->fx->config->refresh());
+        $order = $sequences->orderName($this->fx->config, 12);
+
+        expect(explode('/', $session)[0])->toBe(explode('/', $order)[0]);
+    });
+
     it('keeps its counter in the sequences table, where it can be read back', function (): void {
         app(SessionService::class)->open($this->fx->config, '0');
 

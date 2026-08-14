@@ -103,7 +103,10 @@ final class ErrorEnvelope
      */
     public static function messageFor(Throwable $e, int $status): string
     {
-        if ($status < 500) {
+        // An `HttpException` message is *authored* — someone wrote it for the caller — so it is
+        // passed through at any status. The rule is about unhandled throwables, whose messages are
+        // written for a developer reading a log and name tables, columns and occasionally values.
+        if ($status < 500 || $e instanceof HttpExceptionInterface) {
             return $e->getMessage() !== '' ? $e->getMessage() : 'Request failed.';
         }
 

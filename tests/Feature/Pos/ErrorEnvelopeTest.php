@@ -11,9 +11,11 @@ use App\Support\Http\ErrorEnvelope;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
@@ -98,6 +100,27 @@ describe('an unhandled throwable still comes back as the envelope', function ():
         // `AuthenticationException`, which is the one that broke.
         test()->getJson(route('accounting-exports.download', ['export' => (string) Str::uuid()]))
             ->assertStatus(401);
+    });
+
+    it('logs a 500 once, not twice (review of #54)', function (): void {
+        // The handler reports before it renders, so a `report($e)` inside the render callback
+        // logged every 500 twice — which inflates error counts and any alerting keyed on them.
+        $records = 0;
+        Log::listen(function () use (&$records): void {
+            $records++;
+        });
+
+        boom(new \RuntimeException('boom'))->assertStatus(500);
+
+        expect($records)->toBe(1);
+    });
+
+    it('keeps an authored HTTP message even at 500 (review of #54)', function (): void {
+        // The rule is about *unhandled* throwables, whose messages are written for a developer
+        // reading a log. An `HttpException` message was written for the caller.
+        boom(new HttpException(503, 'Down for maintenance until 06:00.'))
+            ->assertStatus(503)
+            ->assertJsonPath('error.message', 'Down for maintenance until 06:00.');
     });
 
     it('leaves validation errors alone, because their body carries per-field detail', function (): void {

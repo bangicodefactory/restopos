@@ -78,11 +78,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
             // Everything else used to fall through to Laravel's `{"message": …}` — or an HTML page,
             // with debug off and the wrong Accept header. A till can act on neither (BAN-442).
-            if ($status >= 500) {
-                // The trace goes to the log, not over the wire.
-                report($e);
-            }
-
+            //
+            // Nothing is reported from here. The handler reports *before* it renders, so a
+            // `report($e)` in this callback logged every 500 twice — which inflates error counts
+            // and any alerting keyed on them. The trace is already in the log; what this callback
+            // owes the client is a body it can act on.
             return response()->json([
                 'error' => [
                     'code' => ErrorEnvelope::codeForThrowable($e),
