@@ -64,6 +64,9 @@ final readonly class ApprovalAuthority
         $abilities = [];
         $accepted = [];
         $refusals = [];
+        // ability => the lines it was granted for (BAN-515). An ability that appears here with an
+        // empty list was granted without naming a line and stays order-scoped.
+        $lines = [];
 
         foreach ($approvals as $approval) {
             $approval = (array) $approval;
@@ -94,9 +97,52 @@ final readonly class ApprovalAuthority
 
             $abilities[] = $ability;
             $accepted[] = $approval;
+
+            $line = $this->lineContext($approval);
+
+            if ($line === null) {
+                // Order-scoped. Recorded as such so a later line-scoped approval for the same
+                // ability cannot narrow what this one already granted — two approvals mean the
+                // manager pressed the button twice, and the wider one stands.
+                $lines[$ability] = [];
+
+                continue;
+            }
+
+            // Only narrow an ability that has not already been granted order-wide.
+            if (! array_key_exists($ability, $lines) || $lines[$ability] !== []) {
+                $lines[$ability][] = $line;
+            }
         }
 
-        return new ApprovalGrant(array_values(array_unique($abilities)), $accepted, $refusals);
+        return new ApprovalGrant(
+            array_values(array_unique($abilities)),
+            $accepted,
+            $refusals,
+            array_map(static fn (array $l): array => array_values(array_unique($l)), $lines),
+        );
+    }
+
+    /**
+     * The line an approval names, or null when it names none.
+     *
+     * The client writes `context: {"line_uuid": "…"}` when a manager approves an override on one
+     * line. Anything else — an absent context, a context about something other than a line — reads
+     * as order-scoped, which is what every client before BAN-515 sent.
+     *
+     * @param  array<string, mixed>  $approval
+     */
+    private function lineContext(array $approval): ?string
+    {
+        $context = $approval['context'] ?? null;
+
+        if (! is_array($context)) {
+            return null;
+        }
+
+        $line = $context['line_uuid'] ?? null;
+
+        return is_string($line) && $line !== '' ? $line : null;
     }
 
     /**

@@ -27,15 +27,24 @@ import { useUiStore } from '../state/ui-store';
  */
 export type ApprovalGrant = { managerEmployeeId: number; pin: string };
 
-type Pending = { resolve: (grant: ApprovalGrant | null) => void; ability: string };
+/**
+ * What the approval was granted *for* (BAN-515).
+ *
+ * `lineUuid` narrows the approval to one line. Omit it for an ability that is not about a line —
+ * a session close, a cash-movement delete — and the approval stays order-scoped, which is what the
+ * server assumes when no context arrives.
+ */
+export type ApprovalContext = { lineUuid?: string };
+
+type Pending = { resolve: (grant: ApprovalGrant | null) => void; ability: string; context: ApprovalContext };
 
 let pending: Pending | null = null;
 
-export function requestApproval(ability: string): Promise<ApprovalGrant | null> {
+export function requestApproval(ability: string, context: ApprovalContext = {}): Promise<ApprovalGrant | null> {
     if (pending) pending.resolve(null);
     useUiStore.getState().openDialog('approval', { ability });
     return new Promise<ApprovalGrant | null>((resolve) => {
-        pending = { resolve, ability };
+        pending = { resolve, ability, context };
     });
 }
 
@@ -84,7 +93,10 @@ export async function submitApproval(
         manager_employee_id: attempt.managerEmployeeId,
         verified: result.verified ?? 'offline',
         at: new Date().toISOString(),
-        context: {},
+        // Was hardcoded `{}` — so the server could only ever bind an approval to the order, and one
+        // approval unlocked every line in the push (BAN-515). Recording the line the manager was
+        // actually standing in front of is the whole of what makes the narrower binding possible.
+        context: pending?.context.lineUuid === undefined ? {} : { line_uuid: pending.context.lineUuid },
     };
     await runtime.db.approvals.put(approval);
 

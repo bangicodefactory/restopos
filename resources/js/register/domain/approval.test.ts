@@ -78,3 +78,34 @@ it('resolves an earlier pending request to null when a new one supersedes it', a
     requestApproval(OVER_VARIANCE); // supersedes
     await expect(first).resolves.toBeNull();
 });
+
+/**
+ * BAN-515 — the approval records *which line* the manager was standing in front of.
+ *
+ * `context` was hardcoded `{}`, so the only binding the client asserted was the order and one
+ * approval unlocked the ability for every line in the push. The server narrows on this key; it can
+ * only narrow on what the client actually says.
+ */
+it('records the line an approval was granted for', async () => {
+    const pending = requestApproval(OVER_VARIANCE, { lineUuid: 'line-7' });
+
+    expect((await submitApproval({ managerEmployeeId: 2, pin: '9999' })).ok).toBe(true);
+    await pending;
+
+    const [row] = await db.approvals.toArray();
+
+    expect(row?.context).toEqual({ line_uuid: 'line-7' });
+});
+
+it('leaves the context empty when no line was named', async () => {
+    // Order-scoped, which is what a session close or a cash-movement delete wants — and what the
+    // server treats as "authorises the whole push", exactly as before this change.
+    const pending = requestApproval(OVER_VARIANCE);
+
+    expect((await submitApproval({ managerEmployeeId: 2, pin: '9999' })).ok).toBe(true);
+    await pending;
+
+    const [row] = await db.approvals.toArray();
+
+    expect(row?.context).toEqual({});
+});
