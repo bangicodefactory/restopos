@@ -79,6 +79,9 @@ export function CustomerDialog(): JSX.Element | null {
             id,
             uuid,
             name: editing.name,
+            // Server-owned (REG-208). A customer created on the till has never been charged, and
+            // the next bootstrap replaces this row with whatever the ledger says.
+            account_balance: '0.0000',
             company_name: editing.company_name ?? null,
             email: editing.email ?? null,
             phone: editing.phone ?? null,

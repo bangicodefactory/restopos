@@ -11,10 +11,12 @@ use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\IsPosLoadable;
 use App\Models\Concerns\PosLoadable;
 use App\Models\Loyalty\Card;
+use App\Models\Pos\CustomerAccountMove;
 use App\Models\Pos\Order;
 use App\Models\Pos\PosConfig;
 use App\Models\Pricing\FiscalPosition;
 use App\Models\Pricing\Pricelist;
+use App\Services\Pos\CustomerAccountLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -45,6 +47,7 @@ class Customer extends Model implements PosLoadable
             'address_type' => AddressType::class,
             'is_company' => 'boolean',
             'loyalty_points_cache' => 'decimal:3',
+            'account_balance' => 'decimal:4',
             'order_count' => 'integer',
             'last_order_at' => 'datetime',
             'marketing_opt_in' => 'boolean',
@@ -62,6 +65,20 @@ class Customer extends Model implements PosLoadable
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /**
+     * The running tab (REG-208), newest first.
+     *
+     * `account_balance` on this row is the cached head of it. Write through
+     * {@see CustomerAccountLedger} only — appending here directly leaves the
+     * cache behind and the two silently disagree.
+     *
+     * @return HasMany<CustomerAccountMove, $this>
+     */
+    public function accountMoves(): HasMany
+    {
+        return $this->hasMany(CustomerAccountMove::class)->orderByDesc('occurred_at');
     }
 
     /** @return BelongsTo<Country, $this> */

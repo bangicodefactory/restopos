@@ -431,6 +431,7 @@ scan), preferred pricelist and fiscal position, per-customer order counter for l
 | pricelist_id | FK→pricelists.id nullable, set null | `property_product_pricelist` |
 | fiscal_position_id | FK→fiscal_positions.id nullable, set null | auto-applied tax mapping |
 | loyalty_points_cache | decimal(16,3) default 0 | denormalised sum of active loyalty cards (display only) |
+| account_balance | decimal(16,4) default 0, index | REG-208 — what this customer owes on account. Positive = owed to the house; negative = in credit. **Cache** of Σ`customer_account_moves.amount`, written in the same transaction under a row lock; the moves are the record |
 | order_count | unsignedInteger default 0, index | drives "top-N customers" preload ordering (replaces Odoo's raw SQL) |
 | last_order_at | timestamp nullable, index | |
 | marketing_opt_in | boolean default false | |
@@ -1956,6 +1957,44 @@ Maps from `pos.payment`. Dropped: `account_move_id`, `online_account_payment_id`
 **Invariants:** payments of an order that is `done`/invoiced/printed are immutable; the payment
 method must belong to the order's config; a change line is always negative and always cash.
 
+### `customer_account_moves`
+The immutable ledger behind a customer's running tab (REG-208, BOF-119). Deliberately **not** an ERP
+receivable — no ageing, no dunning, no payment terms (see 02-features §"Payment terms, partner
+receivable/payable ledgers"). Modelled on `loyalty_card_histories`: `balance_after` is stored rather
+than derived so a statement prints without replaying the table.
+
+Lives in the order domain rather than identity because it points at `pos_payments`, and identity
+migrates first — the FK direction places it, not the subject matter.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | id | |
+| uuid | char(36) **unique** | |
+| company_id | FK→companies.id, cascade | |
+| customer_id | FK→customers.id, restrict | |
+| move_type | enum('charge','settlement') default 'charge', index | §4.x. There is deliberately no `reversal` — see invariants |
+| amount | decimal(16,4) | **signed**, positive = the customer owes more. A charge is positive, a settlement negative, and the balance is the plain sum of this column |
+| balance_after | decimal(16,4) | running total at this row |
+| pos_order_id | FK→pos_orders.id nullable, set null | |
+| pos_payment_id | FK→pos_payments.id nullable, **unique**, set null | one move per payment. NULL for settlements, and repeated NULLs are permitted by every engine we target |
+| payment_method_id | FK→payment_methods.id nullable, set null | how a settlement was taken; null on a charge |
+| pos_session_id | FK→pos_sessions.id nullable, set null | |
+| employee_id | FK→employees.id nullable, set null | |
+| user_id | FK→users.id nullable, set null | |
+| description | string(160) nullable | |
+| occurred_at | timestamp(3), index | |
+| timestamps | | |
+
+Index: (`customer_id`, `occurred_at`) for the statement view.
+
+**Invariants:** append-only — no update path, no soft delete. `customers.account_balance` =
+Σ`amount` for that customer. **One move per payment**, enforced by the unique index rather than by a
+service that remembers to check: `POST /api/pos/sync` is a pure upsert and the register retries, so
+the same pay-later payment arrives repeatedly by design. A charge is booked **only for a settled
+order** (`paid`/`done`), which is also why no `reversal` type exists: settled orders' payments are
+immutable (§ settled-order rules), so a booked charge can never need undoing, and a returned sale
+comes back as a refund order whose on-account payment is negative.
+
 ### `payment_transactions`
 Online payment attempt (customer's phone, kiosk QR, or cashier-presented QR).
 Maps from `payment.transaction`. Dropped: tokenization, partner-side vault, refund chaining
@@ -2614,7 +2653,7 @@ Delivery record for receipt emails/SMS (replaces `mail.mail` tracking).
 | 3 | Pricing/tax (13) | `currencies`, `currency_rates`, `tax_groups`, `taxes`, `tax_children`, `product_tax`, `product_variant_tax`, `fiscal_positions`, `fiscal_position_taxes`, `pricelists`, `pricelist_items`, `cash_roundings`, `decimal_precisions` |
 | 4 | Config (24) | `pos_configs`, `pos_config_payment_method`, `pos_config_pricelist`, `pos_config_fiscal_position`, `pos_config_preset`, `pos_config_printer`, `pos_config_note`, `pos_config_bill`, `pos_config_pos_category`, `pos_config_trusted_config`, `pos_config_floor`, `pos_config_language`, `pos_config_prep_display`, `pos_config_self_order_custom_link`, `sequences`, `pos_presets`, `preset_service_windows`, `pos_notes`, `pos_bills`, `pos_printers`, `pos_category_pos_printer`, `payment_methods`, `payment_providers`, `notification_templates`, `settings` |
 | 5 | Session/cash (9) | `pos_sessions`, `cash_movements`, `session_cash_counts`, `session_cash_count_lines`, `session_payment_totals`, `session_sales_summaries`, `session_tax_summaries`, `accounting_exports`, `accounting_export_session` |
-| 6 | Orders (8) | `pos_orders`, `pos_order_lines`, `pos_order_line_attribute_value`, `pos_order_line_custom_attribute_values`, `pos_payments`, `payment_transactions`, `pos_invoices`, `pos_invoice_lines` |
+| 6 | Orders (9) | `pos_orders`, `pos_order_lines`, `pos_order_line_attribute_value`, `pos_order_line_custom_attribute_values`, `pos_payments`, `payment_transactions`, `pos_invoices`, `pos_invoice_lines`, `customer_account_moves` |
 | 7 | Restaurant (4) | `restaurant_floors`, `restaurant_tables`, `restaurant_order_courses`, `pos_order_merges` |
 | 8 | Kitchen (8) | `order_preparation_snapshots`, `prep_displays`, `pos_category_prep_display`, `prep_stages`, `prep_orders`, `prep_order_lines`, `prep_line_stage_logs`, `preparation_print_jobs` |
 | 9 | Self-order (1 + columns) | `self_order_custom_links` |
@@ -2996,6 +3035,7 @@ the server id); master data is keyed by id.
 | `pos_order_lines` | (`pos_category_id`, `created_at`) | category reporting + prep routing backfill |
 | `pos_order_lines` | (`refunded_order_line_id`) WHERE NOT NULL (partial) | refundable-qty computation |
 | `pos_payments` | UNIQUE (`uuid`); (`pos_session_id`, `payment_method_id`); (`pos_order_id`) | sync + closing totals |
+| `customer_account_moves` | UNIQUE (`uuid`); UNIQUE (`pos_payment_id`); (`customer_id`, `occurred_at`) | one-move-per-payment guard + statement view |
 | `pos_sessions` | partial UNIQUE (`pos_config_id`) WHERE `state <> 'closed' AND NOT is_rescue` | one open session per register, enforced by the DB, not a race-prone app check |
 | `pos_sessions` | (`pos_config_id`, `state`), (`business_date`), (`closed_at`) | dashboard, reports |
 | `cash_movements` | (`pos_session_id`, `movement_type`), UNIQUE (`uuid`) | closing popup |

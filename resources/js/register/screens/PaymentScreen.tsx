@@ -1,5 +1,5 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
-import { CashRoundingCalculator, isFullyPaid } from '@domain/tax/rounder';
+import { CashRoundingCalculator } from '@domain/tax/rounder';
 import type { CashRounding } from '@domain/tax/types';
 import type { PaymentMethodRow, PaymentRow } from '@domain/types';
 import { Button, NumPad, cn } from '@shared/ui';
@@ -7,7 +7,9 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { tryRuntime } from '../data/runtime';
+import { cancelOnTerminal } from '../domain/terminal';
 import { useT } from '../i18n';
+import type { RegisterKey } from '../i18n';
 import {
     addPayment,
     commitPaidOrder,
@@ -27,6 +29,8 @@ import {
     useTotals,
 } from '../hooks/use-register';
 import { useUiStore } from '../state/ui-store';
+import { orphanedPayments, precheckPayment, settlesOrder } from './payment-prechecks';
+import type { PrecheckBlock } from './payment-prechecks';
 
 /**
  * The payment screen (REG-200 … REG-220).
@@ -44,7 +48,26 @@ import { useUiStore } from '../state/ui-store';
  *  - **Validation flushes IndexedDB immediately** (REG-217), before navigating to the receipt. A
  *    crash between "paid" and "flushed" loses a sale, and the 250 ms debounce is exactly long enough
  *    for that to happen.
+ *  - **Strip before judging** (REG-216). A zero-amount line and a terminal line still waiting are
+ *    not tenders; deciding "is this paid?" with them still in place answers against rows carrying
+ *    no money. The whole decision lives in `payment-prechecks.ts` so it can be tested without
+ *    rendering.
+ *  - **A live authorisation is cancelled on the terminal before its line may go** (REG-212).
+ *    Deleting the row used to be local-only, which reads as "the terminal was told" while a real
+ *    capture stays live and the customer is charged for a payment the register thinks it cancelled.
  */
+
+/** Stable empty array so the mount-cleanup effect does not re-run on every render. */
+const EMPTY_IDS: readonly number[] = [];
+
+/** REG-216 — one message per blocking outcome, so the union is exhaustive at the type level. */
+const BLOCK_MESSAGES: Record<PrecheckBlock, RegisterKey> = {
+    empty_order: 'reg.pay.emptyOrder',
+    not_enough: 'reg.pay.notEnough',
+    overpay_no_cash: 'reg.pay.overpayNoCash',
+    unrounded_cash: 'reg.pay.unroundedCash',
+    needs_customer: 'reg.pay.needCustomer',
+};
 
 export type PaymentScreenProps = {
     orderUuid: string;
@@ -65,6 +88,9 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
     const [buffer, setBuffer] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [pendingOverpay, setPendingOverpay] = useState(false);
+    /** A terminal cancel in flight. Re-tapping would send a second reversal for one authorisation. */
+    const [cancelling, setCancelling] = useState<string | null>(null);
 
     const methods = catalog.paymentMethods.filter((method) =>
         (catalog.config?.payment_method_ids ?? []).includes(method.id),
@@ -88,6 +114,18 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     // tender as €30 afterwards is the skim the server refuses (BAN-410); the buttons go with it, so
     // the cashier is told before tapping rather than watching a sale come back rejected.
     const frozen = paymentsFrozen(order);
+
+    // REG-219 — an order can sit open across a config change and come back holding a tender the
+    // venue has stopped accepting. Dropped on mount rather than blocked: there is nothing for the
+    // cashier to decide, and the line renders with a dash for a name so they cannot see why.
+    const configuredIds = catalog.config?.payment_method_ids ?? EMPTY_IDS;
+
+    useEffect(() => {
+        for (const uuid of orphanedPayments(payments, configuredIds)) {
+            removePayment(uuid);
+            setSelectedPayment((current) => (current === uuid ? null : current));
+        }
+    }, [configuredIds, payments]);
 
     // REG-201 — a single configured method needs no tap.
     useEffect(() => {
@@ -117,6 +155,41 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         [catalog.paymentMethods, order?.employee_id, order?.pos_session_id, orderUuid, prefillFor],
     );
 
+    /**
+     * REG-212 — a live authorisation has to be answered for before its row disappears.
+     *
+     * `await`ed rather than fired and forgotten: the point is that a refusal *stops* the delete.
+     */
+    const removeLine = useCallback(
+        async (payment: PaymentRow) => {
+            if (cancelling !== null) return;
+
+            setError(null);
+
+            const method = catalog.paymentMethods.find(
+                (candidate) => candidate.id === payment.payment_method_id,
+            );
+
+            setCancelling(payment.uuid);
+
+            try {
+                const cancelled = await cancelOnTerminal(payment, method);
+
+                if (!cancelled.ok) {
+                    setError(t(cancelled.reason));
+
+                    return;
+                }
+
+                removePayment(payment.uuid);
+                setSelectedPayment((current) => (current === payment.uuid ? null : current));
+            } finally {
+                setCancelling(null);
+            }
+        },
+        [cancelling, catalog.paymentMethods, t],
+    );
+
     const applyBuffer = useCallback(
         (next: string) => {
             setBuffer(next);
@@ -126,31 +199,46 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         [selectedPayment],
     );
 
-    const validate = useCallback(async () => {
+    const validate = useCallback(async (confirmedOverpay = false) => {
         setError(null);
-        if (lines.length === 0) {
-            setError(t('reg.pay.emptyOrder'));
+
+        // REG-216 — strip first, then judge. The decision lives in `payment-prechecks.ts`, and it
+        // is handed the raw rows rather than `totals`: `useTotals` counts a pending line as paid,
+        // so passing its verdict in let a lone uncaptured tender be stripped *and* pass as settled,
+        // validating an order with no payment rows on it.
+        const verdict = precheckPayment({
+            lines,
+            payments,
+            methods: catalog.paymentMethods,
+            cashRounding,
+            total: totals.roundedTotal,
+            customerId: order?.customer_id ?? null,
+            hasCashMethod: hasCash,
+        });
+
+        // Acted on whatever else is wrong: these rows are not tenders either way, and leaving them
+        // to be re-judged on the next tap means the same non-answer twice.
+        for (const uuid of verdict.strip) {
+            removePayment(uuid);
+        }
+
+        if (verdict.block !== null) {
+            setError(t(BLOCK_MESSAGES[verdict.block]));
+
+            // The one block the cashier can fix from here without dismissing anything.
+            if (verdict.block === 'needs_customer') openDialog('customer');
+
             return;
         }
-        if (!paidInFull) {
-            setError(t('reg.pay.notEnough'));
+
+        if (verdict.confirm !== null && !confirmedOverpay) {
+            // Asked, not refused: a genuinely huge tender is not the register's call to make.
+            setPendingOverpay(true);
+
             return;
         }
-        if (Decimal.of(totals.change).signum() > 0 && !hasCash) {
-            setError(t('reg.pay.overpayNoCash'));
-            return;
-        }
-        // REG-216 — a method flagged `identify_customer` needs a customer before it can settle.
-        const needsCustomer = payments.some(
-            (payment) =>
-                catalog.paymentMethods.find((method) => method.id === payment.payment_method_id)
-                    ?.identify_customer === true,
-        );
-        if (needsCustomer && order?.customer_id == null) {
-            setError(t('reg.pay.needCustomer'));
-            openDialog('customer');
-            return;
-        }
+
+        setPendingOverpay(false);
 
         // Validate, then force the sale to disk before navigating to the receipt (REG-217): the
         // 250 ms write debounce would otherwise leave a crash window that loses the sale.
@@ -170,17 +258,17 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         }
         onValidated();
     }, [
+        cashRounding,
         catalog.paymentMethods,
         hasCash,
-        lines.length,
+        lines,
         onValidated,
         openDialog,
         order?.customer_id,
         orderUuid,
-        paidInFull,
         payments,
         t,
-        totals.change,
+        totals.roundedTotal,
     ]);
 
     const quickAmounts = useCallback(
@@ -242,11 +330,8 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                                 setSelectedPayment(payment.uuid);
                                 setBuffer('');
                             }}
-                            frozen={frozen}
-                            onRemove={() => {
-                                removePayment(payment.uuid);
-                                if (selectedPayment === payment.uuid) setSelectedPayment(null);
-                            }}
+                            frozen={frozen || cancelling !== null}
+                            onRemove={() => void removeLine(payment)}
                             onTerminal={(status) => setPaymentStatus(payment.uuid, status)}
                             terminal={
                                 catalog.paymentMethods.find((method) => method.id === payment.payment_method_id)
@@ -257,6 +342,20 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                 </ul>
 
                 {error ? <p className="rounded-pos bg-danger-soft p-3 text-danger-fg">{error}</p> : null}
+
+                {pendingOverpay ? (
+                    <div className="rounded-pos bg-warning-soft p-3" data-testid="overpay-confirm">
+                        <p className="font-semibold">{t('reg.pay.largeOverpay')}</p>
+                        <div className="mt-2 flex gap-2">
+                            <Button variant="ghost" onClick={() => setPendingOverpay(false)}>
+                                {t('common.cancel')}
+                            </Button>
+                            <Button variant="success" onClick={() => void validate(true)}>
+                                {t('common.confirm')}
+                            </Button>
+                        </div>
+                    </div>
+                ) : null}
             </section>
 
             <aside className="w-full shrink-0 space-y-2 till:w-80">
@@ -303,6 +402,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                         className="flex-1"
                         disabled={!paidInFull}
                         onClick={() => void validate()}
+                        data-testid="payment-validate"
                     >
                         {t('reg.pay.validate')}
                     </Button>
@@ -394,46 +494,11 @@ export function cashRounded(due: Decimal, cashRounding: CashRounding | null): De
     return new CashRoundingCalculator(cashRounding).apply(due).roundedTotal;
 }
 
-/**
- * Whether any live payment line on the order was tendered with a cash method (REG-176).
- *
- * Same exclusions as `settledPayments` in `totals.ts`, and for the same reason: a change line is
- * money going back out of the drawer, and a failed or cancelled line was never taken at all.
- * Neither is a tender, so neither earns the rounding concession.
- */
-export function hasCashTender(
-    payments: readonly PaymentRow[],
-    methods: readonly PaymentMethodRow[],
-): boolean {
-    return payments.some(
-        (payment) =>
-            !payment.is_change &&
-            payment.payment_status !== 'failed' &&
-            payment.payment_status !== 'cancelled' &&
-            methods.find((method) => method.id === payment.payment_method_id)?.is_cash_count === true,
-    );
-}
-
-/**
- * The validate decision (REG-176) — exported so the tests exercise *this*, not a copy of it.
- *
- * The tolerance is a cash concession: it exists because the drawer has no coin smaller than the
- * step. A card can be charged the exact amount, so a settlement with no cash in it stays on the
- * strict `due <= 0` test and cannot be closed a few cents short.
- */
-export function settlesOrder(
-    due: string,
-    payments: readonly PaymentRow[],
-    methods: readonly PaymentMethodRow[],
-    cashRounding: CashRounding | null,
-): boolean {
-    const tolerated = cashRounding !== null && hasCashTender(payments, methods);
-    return isFullyPaid(
-        due,
-        tolerated ? cashRounding.rounding : null,
-        tolerated ? cashRounding.method : undefined,
-    );
-}
+// `hasCashTender` and `settlesOrder` moved to `payment-prechecks.ts` — the precheck now derives
+// the settlement itself, so they had to live where it could reach them without an import cycle.
+// Re-exported because they are the screen's published decision and the tolerance tests import
+// them from here.
+export { hasCashTender, settlesOrder } from './payment-prechecks';
 
 /**
  * What a new payment line pre-fills with (REG-202) — exported for the same reason.

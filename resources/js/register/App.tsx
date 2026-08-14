@@ -278,6 +278,10 @@ export function App(): JSX.Element {
                         onPay={() => {
                             if (selectedOrderUuid !== null) setScreen('payment');
                         }}
+                        onFastPaid={() => {
+                            setReceiptOrder(selectedOrderUuid);
+                            setScreen('receipt');
+                        }}
                         onSend={() => void onSend()}
                         onFireCourse={(courseUuid) => void onFireCourse(courseUuid)}
                         onBill={() => void onBill()}

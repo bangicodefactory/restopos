@@ -20,6 +20,7 @@ function makeCustomer(id: number, uuid: string): CustomerRow {
         id,
         uuid,
         name: 'Chez Ahmed',
+        account_balance: '0.0000',
         company_name: null,
         email: null,
         phone: null,
