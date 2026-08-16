@@ -40,9 +40,26 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
  * server, offline against a cached hash, and `verified` carries which), and the PIN does not travel
  * with the order. What this closes is the gap that mattered: a claim naming somebody who could not
  * have granted it.
+ *
+ * ## What an approval covers (BAN-515)
+ *
+ * Two further checks, both about *how far* a genuine approval reaches rather than whether it is
+ * genuine. An approval naming a line in its `context` authorises that line and no other; one naming
+ * none stays order-scoped, because a client that has not been updated sends `context: {}` for
+ * approvals that are perfectly real. And a uuid may appear **once** per push: one approval is one
+ * thing a manager agreed to, and repeating the row is not repeating the agreement.
  */
 final readonly class ApprovalAuthority
 {
+    /**
+     * The `context` key naming the line an approval was granted for (BAN-515).
+     *
+     * Paired with `LINE_CONTEXT_KEY` in `resources/js/register/domain/approval.ts`. There is no
+     * shared home for a constant across the two languages, so the pairing is held by the tests at
+     * both ends rather than by the type system.
+     */
+    public const LineContextKey = 'line_uuid';
+
     public function __construct(
         private EmployeeAuthService $employees,
         private ConfigRepository $config,
@@ -64,6 +81,12 @@ final readonly class ApprovalAuthority
         $abilities = [];
         $accepted = [];
         $refusals = [];
+        // Every approval uuid this push has already spoken for. One approval is one thing a manager
+        // agreed to; sending the row twice is not two agreements (BAN-515).
+        $seen = [];
+        // ability => the lines it was granted for (BAN-515). An ability that appears here with an
+        // empty list was granted without naming a line and stays order-scoped.
+        $lines = [];
 
         foreach ($approvals as $approval) {
             $approval = (array) $approval;
@@ -76,6 +99,32 @@ final readonly class ApprovalAuthority
             if ($uuid === '' || $ability === '') {
                 continue;
             }
+
+            // The same uuid twice in one push. `replayed()` below asks whether an approval was spent
+            // on a *different order* and deliberately permits re-sending it with its own — the
+            // register re-pushes an order on every edit. That left the door open one level down:
+            // copy the row three times, name a different line in each, and one manager approval
+            // covered three lines. Probed at three, all three took the manual price.
+            //
+            // Worse, `recordApprovals()` skips a uuid already on the trail, so the audit log showed
+            // the manager approving **once** while three lines took it — the same way the dedupe hid
+            // thirty-nine cross-order replays before BAN-430 closed that.
+            //
+            // No real client can produce this: `persistence.ts` reads approval rows keyed by uuid
+            // out of Dexie, so a duplicate is something a device constructed.
+            if (isset($seen[$uuid])) {
+                $refusals[] = [
+                    'code' => 'approval_refused',
+                    'reason' => 'approval_duplicated',
+                    'uuid' => $uuid,
+                    'ability' => $ability,
+                    'manager_employee_id' => $employeeId,
+                ];
+
+                continue;
+            }
+
+            $seen[$uuid] = true;
 
             $reason = $this->reject($known, $employees->get($employeeId), $config, $ability, $employeeId)
                 ?? $this->replayed($uuid, $order);
@@ -94,9 +143,52 @@ final readonly class ApprovalAuthority
 
             $abilities[] = $ability;
             $accepted[] = $approval;
+
+            $line = $this->lineContext($approval);
+
+            if ($line === null) {
+                // Order-scoped. Recorded as such so a later line-scoped approval for the same
+                // ability cannot narrow what this one already granted — two approvals mean the
+                // manager pressed the button twice, and the wider one stands.
+                $lines[$ability] = [];
+
+                continue;
+            }
+
+            // Only narrow an ability that has not already been granted order-wide.
+            if (! array_key_exists($ability, $lines) || $lines[$ability] !== []) {
+                $lines[$ability][] = $line;
+            }
         }
 
-        return new ApprovalGrant(array_values(array_unique($abilities)), $accepted, $refusals);
+        return new ApprovalGrant(
+            array_values(array_unique($abilities)),
+            $accepted,
+            $refusals,
+            array_map(static fn (array $l): array => array_values(array_unique($l)), $lines),
+        );
+    }
+
+    /**
+     * The line an approval names, or null when it names none.
+     *
+     * The client writes `context: {"line_uuid": "…"}` when a manager approves an override on one
+     * line. Anything else — an absent context, a context about something other than a line — reads
+     * as order-scoped, which is what every client before BAN-515 sent.
+     *
+     * @param  array<string, mixed>  $approval
+     */
+    private function lineContext(array $approval): ?string
+    {
+        $context = $approval['context'] ?? null;
+
+        if (! is_array($context)) {
+            return null;
+        }
+
+        $line = $context[self::LineContextKey] ?? null;
+
+        return is_string($line) && $line !== '' ? $line : null;
     }
 
     /**

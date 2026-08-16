@@ -55,6 +55,15 @@ If any of those fail, the action is refused server-side even though the till acc
 the attempt is recorded against the cashier who pushed it — not against the manager whose name was
 used. **A till claiming a permission its manager does not have is worth knowing about.**
 
+### One approval covers one line
+
+When you approve an override on a particular line, that is the line it applies to. Approving a 90 %
+discount on the wine does not let the rest of the order carry one; the other lines come back at the
+normal limit, and the receipt shows what was actually applied.
+
+If a whole order genuinely needs the override, approve each line. It is more taps, and it means the
+record says what you actually agreed to rather than what the till inferred from it.
+
 ## The discount cap
 
 Discounts above the register's limit need approval. The limit is a percentage, set per register.

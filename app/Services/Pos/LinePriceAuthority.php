@@ -94,11 +94,12 @@ final readonly class LinePriceAuthority
             ? null
             : $this->employees->candidates($config)->firstWhere('id', $employeeId);
 
-        // An approval is a manager standing at the till granting exactly this, so it counts the
-        // same as the pusher holding the ability outright (BAN-430).
-        $mayOverride = $this->mayOverride($config, $pusher) || $grant->allows('line.price_override');
-        $mayDiscountAbove = $this->holds($config, $pusher, 'line.discount.above_limit')
-            || $grant->allows('line.discount.above_limit');
+        // What the *pusher* holds outright is a fact about the employee and settles for the whole
+        // push. What an *approval* grants is asked per line (BAN-515): these two used to be folded
+        // together up here, so one manager approval unlocked every line in the batch — approve one
+        // 90 % discount and all three lines carried one.
+        $pusherMayOverride = $this->mayOverride($config, $pusher);
+        $pusherMayDiscountAbove = $this->holds($config, $pusher, 'line.discount.above_limit');
         $discountLimit = (string) $this->config->get('pos.discount_limit_percent', 30);
 
         $prices = [];
@@ -175,6 +176,12 @@ final readonly class LinePriceAuthority
             // could send 100 and take the whole sale to zero. Cut back to the limit rather than
             // refused outright - the cashier is entitled to discount up to it, and a rejected line
             // is invisible to a client that reads the order's status (the BAN-406 lesson).
+            // An approval is a manager standing at the till granting exactly this, so it counts
+            // the same as the pusher holding the ability outright (BAN-430) — but only for the line
+            // it was granted for, when it named one (BAN-515).
+            $mayDiscountAbove = $pusherMayDiscountAbove || $grant->allows('line.discount.above_limit', $uuid);
+            $mayOverride = $pusherMayOverride || $grant->allows('line.price_override', $uuid);
+
             if (! $mayDiscountAbove) {
                 $asked = (string) ($command['discount'] ?? $command['discount_percent'] ?? '0');
 
@@ -186,6 +193,10 @@ final readonly class LinePriceAuthority
                         'line_uuid' => $uuid,
                         'client' => $asked,
                         'server' => $discountLimit,
+                        // Named when an approval exists but was granted elsewhere: "the manager
+                        // approved a discount" and "the manager approved *this* discount" are
+                        // different facts, and a cashier reading the first would be baffled.
+                        'reason' => $this->mismatchReason($grant, 'line.discount.above_limit', $uuid),
                     ];
                 }
             }
@@ -209,6 +220,7 @@ final readonly class LinePriceAuthority
                         'line_uuid' => $uuid,
                         'client' => (string) ($command['price_unit'] ?? ''),
                         'server' => $prices[$uuid] ?? null,
+                        'reason' => $this->mismatchReason($grant, 'line.price_override', $uuid),
                     ];
                 }
             }
@@ -231,6 +243,18 @@ final readonly class LinePriceAuthority
      * register left on a cashier's login cannot quietly reprice the catalogue, which is the thing
      * `restrict_price_control` exists to prevent.
      */
+    /**
+     * Why an override was refused, when an approval for it exists but does not cover this line.
+     *
+     * `null` when there is no approval at all — that is the ordinary "nobody authorised this" case
+     * and needs no elaboration. The interesting one is an approval that *was* granted, for a
+     * different line: without saying so, the response reads as though the manager was ignored.
+     */
+    private function mismatchReason(ApprovalGrant $grant, string $ability, string $lineUuid): ?string
+    {
+        return $grant->deniedByLineBinding($ability, $lineUuid) ? 'approval_names_another_line' : null;
+    }
+
     private function mayOverride(PosConfig $config, ?Employee $pusher): bool
     {
         if (! $config->restrict_price_control) {
