@@ -36,6 +36,14 @@ export type ApprovalGrant = { managerEmployeeId: number; pin: string };
  */
 export type ApprovalContext = { lineUuid?: string };
 
+/**
+ * The `context` key the server reads the line from.
+ *
+ * Paired with `ApprovalAuthority::LineContextKey` in PHP. There is no shared home for a constant
+ * across the two languages, so the pairing is held by the tests at both ends.
+ */
+export const LINE_CONTEXT_KEY = 'line_uuid';
+
 type Pending = { resolve: (grant: ApprovalGrant | null) => void; ability: string; context: ApprovalContext };
 
 let pending: Pending | null = null;
@@ -96,7 +104,7 @@ export async function submitApproval(
         // Was hardcoded `{}` — so the server could only ever bind an approval to the order, and one
         // approval unlocked every line in the push (BAN-515). Recording the line the manager was
         // actually standing in front of is the whole of what makes the narrower binding possible.
-        context: pending?.context.lineUuid === undefined ? {} : { line_uuid: pending.context.lineUuid },
+        context: pending?.context.lineUuid === undefined ? {} : { [LINE_CONTEXT_KEY]: pending.context.lineUuid },
     };
     await runtime.db.approvals.put(approval);
 

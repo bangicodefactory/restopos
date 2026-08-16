@@ -72,10 +72,25 @@ final readonly class ApprovalGrant
         return in_array($lineUuid, $bound, true);
     }
 
-    /** The lines an ability was granted for, empty when it was granted order-wide. @return list<string> */
-    public function linesFor(string $ability): array
+    /**
+     * Was this line refused *because the approval named a different one*?
+     *
+     * False when nothing was approved at all — that is the ordinary "nobody authorised this" case
+     * and needs no explaining. True only when a manager did approve the ability and bound it
+     * elsewhere, which is the answer a cashier staring at a corrected price actually needs.
+     *
+     * Asked rather than exposing the bindings, so the map stays private to the only object that
+     * should be reasoning about it.
+     */
+    public function deniedByLineBinding(string $ability, string $lineUuid): bool
     {
-        return $this->lines[$ability] ?? [];
+        if (! in_array($ability, $this->abilities, true)) {
+            return false;
+        }
+
+        $bound = $this->lines[$ability] ?? [];
+
+        return $bound !== [] && ! in_array($lineUuid, $bound, true);
     }
 
     /** @return list<array<string, mixed>> */

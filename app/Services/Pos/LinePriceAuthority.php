@@ -252,13 +252,7 @@ final readonly class LinePriceAuthority
      */
     private function mismatchReason(ApprovalGrant $grant, string $ability, string $lineUuid): ?string
     {
-        $bound = $grant->linesFor($ability);
-
-        if ($bound === [] || in_array($lineUuid, $bound, true)) {
-            return null;
-        }
-
-        return 'approval_names_another_line';
+        return $grant->deniedByLineBinding($ability, $lineUuid) ? 'approval_names_another_line' : null;
     }
 
     private function mayOverride(PosConfig $config, ?Employee $pusher): bool

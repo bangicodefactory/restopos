@@ -186,6 +186,99 @@ describe('an approval that names a line', function (): void {
     });
 });
 
+describe('one approval is one thing the manager agreed to (review of #55)', function (): void {
+    it('refuses the same approval re-sent naming another line', function (): void {
+        // The hole this feature had. `replayed()` asks whether an approval was spent on a
+        // *different order* and deliberately permits re-sending it with its own — the register
+        // re-pushes on every edit. So copying the row and naming a different line each time put
+        // one manager approval across three lines. Probed at three; all three took the price.
+        //
+        // And `recordApprovals()` skips a uuid already on the trail, so the audit log showed the
+        // manager approving once while three lines took it — the same way the dedupe hid
+        // thirty-nine cross-order replays before BAN-430 closed that.
+        $shared = (string) Str::uuid();
+        [$a, $b, $c] = [(string) Str::uuid(), (string) Str::uuid(), (string) Str::uuid()];
+
+        $copy = fn (string $line): array => [
+            'uuid' => $shared,
+            'ability' => 'line.price_override',
+            'manager_employee_id' => (int) $this->fx->manager->getKey(),
+            'verified' => 'online',
+            'at' => now()->toIso8601ZuluString(),
+            'context' => ['line_uuid' => $line],
+        ];
+
+        $response = pushManualPrices(
+            $this->fx,
+            [$a, $b, $c],
+            '0.01',
+            [$copy($a), $copy($b), $copy($c)],
+            (int) $this->fx->cashier->getKey(),
+        )->assertOk();
+
+        $prices = storedPrices();
+
+        // The first claim stands; the copies buy nothing.
+        expect($prices[$a])->toBe('0.0100')
+            ->and($prices[$b])->toBe('10.0000')
+            ->and($prices[$c])->toBe('10.0000');
+
+        $duplicated = array_values(array_filter(
+            warnings($response),
+            static fn (array $w): bool => ($w['reason'] ?? '') === 'approval_duplicated',
+        ));
+
+        // Reported, not silently dropped: a device sending the same approval three times is the
+        // single most interesting thing this mechanism can see.
+        expect($duplicated)->toHaveCount(2);
+    });
+
+    it('refuses a duplicate even when it names the same line', function (): void {
+        $shared = (string) Str::uuid();
+        $line = (string) Str::uuid();
+
+        $copy = fn (): array => [
+            'uuid' => $shared,
+            'ability' => 'line.price_override',
+            'manager_employee_id' => (int) $this->fx->manager->getKey(),
+            'verified' => 'online',
+            'at' => now()->toIso8601ZuluString(),
+            'context' => ['line_uuid' => $line],
+        ];
+
+        $response = pushManualPrices($this->fx, [$line], '0.01', [$copy(), $copy()], (int) $this->fx->cashier->getKey())
+            ->assertOk();
+
+        // Harmless in effect — the line was approved either way — but the count still has to be
+        // right, because the trail is what says how many overrides a manager granted.
+        expect(storedPrices()[$line])->toBe('0.0100');
+
+        $duplicated = array_values(array_filter(
+            warnings($response),
+            static fn (array $w): bool => ($w['reason'] ?? '') === 'approval_duplicated',
+        ));
+
+        expect($duplicated)->toHaveCount(1);
+    });
+
+    it('grants nothing when the context names a line that is not on the order', function (): void {
+        // A forged context cannot widen an approval — it only wastes it.
+        [$a, $b] = [(string) Str::uuid(), (string) Str::uuid()];
+
+        pushManualPrices(
+            $this->fx,
+            [$a, $b],
+            '0.01',
+            [claim('line.price_override', (int) $this->fx->manager->getKey(), (string) Str::uuid())],
+            (int) $this->fx->cashier->getKey(),
+        )->assertOk();
+
+        $prices = storedPrices();
+
+        expect($prices[$a])->toBe('10.0000')->and($prices[$b])->toBe('10.0000');
+    });
+});
+
 describe('an approval that names no line', function (): void {
     it('still authorises the whole order, as an older client expects', function (): void {
         // The compatibility case, and the reason this is not "match the line or refuse". A client
