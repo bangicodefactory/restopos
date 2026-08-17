@@ -10,6 +10,8 @@ features:
   - RST-036
   - RST-037
   - RST-038
+  - RST-032
+  - RST-039
 ---
 
 # Rearranging the room
@@ -85,3 +87,15 @@ it. Faster than adding and re-typing for a row of identical tables.
 **New floor** creates an empty one. **Duplicate floor** copies the floor you are on, with all of its
 tables — useful for a terrace that mirrors the dining room, or for setting up a seasonal layout you
 can adjust rather than build. **Rename** renames the one you are on.
+
+## What you cannot delete
+
+A table with an **open bill** cannot be deleted, and neither can a floor holding one. The refusal
+names the tables so you know where to look.
+
+This is not fussiness. Deleting an occupied table does not delete the order — it strands it. The bill
+keeps pointing at a table that no longer exists, so it disappears from the floor screen and from the
+ticket list, and nothing tells anyone it is still there. Settle or move the bill first, then delete.
+
+A free table on a busy floor deletes normally; the guard is about the table you are removing, not
+about the room being quiet.

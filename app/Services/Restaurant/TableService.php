@@ -421,4 +421,57 @@ final readonly class TableService
             childTableIds: $childIds,
         ));
     }
+
+    /**
+     * Tables on this floor that still hold a live bill (RST-032, RST-039).
+     *
+     * Deleting an occupied table strands its order: the row keeps a `restaurant_table_id` pointing at
+     * something that no longer exists, the floor screen cannot draw it, the ticket list filters by
+     * table and misses it, and the money on it is unreachable from every screen a waiter has. The
+     * bill does not vanish — which is worse, because nothing tells anyone it is there.
+     *
+     * Returns the table numbers rather than a boolean so the refusal can name them. "You cannot
+     * delete this floor" sends a manager hunting; "tables 4 and 7 still have open bills" is a job.
+     *
+     * @return list<string>
+     */
+    public function occupiedTablesOnFloor(int $floorId): array
+    {
+        return RestaurantTable::query()
+            ->where('restaurant_floor_id', $floorId)
+            ->whereIn('id', $this->tableIdsWithDrafts())
+            ->orderBy('table_number')
+            ->pluck('table_number')
+            ->map(static fn (mixed $number): string => (string) $number)
+            ->values()
+            ->all();
+    }
+
+    /** Does this one table still hold a live bill? */
+    public function tableHasDraftOrder(int $tableId): bool
+    {
+        return in_array($tableId, $this->tableIdsWithDrafts(), true);
+    }
+
+    /**
+     * Table ids carrying a draft order.
+     *
+     * Soft-deleted orders are excluded — a deleted bill is not money anybody is coming back for — but
+     * a draft on a *merged child* table counts through its parent, because that is where the bill
+     * actually lives and deleting the child would orphan the link.
+     *
+     * @return list<int>
+     */
+    private function tableIdsWithDrafts(): array
+    {
+        return Order::query()
+            ->whereNull('deleted_at')
+            ->where('state', OrderState::Draft->value)
+            ->whereNotNull('restaurant_table_id')
+            ->distinct()
+            ->pluck('restaurant_table_id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->values()
+            ->all();
+    }
 }

@@ -457,6 +457,7 @@ export function makeNomenclature(
 
 export function makeFloor(partial: Partial<RestaurantFloorRow> & Pick<RestaurantFloorRow, 'id'>): RestaurantFloorRow {
     return {
+        uuid: `floor-${partial.id}`,
         name: `Floor ${partial.id}`,
         sequence: partial.id,
         background_color: null,

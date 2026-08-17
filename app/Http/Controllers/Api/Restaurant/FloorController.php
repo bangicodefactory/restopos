@@ -105,6 +105,24 @@ final class FloorController extends Controller
     {
         $this->assertOwnedFloor($request, $floor);
 
+        // RST-032 — a floor holding a live bill cannot go. Deleting it strands every order on it:
+        // the rows keep a `restaurant_table_id` pointing at nothing, the floor screen cannot draw
+        // them and the ticket list filters them out, so the money is unreachable from every screen a
+        // waiter has. The bill does not disappear, which is worse, because nothing says it is there.
+        $occupied = $this->tables->occupiedTablesOnFloor((int) $floor->getKey());
+
+        if ($occupied !== []) {
+            return new JsonResponse([
+                'error' => [
+                    'code' => 'floor_occupied',
+                    // Named, not merely refused: "you cannot delete this floor" sends a manager
+                    // hunting through the room; a list of table numbers is a job they can finish.
+                    'message' => 'Still open on this floor: '.implode(', ', $occupied).'.',
+                    'tables' => $occupied,
+                ],
+            ], 422);
+        }
+
         $floor->delete();
 
         return new JsonResponse(null, 204);
@@ -165,6 +183,17 @@ final class FloorController extends Controller
     public function destroyTable(Request $request, RestaurantTable $table): JsonResponse
     {
         $this->assertOwnedTable($request, $table);
+
+        // RST-039 — same rule for one table. The order stays reachable rather than becoming a bill
+        // nobody can open.
+        if ($this->tables->tableHasDraftOrder((int) $table->getKey())) {
+            return new JsonResponse([
+                'error' => [
+                    'code' => 'table_occupied',
+                    'message' => 'That table still has an open bill.',
+                ],
+            ], 422);
+        }
 
         $table->delete();
 

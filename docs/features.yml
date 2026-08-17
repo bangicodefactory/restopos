@@ -195,6 +195,8 @@ features:
   RST-105: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-107: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-111: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
+  RST-032: { status: shipped, surface: user, manual: register/floor-plan.md#what-you-cannot-delete }
+  RST-039: { status: shipped, surface: user, manual: register/floor-plan.md#what-you-cannot-delete }
   RST-072: { status: shipped, surface: user, manual: register/orders.md#guests }
   RST-073: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
   RST-074: { status: shipped, surface: user, manual: todo }

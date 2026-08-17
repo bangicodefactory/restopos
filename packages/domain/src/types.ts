@@ -600,6 +600,15 @@ export type PosConfigRow = {
 
 export type RestaurantFloorRow = {
     id: number;
+    /**
+     * The key every floor route binds on.
+     *
+     * `HasUuid::resolveRouteBindingQuery` resolves uuids only, and unlike `table` there is no
+     * permissive `Route::bind` for `floor` — deliberately, since BAN-499 pinned the back office to
+     * uuid-only addressing. So a client holding just the numeric id cannot reach the endpoint at all
+     * (BAN-452).
+     */
+    uuid: string;
     pos_config_ids: number[];
     name: string;
     background_color: string | null;

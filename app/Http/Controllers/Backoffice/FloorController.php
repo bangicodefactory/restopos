@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Restaurant\FloorRequest;
 use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
+use App\Services\Restaurant\TableService;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -34,7 +35,10 @@ use Inertia\Response;
  */
 final class FloorController extends Controller
 {
-    public function __construct(private readonly ConnectionInterface $connection) {}
+    public function __construct(
+        private readonly ConnectionInterface $connection,
+        private readonly TableService $tables,
+    ) {}
 
     public function index(): Response
     {
@@ -148,7 +152,30 @@ final class FloorController extends Controller
             }
         }
         $removed = $existing->keys()->diff($keptIds);
+
         if ($removed->isNotEmpty()) {
+            // RST-039 — the third deletion path, and the quietest. Dragging a table out of the plan
+            // and pressing save deletes it, so the same rule the API endpoints enforce has to hold
+            // here too: an occupied table strands its bill, and this route would do it without even
+            // the confirmation the delete button asks for.
+            //
+            // The whole save is refused rather than the one table skipped. Silently keeping a table
+            // the manager removed would mean the plan they are looking at is not the plan that was
+            // stored, and they would find out the next time somebody opened the floor screen.
+            $occupied = RestaurantTable::query()
+                ->whereIn('id', $removed->all())
+                ->get()
+                ->filter(fn (RestaurantTable $t): bool => $this->tables->tableHasDraftOrder((int) $t->getKey()))
+                ->map(static fn (RestaurantTable $t): string => (string) $t->table_number)
+                ->values()
+                ->all();
+
+            if ($occupied !== []) {
+                throw ValidationException::withMessages([
+                    'tables' => 'Still open, so they cannot be removed: '.implode(', ', $occupied).'.',
+                ]);
+            }
+
             RestaurantTable::query()->whereIn('id', $removed->all())->get()
                 ->each(static fn (RestaurantTable $t): ?bool => $t->delete());
         }
