@@ -6,12 +6,14 @@ use App\Enums\DeviceType;
 use App\Enums\PrepLineState;
 use App\Enums\PrepOrderState;
 use App\Enums\PrintJobState;
+use App\Events\Kitchen\KitchenTicketCreated;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\PosDevice;
 use App\Services\Device\DeviceTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
@@ -486,6 +488,127 @@ it('does not print an order note to a station that never saw the order', functio
 
     // The bar never printed this order, so it has nothing to amend.
     expect(DB::table('preparation_print_jobs')->where('pos_printer_id', $bar)->count())->toBe(0);
+});
+
+/**
+ * KDS-053, the display half (BAN-500).
+ *
+ * BAN-454 taught the printers that an order note routes to no category. The screens never got the
+ * lesson, so `fanOutToDisplays` bailed on the empty routed set and a kitchen running on displays
+ * alone — no preparation printers at all — never learned that "no onions" was added after the send.
+ * The one above proves the printer path; these prove the screen.
+ */
+it('updates the card on a display already showing the order when only the note changed', function (): void {
+    $uuid = kitchenOrder($this->fx);
+    $displayId = $this->fx->display->getKey();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->where('prep_display_id', $displayId)->value('order_note'))->toBeNull();
+
+    $lineCountBefore = DB::table('prep_order_lines')->count();
+
+    // The waiter comes back with an allergy. No line changes.
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'ALLERGY: no onions']);
+
+    $delta = $this->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/orders/{$uuid}/preparation-changes")
+        ->assertOk();
+
+    expect($delta->json('changes'))->toBe([])
+        ->and($delta->json('order_note_changed'))->toBeTrue();
+
+    $sent = $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect($sent->json('prep_orders'))->toHaveCount(1);
+
+    expect(DB::table('prep_orders')->where('prep_display_id', $displayId)->value('order_note'))
+        ->toBe('ALLERGY: no onions');
+
+    // A note is not a line. Writing one here would put a phantom item on the cook's card.
+    expect(DB::table('prep_order_lines')->count())->toBe($lineCountBefore);
+});
+
+it('broadcasts the note change so an open board re-reads it', function (): void {
+    Event::fake([KitchenTicketCreated::class]);
+
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    Event::assertDispatchedTimes(KitchenTicketCreated::class, 1);
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    // The second event is the whole point: `ingestTicket` sees a card it already holds and pulls the
+    // authoritative row, which is how the note reaches a screen nobody is going to refresh by hand.
+    Event::assertDispatchedTimes(KitchenTicketCreated::class, 2);
+});
+
+it('serves the amended note to the board a cook is actually looking at', function (): void {
+    // The rows above are the mechanism; this is the cook reading the screen. Fetched the way the
+    // client fetches it — `store.ts` calls `api.board(display.token)` with no `since`, so a full
+    // board keyed on the access token is the request that actually happens after the nudge.
+    $uuid = kitchenOrder($this->fx);
+    $token = $this->fx->display->access_token;
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders")
+        ->assertOk()
+        ->assertJsonPath('orders.0.order_note', null);
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'ALLERGY: no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $this->withHeaders($this->kdsHeaders)->getJson("/api/kitchen/{$token}/orders")
+        ->assertOk()
+        ->assertJsonCount(1, 'orders')
+        ->assertJsonPath('orders.0.order_note', 'ALLERGY: no onions');
+});
+
+it('does not give a card to a display that never saw the order', function (): void {
+    // The bar screen is scoped to a category this order never touches. BAN-454 made the same ruling
+    // for printers — a station with nothing to amend gets nothing — and the two paths should agree
+    // deliberately rather than by accident.
+    $otherCategory = DB::table('pos_categories')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Bar',
+        'path' => '/bar',
+        'sequence' => 20,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $bar = DB::table('prep_displays')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Bar screen',
+        'access_token' => Str::lower(Str::random(32)),
+        'show_all_categories' => false,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('pos_config_prep_display')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'prep_display_id' => $bar,
+    ]);
+    DB::table('pos_category_prep_display')->insert([
+        'prep_display_id' => $bar,
+        'pos_category_id' => $otherCategory,
+    ]);
+
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->where('prep_display_id', $bar)->count())->toBe(0);
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->where('prep_display_id', $bar)->count())->toBe(0);
 });
 
 it('routes a cancelled combo child to the station that was cooking it', function (): void {

@@ -699,10 +699,26 @@ final readonly class PreparationService
 
             $routed = $delta->forCategories($categoryIds, (bool) $display->show_all_categories);
 
-            if ($routed === []) {
+            // KDS-053, display half. BAN-454 taught the printers that an order note is not a line —
+            // it routes to no category, so `$routed` is empty for every station and bailing here
+            // threw the change away. The screens never got the same lesson: a kitchen running on
+            // displays alone, with no preparation printers, never learned that "ALLERGY: no onions"
+            // was added after the send. The food went out with the onions.
+            //
+            // Same rule as the printer path, deliberately rather than by accident: the note goes to
+            // the displays already showing this order, because those are the cooks who can still act
+            // on it. A display that never received the order has nothing to amend, and giving it a
+            // card now would put a lineless ticket on a screen that was never cooking the dish.
+            $noteOnly = $routed === [] && $delta->orderNoteChanged && $this->hasCard($order, (int) $display->id);
+
+            if ($routed === [] && ! $noteOnly) {
                 continue;
             }
 
+            // Passed the empty `$routed` unchanged. `upsertPrepOrder` then takes its update branch —
+            // guaranteed to exist, since `hasCard` is what got us here — refreshes `order_note`,
+            // writes no lines, and broadcasts. The card the cook is looking at already carries the
+            // note; the ticket event is the nudge that makes the open board re-read it.
             $out[] = $this->upsertPrepOrder($order, $config, $display, $routed);
         }
 
@@ -880,6 +896,20 @@ final readonly class PreparationService
         }
 
         return $jobs;
+    }
+
+    /**
+     * Is this display already showing this order? (KDS-053)
+     *
+     * The display counterpart of {@see hasPrinted()}. A `prep_orders` row is the screen's equivalent
+     * of a printed ticket: it is the evidence that this station was told to cook something.
+     */
+    private function hasCard(Order $order, int $displayId): bool
+    {
+        return $this->connection->table('prep_orders')
+            ->where('prep_display_id', $displayId)
+            ->where('pos_order_id', $order->getKey())
+            ->exists();
     }
 
     /** Has this printer already been sent anything for this order? (KDS-053) */
