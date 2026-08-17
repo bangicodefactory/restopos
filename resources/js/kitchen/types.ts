@@ -109,6 +109,7 @@ export type KitchenTicket = {
     tracking_number: string | null;
     table_label: string | null;
     guest_count: number | null;
+    order_note: string | null;
     fired_at: string | null;
     lines: Array<
         Pick<

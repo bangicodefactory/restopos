@@ -809,6 +809,10 @@ final readonly class PreparationService
             'tracking_number' => $order->tracking_number,
             'table_label' => $this->tableLabel($order),
             'guest_count' => (int) $order->guest_count,
+            // The whole content of a note-update ticket, and it was missing. Every other field here
+            // describes the order; the note is the one the amendment exists to carry, and without it
+            // a client that painted the ticket had nothing to show (review of #58).
+            'order_note' => $order->general_customer_note,
             'fired_at' => $now->toIso8601ZuluString('millisecond'),
             'lines' => $lines,
         ];

@@ -567,6 +567,25 @@ it('serves the amended note to the board a cook is actually looking at', functio
         ->assertJsonPath('orders.0.order_note', 'ALLERGY: no onions');
 });
 
+it('puts the note on the wire, not just in the row (review of #58)', function (): void {
+    // The broadcast carried table, guests and lines but not the note — so the one thing a note-update
+    // ticket exists to say was the one thing it did not say. Faked before the first send: the
+    // dispatcher is constructor-injected, so a service resolved earlier keeps the real one.
+    Event::fake([KitchenTicketCreated::class]);
+
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'ALLERGY: no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    Event::assertDispatched(
+        KitchenTicketCreated::class,
+        static fn (KitchenTicketCreated $e): bool => $e->ticket['lines'] === []
+            && ($e->ticket['order_note'] ?? null) === 'ALLERGY: no onions',
+    );
+});
+
 it('does not give a card to a display that never saw the order', function (): void {
     // The bar screen is scoped to a category this order never touches. BAN-454 made the same ruling
     // for printers — a station with nothing to amend gets nothing — and the two paths should agree
