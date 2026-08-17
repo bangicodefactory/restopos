@@ -219,6 +219,7 @@ features:
 
   # Tips (RST-120 … RST-139) — user
   RST-121: { status: shipped, surface: user, manual: todo }
+  RST-125: { status: shipped, surface: user, manual: register/payments.md#tips }
   RST-127: { status: shipped, surface: user, manual: todo }
 
   # Restaurant order lifecycle extras (RST-140 … RST-159) — user
