@@ -190,14 +190,27 @@ const FEATURE_RANGE = /\b((?:REG|RST|KDS|SLF|BOF|XCT)-\d{3})\s*(?:…|\.{2,3}|�
 export function citedFeatureIds(diff) {
     const cited = [];
     let file = '';
+    let previous = '';
 
     for (const line of diff.split('\n')) {
-        if (line.startsWith('+++ ')) {
+        // A file header only where a unified diff actually puts one: `+++` on the line *after* `---`.
+        //
+        // Matching `+++ ` anywhere was wrong in a way that **hides** claims rather than mislabelling
+        // them. An added line whose own content begins with `++ ` — `++ $i;` at column 0 — reaches
+        // here as `+++ $i;`, and taking that for a header set the current file to `$i;`. `isWatched`
+        // then rejects that as an unwatched path, and every id in the rest of that hunk is dropped
+        // without a word. A guard that quietly stops looking is worse than no guard, so the shape is
+        // checked rather than the prefix.
+        const isHeader = line.startsWith('+++ ') && previous.startsWith('--- ');
+
+        previous = line;
+
+        if (isHeader) {
             file = line.slice(4).replace(/^b\//, '').trim();
             continue;
         }
 
-        if (!line.startsWith('+') || line.startsWith('+++')) continue;
+        if (!line.startsWith('+')) continue;
 
         const ranged = new Set();
 

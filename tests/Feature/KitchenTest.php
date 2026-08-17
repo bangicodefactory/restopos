@@ -1088,3 +1088,31 @@ it('keeps a preset the venue does own', function (): void {
 
     expect((int) Order::query()->where('uuid', $uuid)->value('pos_preset_id'))->toBe($mine);
 });
+
+it('picks up a customer attached after the order was already sent (review of #59)', function (): void {
+    // The update branch of `upsertPrepOrder` refreshes `customer_name`, and nothing covered it. A
+    // collection order is very often rung up first and named second — the guest gives their name
+    // while the kitchen is already cooking — so the card has to learn it late or the pass calls out
+    // a number nobody answers to.
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->value('customer_name'))->toBeNull();
+
+    $customer = DB::table('customers')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Amina B.',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    Order::query()->where('uuid', $uuid)->update([
+        'customer_id' => $customer,
+        'general_customer_note' => 'no onions',
+    ]);
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->value('customer_name'))->toBe('Amina B.');
+});
