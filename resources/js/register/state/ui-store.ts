@@ -64,6 +64,11 @@ export type UiSlice = {
      * synced, which the server re-checks on ingest — this is what lets the screen stop refusing the
      * edit once the manager has said yes. Keyed by line, because that is the scope the approval was
      * granted at; a removed line's uuid never comes back, so nothing has to clear it.
+     *
+     * Deliberately **not** persisted: this store is plain zustand, so a reload mid-order asks again
+     * even though the approval itself is still in IndexedDB and will still be pushed. Re-asking is
+     * the conservative direction, and a manager standing at the till is cheaper than a screen that
+     * believes it has permission it can no longer show the provenance of.
      */
     lineApprovals: Record<string, string[]>;
 
@@ -83,10 +88,9 @@ export type UiSlice = {
     setReceiptOrder: (orderUuid: string | null) => void;
     noteScan: () => void;
     grantLineApproval: (lineUuid: string, ability: string) => void;
-    hasLineApproval: (lineUuid: string | null, ability: string) => boolean;
 };
 
-export const useUiStore = createPosStore<UiSlice>((set, get) => ({
+export const useUiStore = createPosStore<UiSlice>((set) => ({
     screen: 'products',
     pane: 'catalog',
     numpadMode: 'quantity',
@@ -197,6 +201,4 @@ export const useUiStore = createPosStore<UiSlice>((set, get) => ({
             if (!held.includes(ability)) state.lineApprovals[lineUuid] = [...held, ability];
         }),
 
-    hasLineApproval: (lineUuid: string | null, ability: string): boolean =>
-        lineUuid !== null && (get().lineApprovals[lineUuid]?.includes(ability) ?? false),
 }));

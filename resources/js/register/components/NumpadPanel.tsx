@@ -55,11 +55,15 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
     const previous = useRef('');
 
     const grantLineApproval = useUiStore((state) => state.grantLineApproval);
+    // Subscribed to rather than read through the store's own getter, so the panel re-renders the
+    // moment a grant lands. A `get()`-based helper would answer correctly and never repaint.
     const lineApprovals = useUiStore((state) => state.lineApprovals);
     const [refused, setRefused] = useState<string | null>(null);
 
-    const approvedHere = (ability: string): boolean =>
-        line !== null && (lineApprovals[line.uuid]?.includes(ability) ?? false);
+    const approvedHere = useCallback(
+        (ability: string): boolean => line !== null && (lineApprovals[line.uuid]?.includes(ability) ?? false),
+        [line, lineApprovals],
+    );
 
     // The pusher's own right, or a manager's approval standing on *this* line.
     const allowPrice =
@@ -142,7 +146,10 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
         async (ability: string, then?: () => void) => {
             if (!line) return;
 
-            const granted = await requestApproval(ability, { lineUuid: line.uuid });
+            // Both, and the order is the load-bearing one: without it `persistence.ts` never finds
+            // the row, so the manager's approval stays on this device and the server reprices the
+            // line as though nobody had authorised it.
+            const granted = await requestApproval(ability, { lineUuid: line.uuid, orderUuid: line.order_uuid });
 
             if (granted === null) return;
 

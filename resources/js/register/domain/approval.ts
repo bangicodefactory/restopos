@@ -28,13 +28,22 @@ import { useUiStore } from '../state/ui-store';
 export type ApprovalGrant = { managerEmployeeId: number; pin: string };
 
 /**
- * What the approval was granted *for* (BAN-515).
+ * What the approval was granted *for* (BAN-515, BAN-518).
  *
  * `lineUuid` narrows the approval to one line. Omit it for an ability that is not about a line —
  * a session close, a cash-movement delete — and the approval stays order-scoped, which is what the
  * server assumes when no context arrives.
+ *
+ * **`orderUuid` is what gets the approval off the device.** `persistence.ts` attaches approvals to
+ * an order push with `db.approvals.where('order_uuid').equals(orderUuid)`, so a row written without
+ * one is never sent: the till shows the override, the server reprices the line because it saw no
+ * approval, and the audit trail never records that a manager authorised anything — the one fact the
+ * PIN exists to capture (BAN-413).
+ *
+ * The two original callers are session-level and hand the manager's credentials straight to an HTTP
+ * endpoint, so they never needed it. Anything riding the order push does.
  */
-export type ApprovalContext = { lineUuid?: string };
+export type ApprovalContext = { lineUuid?: string; orderUuid?: string };
 
 /**
  * The `context` key the server reads the line from.
@@ -94,9 +103,13 @@ export async function submitApproval(
 
     if (!result.ok) return { ok: false, reason: result.reason ?? 'denied' };
 
+    // The context wins over the attempt: `requestApproval` is where the caller says what the
+    // approval is *for*, and the dialog that calls `submitApproval` knows nothing about orders.
+    const orderUuid = pending?.context.orderUuid ?? attempt.orderUuid ?? null;
+
     const approval: ApprovalRow = {
         uuid: asUuid(generateUuid()),
-        order_uuid: attempt.orderUuid ? asUuid(attempt.orderUuid) : null,
+        order_uuid: orderUuid === null ? null : asUuid(orderUuid),
         ability,
         manager_employee_id: attempt.managerEmployeeId,
         verified: result.verified ?? 'offline',

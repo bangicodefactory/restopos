@@ -92,11 +92,14 @@ function signInCashier(abilities: string[] = ['line.discount']): void {
     });
 }
 
+let lastOrderUuid = '';
+
 async function selectedLine(): Promise<string> {
     const uuid = await createOrder();
     useOrderStore.getState().selectOrder(uuid);
     const lineUuid = addLine({ orderUuid: uuid, variantId: VARIANT });
     useOrderStore.getState().selectLine(lineUuid);
+    lastOrderUuid = uuid;
 
     return lineUuid;
 }
@@ -201,6 +204,26 @@ describe('a price the cashier may not set', () => {
 
         expect(row?.ability).toBe(PRICE_OVERRIDE);
         expect(row?.context).toEqual({ line_uuid: lineUuid });
+    });
+
+    it('attaches the approval to the order, which is what actually sends it (review of #56)', async () => {
+        // The bug every other test in this file missed. `persistence.ts` collects approvals for a
+        // push with `db.approvals.where('order_uuid').equals(orderUuid)`, and the row was written
+        // with `order_uuid: null` — so the till showed the override, the server saw no approval and
+        // repriced the line, and the audit trail never recorded that a manager authorised anything.
+        //
+        // Asserting the *query the push uses*, not just that a row exists somewhere.
+        const lineUuid = await selectedLine();
+        panel();
+
+        await userEvent.click(screen.getByTestId('numpad-mode-price'));
+        await approveAs('9999');
+
+        const forThisOrder = await db.approvals.where('order_uuid').equals(lastOrderUuid).toArray();
+
+        expect(forThisOrder).toHaveLength(1);
+        expect(forThisOrder[0]?.ability).toBe(PRICE_OVERRIDE);
+        expect(forThisOrder[0]?.context).toEqual({ line_uuid: lineUuid });
     });
 
     it('changes nothing when the manager is refused', async () => {
