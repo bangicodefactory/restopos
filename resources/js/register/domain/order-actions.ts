@@ -152,6 +152,15 @@ export type NewOrderInput = {
     presetTime?: string | null;
     pricelistId?: number | null;
     fiscalPositionId?: number | null;
+    /**
+     * Who decided the position being copied in (REG-175).
+     *
+     * A refund and a split both carry the parent's mapping across. Recording that as `default` — the
+     * value a fresh order gets — throws the provenance away, so attaching a customer to the split
+     * silently overrode a position a cashier had chosen by hand on the parent: the very defect the
+     * ladder exists to stop, walking in through the copy.
+     */
+    fiscalPositionSource?: FiscalPositionSource;
     customerId?: number | null;
     floatingOrderName?: string | null;
     isRefund?: boolean;
@@ -200,7 +209,7 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
         // order whose pricelist was cleared must not silently re-apply the register default, so
         // the key's presence — not its value — decides whether the config default applies.
         pricelist_id: 'pricelistId' in input ? (input.pricelistId ?? null) : (catalog.config?.pricelist_id ?? null),
-        fiscal_position_source: 'default',
+        fiscal_position_source: input.fiscalPositionSource ?? 'default',
         fiscal_position_id:
             'fiscalPositionId' in input
                 ? (input.fiscalPositionId ?? null)
@@ -1422,6 +1431,7 @@ export async function createRefundOrder(
         customerId: original.customer_id,
         pricelistId: original.pricelist_id,
         fiscalPositionId: original.fiscal_position_id,
+        fiscalPositionSource: original.fiscal_position_source ?? 'default',
         presetId: original.pos_preset_id,
     });
 
@@ -1507,6 +1517,7 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
         presetId: original.pos_preset_id,
         pricelistId: original.pricelist_id,
         fiscalPositionId: original.fiscal_position_id,
+        fiscalPositionSource: original.fiscal_position_source ?? 'default',
         customerId: original.customer_id,
         splitFromOrderUuid: orderUuid,
         splitLetter: letter,

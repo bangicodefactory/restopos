@@ -41,6 +41,7 @@ import {
     setDiscount,
     setEmployee,
     setFiscalPosition,
+    splitOrder,
     setGuestCount,
     setLineCourse,
     setPaymentAmount,
@@ -1313,5 +1314,53 @@ describe('cancelling a future-preset order', () => {
         discardOrder(orderUuid);
 
         expect(useOrderStore.getState().orders[orderUuid]).toBeDefined();
+    });
+});
+
+/**
+ * REG-175, the copy paths (review of #63).
+ *
+ * A refund and a split both carry the parent's tax mapping across. Recording that as `default` — the
+ * value a fresh order gets — threw the provenance away, so attaching a customer to the split
+ * silently overrode a position the cashier had chosen by hand on the parent. The exact defect the
+ * precedence ladder exists to stop, walking in through the copy.
+ */
+describe('a copied fiscal position remembers who chose it', () => {
+    it('carries a manual choice onto a split, where a customer cannot undo it', async () => {
+        const orderUuid = await createOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        setFiscalPosition(orderUuid, 9);
+
+        const lineUuid = linesOf(useOrderStore.getState(), orderUuid)[0]!.uuid;
+        const splitUuid = await splitOrder(orderUuid, { [lineUuid]: 1 });
+
+        expect(splitUuid).not.toBeNull();
+        expect(useOrderStore.getState().orders[splitUuid!]?.fiscal_position_source).toBe('manual');
+
+        // The move that used to overwrite it.
+        setFiscalPosition(splitUuid!, 3, 'partner');
+
+        expect(useOrderStore.getState().orders[splitUuid!]?.fiscal_position_id).toBe(9);
+    });
+
+    it('carries it onto a refund too', async () => {
+        const orderUuid = await createOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+        setFiscalPosition(orderUuid, 9);
+
+        const lineUuid = linesOf(useOrderStore.getState(), orderUuid)[0]!.uuid;
+        const refundUuid = await createRefundOrder(orderUuid, { [lineUuid]: 1 });
+
+        expect(useOrderStore.getState().orders[refundUuid!]?.fiscal_position_source).toBe('manual');
+    });
+
+    it('leaves an ordinary new order open to any source', async () => {
+        const orderUuid = await createOrder();
+
+        expect(useOrderStore.getState().orders[orderUuid]?.fiscal_position_source).toBe('default');
+
+        setFiscalPosition(orderUuid, 3, 'partner');
+
+        expect(useOrderStore.getState().orders[orderUuid]?.fiscal_position_id).toBe(3);
     });
 });
