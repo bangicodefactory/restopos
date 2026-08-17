@@ -12,6 +12,7 @@ import { REGISTER_EVENTS, reverbConfig, sessionChannel } from './realtime';
 import { publishDisplay } from './domain/customer-display-bus';
 import { applySessionClosedBroadcast } from './domain/session-actions';
 import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
+import { splitRemainder } from './domain/split-order';
 import { cleanCourses, createOrder, markPrinted } from './domain/order-actions';
 import { print } from './domain/printing';
 import { buildBill } from './domain/receipt';
@@ -316,6 +317,12 @@ export function App(): JSX.Element {
                 {screen === 'receipt' && receiptOrderUuid !== null ? (
                     <ReceiptScreen
                         orderUuid={receiptOrderUuid}
+                        remainder={splitRemainder(receiptOrderUuid)}
+                        onContinueSplit={(uuid) => {
+                            markPrinted(receiptOrderUuid);
+                            selectOrder(uuid);
+                            setScreen('payment');
+                        }}
                         onBack={() => setScreen('products')}
                         onNewOrder={async () => {
                             markPrinted(receiptOrderUuid);

@@ -17,6 +17,10 @@ features:
   - REG-218
   - REG-219
   - REG-220
+  - RST-104
+  - RST-105
+  - RST-107
+  - RST-111
 ---
 
 # Taking payment
@@ -148,3 +152,40 @@ the line says it took nothing.
 An order left open across a change to the till's settings can come back holding a payment method
 the restaurant no longer accepts. Those lines are dropped when the payment screen opens; the amount
 returns as owed and you tender it again with something that exists.
+
+## Splitting a bill
+
+Three ways, and the right one depends on what the table is asking for.
+
+### By item
+
+"She had the fish, I had the steak." Tap each line to move it — one unit per tap — onto a second
+bill. Each bill then lists what that person actually ate, and prints its own correct total.
+
+Once the second bill is paid, the till offers to go straight back to what is left rather than to a
+blank order, so a table of six is six taps and six payments, not six searches for the same tab.
+
+### Evenly
+
+"Just split it four ways." Choose how many, and the till shows each share. Take them in whatever
+order the cards come across the counter.
+
+The shares always add up to exactly the bill. Where it does not divide cleanly the odd penny goes to
+whoever pays first, so the last person is never left with the larger amount.
+
+### By amount
+
+"Put twenty on this card." Type the amount and take it. Whatever is left stays on the bill for the
+next person.
+
+You cannot take more than is outstanding — typing more simply settles it, rather than making change
+against a table that has not finished paying.
+
+### What is happening underneath
+
+Splitting **by item** makes a second bill. Splitting **evenly** or **by amount** does not: the bill
+stays whole and you collect several payments against it. That is deliberate — four people halving a
+table do not each own a quarter of a pizza, and inventing four part-bills would put tax figures on
+paper that match nothing anybody ordered.
+
+Practically, it means the running total you see is always the real remaining balance.

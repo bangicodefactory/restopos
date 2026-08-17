@@ -124,6 +124,7 @@ export type ReceiptLabels = {
     order: string;
     table: string;
     guests: string;
+    gratuity: string;
     cashier: string;
     customer: string;
     vat: string;
@@ -173,6 +174,7 @@ export const DEFAULT_LABELS: ReceiptLabels = {
     order: 'Order',
     table: 'Table',
     guests: 'Guests',
+    gratuity: 'Gratuity suggestions',
     cashier: 'Served by',
     customer: 'Customer',
     vat: 'VAT',

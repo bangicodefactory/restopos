@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPrepTicketDoc } from '../src/receipt/build';
+import { buildBillDoc, buildPrepTicketDoc } from '../src/receipt/build';
 import { toPlainText } from '../src/escpos/serializer';
 import { DEFAULT_LABELS } from '../src/receipt/types';
 import type { PrepTicketView, ReceiptConfigView } from '../src/receipt/types';
@@ -89,5 +89,63 @@ describe('the guest count on a prep ticket', () => {
 
         expect(text).toContain('Pasta');
         expect(text).toContain('T4');
+    });
+});
+
+/**
+ * RST-111 (BAN-487) — suggested gratuity on the proforma.
+ *
+ * The bill is the paper the customer is holding when they decide, so the suggestion has to be on
+ * *that*, not on the receipt they get afterwards. Computed on the printed total so the arithmetic a
+ * guest can check by hand agrees with the paper.
+ */
+describe('gratuity on the proforma', () => {
+    function bill(gratuity: readonly number[]): string {
+        const order = {
+            uuid: 'o-1',
+            name: 'Bar/00012',
+            reference: 'Bar/00012',
+            trackingNumber: null,
+            orderedAt: '2026-08-17T18:30:00.000Z',
+            cashierName: null,
+            customerName: null,
+            customerVat: null,
+            tableName: 'T4',
+            guestCount: 4,
+            presetName: null,
+            presetTime: null,
+            lines: [],
+            taxes: [],
+            payments: [],
+            amountTotal: '40.00',
+            amountUntaxed: '40.00',
+            amountTax: '0.00',
+            amountRounding: '0.00',
+            amountDiscount: '0.00',
+            amountPaid: '0.00',
+            amountChange: '0.00',
+            generalNote: null,
+            isRefund: false,
+            refundedOrderName: null,
+            copy: 1,
+        } as unknown as Parameters<typeof buildBillDoc>[0];
+
+        return toPlainText(buildBillDoc(order, CONFIG, gratuity));
+    }
+
+    it('prints nothing at all unless a venue asks for it', () => {
+        // A tip line is a cultural default, not a universal one. Printed where tipping is not
+        // customary it reads as a demand, so the empty list is the default.
+        expect(bill([])).not.toContain(DEFAULT_LABELS.gratuity);
+    });
+
+    it('prints the total including each suggested percentage', () => {
+        const text = bill([10, 15]);
+
+        expect(text).toContain(DEFAULT_LABELS.gratuity);
+        // 40.00 + 10 % = 44.00, + 15 % = 46.00 — the figure the guest would actually pay, not the
+        // tip in isolation, which is the number they have to do arithmetic on.
+        expect(text).toContain('44');
+        expect(text).toContain('46');
     });
 });

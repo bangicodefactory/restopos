@@ -10,7 +10,7 @@ import { useT } from '../i18n';
 import { markPrinted } from '../domain/order-actions';
 import { print } from '../domain/printing';
 import { buildReceipt } from '../domain/receipt';
-import { useCatalog, useOrder } from '../hooks/use-register';
+import { useCatalog, useMoney, useOrder } from '../hooks/use-register';
 import { useOrderStore } from '../state/order-store';
 
 /**
@@ -29,10 +29,26 @@ import { useOrderStore } from '../state/order-store';
 export type ReceiptScreenProps = {
     orderUuid: string;
     onNewOrder: () => void;
+    /**
+     * The bill this one was split off, when it still owes money (RST-107).
+     *
+     * Absent on an ordinary sale. Present, it is the *first* thing offered: after settling one
+     * guest's share the waiter's next act is almost always the next guest, and sending them to a
+     * blank order means finding the table again for every person at it.
+     */
+    remainder?: { orderUuid: string; due: string } | null;
+    onContinueSplit?: (orderUuid: string) => void;
     onBack: () => void;
 };
 
-export function ReceiptScreen({ orderUuid, onNewOrder, onBack }: ReceiptScreenProps): JSX.Element {
+export function ReceiptScreen({
+    orderUuid,
+    onNewOrder,
+    onBack,
+    remainder = null,
+    onContinueSplit,
+}: ReceiptScreenProps): JSX.Element {
+    const money = useMoney();
     const t = useT();
     const catalog = useCatalog();
     const order = useOrder(orderUuid);
@@ -95,7 +111,24 @@ export function ReceiptScreen({ orderUuid, onNewOrder, onBack }: ReceiptScreenPr
                 </Button>
                 <p className="text-xs text-slate-500">{t('reg.receipt.notImplemented')}</p>
 
-                <Button size="xl" block variant="success" onClick={onNewOrder}>
+                {remainder !== null && onContinueSplit !== undefined ? (
+                    <Button
+                        size="xl"
+                        block
+                        variant="success"
+                        data-testid="receipt-continue-split"
+                        onClick={() => onContinueSplit(remainder.orderUuid)}
+                    >
+                        {t('reg.split.remaining', { amount: money(remainder.due) })}
+                    </Button>
+                ) : null}
+
+                <Button
+                    size="xl"
+                    block
+                    variant={remainder === null ? 'success' : 'secondary'}
+                    onClick={onNewOrder}
+                >
                     {t('reg.receipt.newOrder')}
                 </Button>
                 <Button block variant="ghost" onClick={onBack}>
