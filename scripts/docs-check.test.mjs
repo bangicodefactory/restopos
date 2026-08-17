@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     checkDocs,
+    citedFeatureIds,
     headingSlugs,
     htmlHref,
     isDoc,
@@ -365,7 +366,7 @@ describe('the run reports what it examined', () => {
             changedFiles: ['app/A.php', 'tests/B.php', 'docs/features.yml', 'database/migrations/c.php', 'docs/spec/01-schema.md'],
         });
 
-        expect(diff).toEqual({ changed: 5, watched: 2, docs: 2, migrations: 1 });
+        expect(diff).toEqual({ changed: 5, watched: 2, docs: 2, migrations: 1, cited: 0 });
     });
 
     it('reports nothing when no diff was requested', () => {
@@ -373,7 +374,7 @@ describe('the run reports what it examined', () => {
     });
 
     it('reports an empty diff rather than passing silently', () => {
-        expect(run({ changedFiles: [] }).diff).toEqual({ changed: 0, watched: 0, docs: 0, migrations: 0 });
+        expect(run({ changedFiles: [] }).diff).toEqual({ changed: 0, watched: 0, docs: 0, migrations: 0, cited: 0 });
     });
 });
 
@@ -443,5 +444,139 @@ describe('cross-links survive publication (review of #52)', () => {
         ]);
 
         expect(run({ manual }).errors).toEqual([]);
+    });
+});
+
+describe('a feature the diff claims has to be recorded (BAN-519)', () => {
+    // The gate could tell that *some* doc had moved and that the ledger was internally consistent.
+    // Neither noticed a feature shipping unrecorded, which is the thing it exists to prevent —
+    // BAN-434 annotated four in its source, recorded none, and passed green.
+    const diff = (...lines) => lines.join(String.fromCharCode(10));
+
+    describe('reading the claims out of a diff', () => {
+        it('takes an id from an added line, with the file that claims it', () => {
+            expect(citedFeatureIds(diff('+++ b/app/X.php', '+ // REG-208 — pay later.'))).toEqual([
+                { id: 'REG-208', file: 'app/X.php' },
+            ]);
+        });
+
+        it('ignores a removed line — that is a feature going away, not arriving', () => {
+            expect(citedFeatureIds(diff('+++ b/app/X.php', '- // REG-208 gone'))).toEqual([]);
+        });
+
+        it('ignores a range, which orients the reader rather than claiming anything', () => {
+            // Twenty ids cited in source turned out to be exactly this, which is why the spec never
+            // defined them: nothing was ever meant to define `BOF-079`.
+            const cited = citedFeatureIds(
+                diff(
+                    '+++ b/app/X.php',
+                    '+ * Session lifecycle & cash control (REG-001 … REG-039).',
+                    '+ * Settings (SLF-001…SLF-019, BOF-070…079).',
+                    '+ * Closing (REG-030…039).',
+                ),
+            );
+
+            expect(cited).toEqual([]);
+        });
+
+        it('still reads a real claim on a line that also carries a range', () => {
+            const cited = citedFeatureIds(diff('+++ b/app/X.php', '+ * Payments (REG-200 … REG-239). This does REG-208.'));
+
+            expect(cited).toEqual([{ id: 'REG-208', file: 'app/X.php' }]);
+        });
+
+        it('takes several claims from one line', () => {
+            expect(citedFeatureIds(diff('+++ b/a.ts', '+ // REG-209 and REG-212'))).toHaveLength(2);
+        });
+
+        it('does not repeat an id claimed twice in the same file', () => {
+            expect(citedFeatureIds(diff('+++ b/a.ts', '+ // REG-208', '+ // REG-208 again'))).toHaveLength(1);
+        });
+    });
+
+    describe('the rule', () => {
+        const ledger = { 'REG-001': { status: 'shipped', surface: 'internal' } };
+
+        it('fails a claim the ledger does not record', () => {
+            const { errors } = run({
+                features: ledger,
+                changedFiles: ['app/X.php', 'docs/features.yml'],
+                citedIds: [{ id: 'REG-208', file: 'app/X.php' }],
+            });
+
+            expect(errors).toHaveLength(1);
+            expect(errors[0]).toContain('claims REG-208');
+            expect(errors[0]).toContain('does not record');
+        });
+
+        it('passes a claim it does record', () => {
+            const { errors } = run({
+                features: ledger,
+                changedFiles: ['app/X.php', 'docs/features.yml'],
+                citedIds: [{ id: 'REG-001', file: 'app/X.php' }],
+            });
+
+            expect(errors).toEqual([]);
+        });
+
+        it('says so differently when the spec does not define the id at all', () => {
+            // `REG-091` was cited in `ProductScreen.tsx` as the discount-barcode handler and does
+            // not exist — the behaviour is REG-083. Either the id is wrong or the matrix is missing
+            // a row, and those need different answers.
+            const { errors } = run({
+                features: ledger,
+                changedFiles: ['app/X.php', 'docs/features.yml'],
+                citedIds: [{ id: 'REG-404', file: 'app/X.php' }],
+            });
+
+            expect(errors[0]).toContain('does not define');
+        });
+
+        it('lets the opt-out defer a ledger entry, like the other diff rules', () => {
+            const { errors, warnings } = run({
+                features: ledger,
+                changedFiles: ['app/X.php'],
+                citedIds: [{ id: 'REG-208', file: 'app/X.php' }],
+                skipDiffGate: true,
+            });
+
+            expect(errors).toEqual([]);
+            expect(warnings.some((w) => w.includes('(waived)') && w.includes('REG-208'))).toBe(true);
+        });
+
+        it('still refuses an id the spec does not define, opt-out or not (review of #57)', () => {
+            // Found reviewing this rule against its own pull request, which needed the opt-out for a
+            // one-word comment fix and would have carried an invented id straight through with it.
+            //
+            // The waiver answers "does this change owe documentation". It was never meant to answer
+            // "may this change name a feature that does not exist" — and inventing a name nothing
+            // validates is the BAN-430 defect this rule exists to prevent. Waivable, it would have
+            // been the documented way to reintroduce it.
+            const { errors, warnings } = run({
+                features: ledger,
+                changedFiles: ['app/X.php'],
+                citedIds: [{ id: 'REG-404', file: 'app/X.php' }],
+                skipDiffGate: true,
+            });
+
+            expect(errors).toHaveLength(1);
+            expect(errors[0]).toContain('claims REG-404');
+            expect(errors[0]).toContain('does not define');
+            expect(warnings.some((w) => w.includes('REG-404'))).toBe(false);
+        });
+
+        it('asks nothing when no diff was requested', () => {
+            expect(run({ features: ledger, citedIds: [{ id: 'REG-208', file: 'app/X.php' }] }).errors).toEqual([]);
+        });
+
+        it('counts the claims it examined', () => {
+            const { diff: summary } = run({
+                features: ledger,
+                changedFiles: ['app/X.php', 'docs/features.yml'],
+                citedIds: [{ id: 'REG-001', file: 'app/X.php' }],
+            });
+
+            expect(summary.cited).toBe(1);
+        });
     });
 });

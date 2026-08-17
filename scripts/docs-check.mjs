@@ -160,6 +160,62 @@ export function headingSlugs(markdown) {
     return [...markdown.matchAll(/^#{1,6}\s+(.+?)\s*$/gm)].map((m) => slugify(m[1]));
 }
 
+/** Any feature id, anywhere. */
+const FEATURE_ID = /\b(?:REG|RST|KDS|SLF|BOF|XCT)-\d{3}\b/g;
+
+/**
+ * A range of features rather than a citation of one.
+ *
+ * Docblocks orient the reader with spans — `SLF-001…SLF-019`, `BOF-070…079`, `REG-030…039` — and
+ * the endpoints are not claims that the file implements them. Twenty ids cited in source turned out
+ * to be exactly this, which is why they were never in the spec: nothing was ever meant to define
+ * `BOF-079`. Both shapes appear, with the tail written either in full or as bare digits.
+ */
+const FEATURE_RANGE = /\b((?:REG|RST|KDS|SLF|BOF|XCT)-\d{3})\s*(?:…|\.{2,3}|–|—)\s*((?:REG|RST|KDS|SLF|BOF|XCT)-\d{3}|\d{3})/g;
+
+/**
+ * Feature ids newly *claimed* by a diff (BAN-519).
+ *
+ * The ledger was seeded from ids annotated in source docblocks, because that is the honest evidence
+ * of what is wired up. The same signal read per-diff is what turns "did you touch a doc?" into "did
+ * you record the features you just claimed" — the gate passed BAN-434 while four of them were
+ * annotated in the source and absent from `docs/features.yml`.
+ *
+ * Added lines only. Re-touching a line that already cited an id is not a new feature, and demanding
+ * a ledger entry for it would make every refactor of an annotated file a documentation task.
+ *
+ * @param {string} diff  unified diff text, as `git diff --unified=0` produces
+ * @returns {Array<{id: string, file: string}>}
+ */
+export function citedFeatureIds(diff) {
+    const cited = [];
+    let file = '';
+
+    for (const line of diff.split('\n')) {
+        if (line.startsWith('+++ ')) {
+            file = line.slice(4).replace(/^b\//, '').trim();
+            continue;
+        }
+
+        if (!line.startsWith('+') || line.startsWith('+++')) continue;
+
+        const ranged = new Set();
+
+        for (const match of line.matchAll(FEATURE_RANGE)) {
+            ranged.add(match[1]);
+            if (/^[A-Z]/.test(match[2])) ranged.add(match[2]);
+        }
+
+        for (const [id] of line.matchAll(FEATURE_ID)) {
+            if (!ranged.has(id) && !cited.some((c) => c.id === id && c.file === file)) {
+                cited.push({ id, file });
+            }
+        }
+    }
+
+    return cited;
+}
+
 /** Is this changed path a behaviour change that owes documentation? */
 export function isWatched(file) {
     const unix = file.replace(/\\/g, '/');
@@ -183,10 +239,11 @@ export function isDoc(file) {
  * @param {Set<string>} input.specIds            IDs `02-features.md` actually defines
  * @param {Map<string, {data: object, slugs: string[]}>} input.manual  path (relative to docs/manual) => page
  * @param {string[]|null} input.changedFiles     null disables the diff gate
+ * @param {Array<{id: string, file: string}>} input.citedIds  feature ids newly claimed by the diff
  * @param {boolean} input.skipDiffGate           the `[skip docs]` / `docs: none` opt-out
  * @returns {{errors: string[], warnings: string[], debt: number, diff: object|null}}
  */
-export function checkDocs({ features, specIds, manual, changedFiles = null, skipDiffGate = false }) {
+export function checkDocs({ features, specIds, manual, changedFiles = null, citedIds = [], skipDiffGate = false }) {
     const errors = [];
     const warnings = [];
 
@@ -323,11 +380,48 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, skip
             skipDiffGate ? warnings.push(`(waived) ${message}`) : errors.push(message);
         }
 
+        // A feature the diff *claims* must be recorded (BAN-519). The gate could already tell that
+        // some doc had moved and that the ledger was internally consistent; neither noticed a
+        // feature shipping unrecorded, which is what it exists to prevent. BAN-434 annotated four
+        // in its source, recorded none of them, and passed.
+        //
+        // The two halves are *not* equally waivable, and collapsing them was the mistake found
+        // reviewing this rule against its own PR. "You owe a ledger entry" is a judgement the author
+        // may reasonably defer — that is what the opt-out is for. "You cited an id that does not
+        // exist" is not a judgement, it is wrong: there is no pull request where inventing a feature
+        // id is the correct outcome, and inventing names nothing validated is precisely the BAN-430
+        // failure this rule was written to catch. The always-on sibling of this check — every id in
+        // the ledger exists in the spec — has never been waivable; the diff-mode one should not be
+        // either, or a refactor carrying `[skip docs]` becomes the way to smuggle one in.
+        for (const { id, file } of citedIds) {
+            if (!specIds.has(id)) {
+                errors.push(
+                    `${file} claims ${id}, which ${SPEC_FILE} does not define.
+` +
+                        `  Either the id is wrong or the feature needs a row in the parity matrix.
+` +
+                        `  Not waivable — the opt-out defers documentation, it does not permit an id that does not exist.`,
+                );
+
+                continue;
+            }
+
+            if (features?.features?.[id] !== undefined) continue;
+
+            const message =
+                `${file} claims ${id}, which ${FEATURES_FILE} does not record.
+` +
+                `  Add it — status, surface, and a manual page or \`manual: todo\`.`;
+
+            skipDiffGate ? warnings.push(`(waived) ${message}`) : errors.push(message);
+        }
+
         diff = {
             changed: changedFiles.length,
             watched: watched.length,
             docs: docs.length,
             migrations: migrations.length,
+            cited: citedIds.length,
         };
     }
 
@@ -364,6 +458,15 @@ function readManual(dir = path.join(ROOT, MANUAL_DIR), prefix = '') {
     return pages;
 }
 
+/** The added lines of the watched source trees, as a unified diff. */
+function addedSince(base) {
+    return execFileSync(
+        'git',
+        ['diff', '--unified=0', `${base}..HEAD`, '--', ...WATCHED],
+        { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    );
+}
+
 function changedSince(ref) {
     const base = execFileSync('git', ['merge-base', ref, 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
 
@@ -385,10 +488,14 @@ function main(argv) {
     const skipDiffGate = argv.includes('--skip-diff') || skip.waived;
 
     let changedFiles = null;
+    let citedIds = [];
 
     if (since !== undefined) {
         try {
+            const base = execFileSync('git', ['merge-base', since, 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+
             changedFiles = changedSince(since);
+            citedIds = citedFeatureIds(addedSince(base));
         } catch (error) {
             console.error(`docs-check: could not diff against "${since}" — ${error.message}`);
             process.exit(2);
@@ -397,13 +504,16 @@ function main(argv) {
 
     // Announced whether or not a rule ends up firing. A waiver that only surfaces when something
     // was actually waived is a waiver nobody notices was in force.
-    if (skip.waived) console.log(`docs-check: diff rules waived by ${skip.reason}.`);
+    if (skip.waived) {
+        console.log(`docs-check: documentation rules waived by ${skip.reason} — an undefined feature id still fails.`);
+    }
 
     const { errors, warnings, debt, diff } = checkDocs({
         features: parseYaml(read(FEATURES_FILE)),
         specIds: readSpecIds(read(SPEC_FILE)),
         manual: readManual(),
         changedFiles,
+        citedIds,
         skipDiffGate,
     });
 
@@ -414,7 +524,7 @@ function main(argv) {
     if (diff !== null) {
         console.log(
             `docs-check: diff vs ${since} — ${diff.changed} changed, ${diff.watched} behaviour, ` +
-                `${diff.docs} docs, ${diff.migrations} migration(s).`,
+                `${diff.docs} docs, ${diff.migrations} migration(s), ${diff.cited} feature id(s) claimed.`,
         );
 
         if (diff.changed === 0) {
