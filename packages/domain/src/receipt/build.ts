@@ -357,6 +357,8 @@ export function buildPrepTicketDoc(ticket: PrepTicketView, config: ReceiptConfig
     if (ticket.trackingNumber) b.text(ticket.trackingNumber, { align: 'center', size: 'lg' });
     b.rule('=');
     b.row(ticket.orderName, formatDateTime(ticket.firedAt, { date: false }));
+    // Above the cashier, because it changes the plating and the cashier's name does not.
+    if (ticket.guests !== null && ticket.guests > 0) b.row(l.guests, String(ticket.guests));
     if (ticket.cashierName) b.row(l.cashier, ticket.cashierName);
     if (ticket.courseName) b.text(`${l.course}: ${ticket.courseName}`, { bold: true });
     b.rule('=');

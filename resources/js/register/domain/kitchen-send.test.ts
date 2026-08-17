@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearRuntime, setRuntime, type RegisterRuntime } from '../data/runtime';
 import { useOrderStore } from '../state/order-store';
-import { installCatalog, makeProduct, makeVariant, resetRegisterState } from './__fixtures__/catalog';
+import { installCatalog, makePreset, makeProduct, makeVariant, resetRegisterState } from './__fixtures__/catalog';
 import {
     currentDelta,
     fireCourseAndSend,
@@ -231,5 +231,87 @@ describe('fireCourseAndSend (RST-084 / BAN-408)', () => {
         expect((await fireCourseAndSend(orderUuid, course)).status).toBe('outdated');
         // The course must not be marked fired on a conflict.
         expect(useOrderStore.getState().courses[course]?.fired).toBe(false);
+    });
+});
+
+/**
+ * RST-072 (BAN-481) — a preset that plates to a cover count must have one.
+ *
+ * `pos_presets.use_guest` was read by nothing: the column shipped, `PosPresetRow` did not even
+ * declare it, and a dine-in order could reach the pass with no idea how many people were eating.
+ *
+ * The check lives in `sendToKitchen` rather than in the button's handler on purpose — a guard in one
+ * caller is a guard that one caller has, and `fireCourseAndSend` and the offline path both come
+ * through here.
+ */
+describe('the guest count a preset requires', () => {
+    const DINE_IN = 1;
+    const TAKEAWAY = 2;
+
+    function installPresets(): void {
+        installCatalog({
+            products: [makeProduct({ id: 1, name: 'Pizza', list_price: '10.00' })],
+            variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
+            presets: [
+                makePreset({ id: DINE_IN, name: 'Dine in', use_guest: true }),
+                makePreset({ id: TAKEAWAY, name: 'Takeaway', use_guest: false }),
+            ],
+        });
+    }
+
+    it('refuses the send and asks, rather than firing a ticket the kitchen cannot plate', async () => {
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: DINE_IN });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+
+        const outcome = await sendToKitchen(orderUuid);
+
+        expect(outcome.status).toBe('needs_guests');
+        // Nothing reached the server: the refusal has to happen before the snapshot advances, or
+        // the second attempt would find nothing left to send.
+        expect(post).not.toHaveBeenCalled();
+        expect(unsentChangeCount(orderUuid)).toBe(2);
+    });
+
+    it('sends once the count is given', async () => {
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: DINE_IN, guestCount: 4 });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+
+    it('does not ask on a preset that does not want it', async () => {
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: TAKEAWAY });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+
+    it('does not ask on an order with no preset at all', async () => {
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1 });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+
+    it('does not ask again when more is added to an order that already has a count', async () => {
+        // The rule is "this order has a cover count", not "this order has been sent". A waiter
+        // adding a dessert must not be stopped to re-answer a question the kitchen already has.
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: DINE_IN, guestCount: 4 });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
     });
 });

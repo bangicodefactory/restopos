@@ -31,6 +31,8 @@ export type SendOutcome =
     | { status: 'nothing'; delta: PrepDelta }
     | { status: 'sent'; delta: PrepDelta; printed: number; online: boolean }
     | { status: 'outdated'; delta: PrepDelta }
+    /** The preset wants a cover count and the order has none yet (RST-072). */
+    | { status: 'needs_guests'; delta: PrepDelta }
     | { status: 'failed'; delta: PrepDelta; reason: string };
 
 type ServerDelta = {
@@ -108,6 +110,29 @@ async function printTickets(orderUuid: string, delta: PrepDelta, courseName: str
     return printed;
 }
 
+/**
+ * Does this order still owe the kitchen a cover count? (RST-072)
+ *
+ * `pos_presets.use_guest` marks the service modes where the number matters — a dine-in preset, not a
+ * takeaway — and it was read by nothing at all: the column shipped, the client type did not even
+ * declare it, and an order could reach the pass with no idea how many people were eating.
+ *
+ * Only before the **first** send. Asking again on every re-fire would punish the waiter for adding a
+ * dessert, and by then the kitchen already has the number.
+ */
+export function needsGuestCount(orderUuid: string): boolean {
+    const order = useOrderStore.getState().orders[orderUuid];
+    if (!order) return false;
+
+    // Already told them; a later edit is not a new question.
+    if (Number(order.guest_count ?? 0) > 0) return false;
+
+    const presetId = order.pos_preset_id ?? null;
+    if (presetId === null) return false;
+
+    return getCatalog().presets.find((preset) => preset.id === presetId)?.use_guest === true;
+}
+
 export async function sendToKitchen(
     orderUuid: string,
     options: { courseIndex?: number | null; courseName?: string | null } = {},
@@ -115,6 +140,13 @@ export async function sendToKitchen(
     const delta = currentDelta(orderUuid);
     if (delta.nbrOfChanges === 0 && !delta.orderNoteChanged) {
         return { status: 'nothing', delta };
+    }
+
+    // Checked here rather than in the button's handler, so every route to the kitchen is covered:
+    // a guard living in one caller is a guard that one caller has. `fireCourseAndSend` comes through
+    // this same function, and the offline path is below it.
+    if (needsGuestCount(orderUuid)) {
+        return { status: 'needs_guests', delta };
     }
 
     const runtime = tryRuntime();

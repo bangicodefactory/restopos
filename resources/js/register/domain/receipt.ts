@@ -283,6 +283,7 @@ export function buildPrepTicket(
         trackingNumber: order.tracking_number,
         tableName: context.tableName,
         presetName: context.presetName,
+        guests: order.guest_count > 0 ? order.guest_count : null,
         cashierName: context.cashierName,
         firedAt: new Date().toISOString(),
         courseName,

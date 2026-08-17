@@ -23,6 +23,7 @@ features:
   - REG-295
   - REG-300
   - REG-301
+  - RST-072
 ---
 
 # Taking orders
@@ -93,3 +94,14 @@ Once an order is settled, it is closed to editing. Attempts to change lines, pay
 a paid order are refused, and the attempt is recorded. Edits made before payment are flagged on the
 order, so a manager reading the shift afterwards can see which tickets were altered and which lines
 were removed.
+
+## Guests
+
+Some service modes need to know how many people are eating before the order goes to the kitchen —
+a dine-in table does, a takeaway does not.
+
+On those, the till asks for the number the first time you send. Until you give it, the order does not
+go through: a kitchen cannot plate a table it cannot count. Enter it once and you will not be asked
+again, even when you add to the order later.
+
+You can set or change it at any time from the guests button on the order.
