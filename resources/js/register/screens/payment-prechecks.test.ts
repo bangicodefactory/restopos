@@ -87,6 +87,7 @@ function input(overrides: Partial<PrecheckInput> = {}): PrecheckInput {
         payments: [payment(CASH.id, '12.10')],
         methods: METHODS,
         cashRounding: null,
+        presetIdentification: null,
         total: '12.10',
         customerId: null,
         hasCashMethod: true,
@@ -328,5 +329,42 @@ describe('the checks that were already there', () => {
         expect(result.block).toBeNull();
         expect(result.confirm).toBeNull();
         expect(result.strip).toEqual([]);
+    });
+});
+
+/**
+ * REG-337 (BAN-498) — a service mode that must know who the customer is.
+ *
+ * `pos_presets.identification` has existed since the schema was written and was read by nothing. A
+ * delivery preset that has to know where the food is going settled happily with no customer at all,
+ * and the driver found out at the door.
+ */
+describe('a preset that requires identification', () => {
+    it('blocks validation until a customer is set', () => {
+        const verdict = precheckPayment(input({ presetIdentification: 'name', customerId: null }));
+
+        expect(verdict.block).toBe('preset_needs_identification');
+    });
+
+    it('passes once one is', () => {
+        expect(precheckPayment(input({ presetIdentification: 'name', customerId: 42 })).block).toBeNull();
+    });
+
+    it('says nothing on a preset that does not ask', () => {
+        expect(precheckPayment(input({ presetIdentification: 'none', customerId: null })).block).toBeNull();
+    });
+
+    it('says nothing on an order with no preset', () => {
+        expect(precheckPayment(input({ presetIdentification: null, customerId: null })).block).toBeNull();
+    });
+
+    it('asks before the settlement checks, not after', () => {
+        // A cashier who has to go and fetch a name should be told while the customer is still
+        // standing there, rather than once the money is counted and the drawer is open.
+        const verdict = precheckPayment(
+            input({ presetIdentification: 'address', customerId: null, payments: [] }),
+        );
+
+        expect(verdict.block).toBe('preset_needs_identification');
     });
 });

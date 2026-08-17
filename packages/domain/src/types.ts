@@ -818,6 +818,16 @@ export type OrderRow = {
     employee_id: number | null;
     pricelist_id: number | null;
     fiscal_position_id: number | null;
+    /**
+     * Who decided the fiscal position (REG-175) — local provenance, never sent.
+     *
+     * Four things set the mapping and they arrive in whatever order the service takes, so without
+     * this the winner is whichever ran last: attach a customer after choosing takeaway and the
+     * takeaway rate silently reverts. The server does not need it — it recomputes tax from the
+     * position itself — so it stays on the client, and an order arriving from the server without it
+     * is treated as the register's default.
+     */
+    fiscal_position_source?: 'default' | 'partner' | 'preset' | 'manual';
     pos_preset_id: number | null;
     preset_time: Iso | null;
     currency_id: number;

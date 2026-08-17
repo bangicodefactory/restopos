@@ -1,6 +1,7 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
 import { CashRoundingCalculator, isFullyPaid } from '@domain/tax/rounder';
 import type { CashRounding } from '@domain/tax/types';
+import type { PresetIdentification } from '@domain/enums';
 import type { OrderLineRow, PaymentMethodRow, PaymentRow } from '@domain/types';
 
 /**
@@ -35,7 +36,9 @@ export type PrecheckBlock =
     | 'not_enough'
     | 'overpay_no_cash'
     | 'unrounded_cash'
-    | 'needs_customer';
+    | 'needs_customer'
+    /** The service mode requires the customer to be identified (REG-337). */
+    | 'preset_needs_identification';
 
 /** Something the cashier has to agree to before it goes through. */
 export type PrecheckConfirm = 'large_overpay';
@@ -66,6 +69,14 @@ export type PrecheckInput = {
     readonly customerId: number | null;
     /** Does the register have a cash method at all? Without one there is no way to give change. */
     readonly hasCashMethod: boolean;
+    /**
+     * What the order's preset demands of the customer (REG-337), or `null` for no preset.
+     *
+     * `pos_presets.identification` has existed since the schema was written and was read by nothing:
+     * a delivery preset that must know where the food is going settled happily with no customer at
+     * all, and the driver found out at the door.
+     */
+    readonly presetIdentification: PresetIdentification | null;
 };
 
 /**
@@ -297,6 +308,12 @@ function firstBlock(
     if (tradingLines(input.lines).length === 0) return 'empty_order';
 
     if (needsCustomer(live, input.methods) && input.customerId == null) return 'needs_customer';
+
+    // Before the settlement checks, not after: a cashier who has to fetch a name should be told
+    // while the customer is still standing there, not once the money is counted.
+    if (input.presetIdentification !== null && input.presetIdentification !== 'none' && input.customerId == null) {
+        return 'preset_needs_identification';
+    }
 
     if (!cashLinesAreRounded(live, input.methods, input.cashRounding)) return 'unrounded_cash';
 

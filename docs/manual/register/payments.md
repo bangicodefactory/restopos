@@ -21,6 +21,7 @@ features:
   - RST-105
   - RST-107
   - RST-111
+  - REG-337
 ---
 
 # Taking payment
@@ -189,3 +190,17 @@ table do not each own a quarter of a pizza, and inventing four part-bills would 
 paper that match nothing anybody ordered.
 
 Practically, it means the running total you see is always the real remaining balance.
+
+## When the till will not let you validate
+
+Validation is blocked, with the reason on screen, when:
+
+- **the order is empty** — nothing to sell
+- **not enough has been tendered** — the balance is still owed
+- **a payment method needs a customer** and none is set
+- **the service mode needs the customer** — a delivery or collection preset has to know who and
+  where, and you are asked while they are still in front of you rather than after the money is
+  counted
+- **cash does not match the rounding rule**, or change is due on a till with no cash method
+
+Set the missing thing and validate again. Nothing is lost in the meantime.
