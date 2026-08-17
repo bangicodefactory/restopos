@@ -24,6 +24,8 @@ features:
   - REG-300
   - REG-301
   - RST-072
+  - REG-175
+  - RST-144
 ---
 
 # Taking orders
@@ -105,3 +107,27 @@ go through: a kitchen cannot plate a table it cannot count. Enter it once and yo
 again, even when you add to the order later.
 
 You can set or change it at any time from the guests button on the order.
+
+## Tax mapping (fiscal position)
+
+Most venues never touch this. Where a sale is taxed differently — takeaway at a lower rate, an
+exempt customer, an export — the mapping decides which rates apply.
+
+Four things can set it, and the strongest wins rather than the most recent:
+
+| Set by | Beats |
+| --- | --- |
+| You, by hand | everything |
+| The service mode (preset) | the customer's mapping, the register default |
+| The customer's own mapping | the register default |
+| The register default | — |
+
+So choosing **Takeaway** and *then* attaching a regular customer keeps the takeaway rate: the sale is
+still takeaway. If that customer genuinely needs their own mapping on this sale, set it by hand and
+nothing will override it.
+
+## Orders you cannot cancel
+
+An order placed for a **later time slot** cannot be cancelled from the till. It is a booking the
+kitchen has not started, and cancelling it mid-service is nearly always a mistap on an order you did
+not mean to be looking at. Once the slot has passed it cancels like any other order.

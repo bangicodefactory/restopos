@@ -68,6 +68,7 @@ const BLOCK_MESSAGES: Record<PrecheckBlock, RegisterKey> = {
     overpay_no_cash: 'reg.pay.overpayNoCash',
     unrounded_cash: 'reg.pay.unroundedCash',
     needs_customer: 'reg.pay.needCustomer',
+    preset_needs_identification: 'reg.pay.needIdentification',
 };
 
 export type PaymentScreenProps = {
@@ -217,6 +218,8 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
             lines,
             payments,
             methods: catalog.paymentMethods,
+            presetIdentification:
+                catalog.presets.find((preset) => preset.id === order?.pos_preset_id)?.identification ?? null,
             cashRounding,
             total: totals.roundedTotal,
             customerId: order?.customer_id ?? null,
@@ -269,6 +272,8 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
         onValidated();
     }, [
         resetSplit,
+        catalog.presets,
+        order?.pos_preset_id,
         cashRounding,
         catalog.paymentMethods,
         hasCash,

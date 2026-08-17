@@ -32,6 +32,7 @@ import {
     useOrderStore,
     type OrderSlice,
 } from '../state/order-store';
+import { resolveFiscalPosition, type FiscalPositionSource } from './fiscal-position-precedence';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
@@ -147,8 +148,19 @@ export type NewOrderInput = {
     tableId?: number | null;
     guestCount?: number;
     presetId?: number | null;
+    /** The slot an order-ahead was placed for (RST-144); absent on an ordinary sale. */
+    presetTime?: string | null;
     pricelistId?: number | null;
     fiscalPositionId?: number | null;
+    /**
+     * Who decided the position being copied in (REG-175).
+     *
+     * A refund and a split both carry the parent's mapping across. Recording that as `default` — the
+     * value a fresh order gets — throws the provenance away, so attaching a customer to the split
+     * silently overrode a position a cashier had chosen by hand on the parent: the very defect the
+     * ladder exists to stop, walking in through the copy.
+     */
+    fiscalPositionSource?: FiscalPositionSource;
     customerId?: number | null;
     floatingOrderName?: string | null;
     isRefund?: boolean;
@@ -197,12 +209,13 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
         // order whose pricelist was cleared must not silently re-apply the register default, so
         // the key's presence — not its value — decides whether the config default applies.
         pricelist_id: 'pricelistId' in input ? (input.pricelistId ?? null) : (catalog.config?.pricelist_id ?? null),
+        fiscal_position_source: input.fiscalPositionSource ?? 'default',
         fiscal_position_id:
             'fiscalPositionId' in input
                 ? (input.fiscalPositionId ?? null)
                 : (catalog.config?.default_fiscal_position_id ?? null),
         pos_preset_id: input.presetId ?? catalog.config?.default_preset_id ?? null,
-        preset_time: null,
+        preset_time: (input.presetTime ?? null) as OrderRow['preset_time'],
         currency_id: context.currencyId,
         currency_rate: '1',
         floating_order_name: input.floatingOrderName ?? null,
@@ -729,7 +742,7 @@ export function applyCustomerDefaults(
         (config?.available_fiscal_position_ids ?? []).includes(customer.fiscal_position_id);
 
     if (pricelistAllowed) setPricelist(orderUuid, customer.pricelist_id);
-    if (positionAllowed) setFiscalPosition(orderUuid, customer.fiscal_position_id);
+    if (positionAllowed) setFiscalPosition(orderUuid, customer.fiscal_position_id, 'partner');
 }
 
 /** REG-173 — switching the pricelist reprices every line whose price is not manual. */
@@ -754,9 +767,34 @@ export function setPricelist(orderUuid: string, pricelistId: number | null): voi
     commit(orderUuid);
 }
 
-export function setFiscalPosition(orderUuid: string, fiscalPositionId: number | null): void {
+/**
+ * REG-175 — set the tax mapping, recording who decided it.
+ *
+ * `source` defaults to `manual` because a bare call is a cashier acting: every automatic caller
+ * (creation, preset, customer) names itself, so anything that does not is somebody's explicit
+ * choice. A weaker source cannot overwrite a stronger one, which is what stops attaching a customer
+ * from quietly undoing "takeaway".
+ */
+export function setFiscalPosition(
+    orderUuid: string,
+    fiscalPositionId: number | null,
+    source: FiscalPositionSource = 'manual',
+): void {
+    const current = snapshot().orders[orderUuid];
+    if (!current) return;
+
+    const resolved = resolveFiscalPosition(
+        { fiscalPositionId: current.fiscal_position_id, source: current.fiscal_position_source ?? 'default' },
+        { fiscalPositionId, source },
+    );
+
+    if (resolved.source === (current.fiscal_position_source ?? 'default') && resolved.fiscalPositionId === current.fiscal_position_id) {
+        return;
+    }
+
     updateOrder(orderUuid, (order) => {
-        order.fiscal_position_id = fiscalPositionId;
+        order.fiscal_position_id = resolved.fiscalPositionId;
+        order.fiscal_position_source = resolved.source;
     });
 }
 
@@ -767,8 +805,12 @@ export function setPreset(orderUuid: string, presetId: number | null): void {
         order.pos_preset_id = presetId;
         // REG-336: the preset overrides the pricelist and the fiscal position.
         if (preset?.pricelist_id) order.pricelist_id = preset.pricelist_id;
-        if (preset?.fiscal_position_id) order.fiscal_position_id = preset.fiscal_position_id;
     });
+
+    // Through the precedence rule rather than written straight onto the row (REG-175): a preset
+    // outranks a customer's mapping and the register default, but must not silently undo a position
+    // the cashier chose by hand.
+    if (preset?.fiscal_position_id) setFiscalPosition(orderUuid, preset.fiscal_position_id, 'preset');
 }
 
 export function setGuestCount(orderUuid: string, guests: number): void {
@@ -1131,7 +1173,29 @@ export function markPrinted(orderUuid: string): void {
     });
 }
 
+/**
+ * Why this order may not be scrapped, or `null` (RST-144).
+ *
+ * A future-preset order is a booking: somebody has ordered ahead for eight o'clock and the kitchen
+ * has not started it. Cancelling it from the till is almost always a misdirected tap on an order the
+ * cashier did not mean to be looking at — the real cancellation for a booking is a conversation, not
+ * a swipe on a busy service.
+ *
+ * Pure and exported so the screens can grey the button rather than let it be pressed and refused,
+ * which is the difference between a guard and a rebuke.
+ */
+export function cancelBlockedReason(orderUuid: string, now: Date = new Date()): 'future_preset' | null {
+    const order = snapshot().orders[orderUuid];
+    if (!order?.preset_time) return null;
+
+    return Date.parse(order.preset_time) > now.getTime() ? 'future_preset' : null;
+}
+
 export function cancelOrder(orderUuid: string, reason: string | null = null): void {
+    // Refused here rather than only in the screens: `discardOrder` routes through this, and a guard
+    // that lives in the UI is a guard the next caller does not get.
+    if (cancelBlockedReason(orderUuid) !== null) return;
+
     updateOrder(orderUuid, (order) => {
         order.state = 'cancelled';
         order.cancelled_at = nowIso();
@@ -1144,6 +1208,7 @@ export function discardOrder(orderUuid: string): void {
     const state = snapshot();
     const order = state.orders[orderUuid];
     if (!order) return;
+    if (cancelBlockedReason(orderUuid) !== null) return;
     if (order.id !== null || order.syncState === 'synced') {
         cancelOrder(orderUuid);
         return;
@@ -1366,6 +1431,7 @@ export async function createRefundOrder(
         customerId: original.customer_id,
         pricelistId: original.pricelist_id,
         fiscalPositionId: original.fiscal_position_id,
+        fiscalPositionSource: original.fiscal_position_source ?? 'default',
         presetId: original.pos_preset_id,
     });
 
@@ -1451,6 +1517,7 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
         presetId: original.pos_preset_id,
         pricelistId: original.pricelist_id,
         fiscalPositionId: original.fiscal_position_id,
+        fiscalPositionSource: original.fiscal_position_source ?? 'default',
         customerId: original.customer_id,
         splitFromOrderUuid: orderUuid,
         splitLetter: letter,

@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 167
+  manual_debt: 166
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -189,6 +189,8 @@ features:
   # Guest count (RST-070 … RST-079) — user
   RST-070: { status: shipped, surface: user, manual: todo }
   RST-071: { status: shipped, surface: user, manual: todo }
+  REG-175: { status: shipped, surface: user, manual: register/orders.md#tax-mapping-fiscal-position }
+  REG-337: { status: shipped, surface: user, manual: register/payments.md#when-the-till-will-not-let-you-validate }
   RST-104: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-105: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-107: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
@@ -222,7 +224,7 @@ features:
   # Restaurant order lifecycle extras (RST-140 … RST-159) — user
   RST-142: { status: shipped, surface: user, manual: todo }
   RST-143: { status: shipped, surface: user, manual: todo }
-  RST-144: { status: shipped, surface: user, manual: todo }
+  RST-144: { status: shipped, surface: user, manual: register/orders.md#orders-you-cannot-cancel }
   RST-146: { status: shipped, surface: user, manual: todo }
 
   # Preparation display (KDS-001 … KDS-049) — user

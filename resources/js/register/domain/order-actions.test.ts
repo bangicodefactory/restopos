@@ -25,6 +25,7 @@ import {
     attributeExtraOf,
     canMergeLines,
     cancelOrder,
+    cancelBlockedReason,
     cleanCourses,
     configureOrderActions,
     createOrder,
@@ -40,6 +41,7 @@ import {
     setDiscount,
     setEmployee,
     setFiscalPosition,
+    splitOrder,
     setGuestCount,
     setLineCourse,
     setPaymentAmount,
@@ -1265,5 +1267,100 @@ describe('selection helpers', () => {
         expect(paymentsOf(state(), a).map((p) => p.amount)).toEqual(['5.00']);
         expect(paymentsOf(state(), b).map((p) => p.amount)).toEqual(['9.00']);
         expect(paymentsOf(state(), asUuid('nope'))).toEqual([]);
+    });
+});
+
+/**
+ * RST-144 (BAN-498) — a booking is not a scrap.
+ *
+ * A future-preset order is somebody who has ordered ahead for eight o'clock. Cancelling it from the
+ * till mid-service is almost always a misdirected tap, and the kitchen has not started it, so there
+ * is nothing to undo — the real cancellation for a booking is a conversation.
+ */
+describe('cancelling a future-preset order', () => {
+    it('is refused, and leaves the order alone', async () => {
+        const orderUuid = await createOrder({ presetTime: new Date(Date.now() + 3_600_000).toISOString() });
+
+        expect(cancelBlockedReason(orderUuid)).toBe('future_preset');
+
+        cancelOrder(orderUuid);
+
+        expect(useOrderStore.getState().orders[orderUuid]?.state).not.toBe('cancelled');
+    });
+
+    it('is allowed once the slot has passed', async () => {
+        // Then it is an ordinary order somebody did not collect, and the till must be able to close
+        // it out — refusing forever would leave a draft that can never be cleared.
+        const orderUuid = await createOrder({ presetTime: new Date(Date.now() - 3_600_000).toISOString() });
+
+        expect(cancelBlockedReason(orderUuid)).toBeNull();
+
+        cancelOrder(orderUuid);
+
+        expect(useOrderStore.getState().orders[orderUuid]?.state).toBe('cancelled');
+    });
+
+    it('says nothing about an ordinary order', async () => {
+        const orderUuid = await createOrder();
+
+        expect(cancelBlockedReason(orderUuid)).toBeNull();
+    });
+
+    it('refuses a discard too, not only a cancel', async () => {
+        // `discardOrder` forgets a never-synced draft outright, which would delete the booking
+        // rather than merely fail to cancel it.
+        const orderUuid = await createOrder({ presetTime: new Date(Date.now() + 3_600_000).toISOString() });
+
+        discardOrder(orderUuid);
+
+        expect(useOrderStore.getState().orders[orderUuid]).toBeDefined();
+    });
+});
+
+/**
+ * REG-175, the copy paths (review of #63).
+ *
+ * A refund and a split both carry the parent's tax mapping across. Recording that as `default` — the
+ * value a fresh order gets — threw the provenance away, so attaching a customer to the split
+ * silently overrode a position the cashier had chosen by hand on the parent. The exact defect the
+ * precedence ladder exists to stop, walking in through the copy.
+ */
+describe('a copied fiscal position remembers who chose it', () => {
+    it('carries a manual choice onto a split, where a customer cannot undo it', async () => {
+        const orderUuid = await createOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        setFiscalPosition(orderUuid, 9);
+
+        const lineUuid = linesOf(useOrderStore.getState(), orderUuid)[0]!.uuid;
+        const splitUuid = await splitOrder(orderUuid, { [lineUuid]: 1 });
+
+        expect(splitUuid).not.toBeNull();
+        expect(useOrderStore.getState().orders[splitUuid!]?.fiscal_position_source).toBe('manual');
+
+        // The move that used to overwrite it.
+        setFiscalPosition(splitUuid!, 3, 'partner');
+
+        expect(useOrderStore.getState().orders[splitUuid!]?.fiscal_position_id).toBe(9);
+    });
+
+    it('carries it onto a refund too', async () => {
+        const orderUuid = await createOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+        setFiscalPosition(orderUuid, 9);
+
+        const lineUuid = linesOf(useOrderStore.getState(), orderUuid)[0]!.uuid;
+        const refundUuid = await createRefundOrder(orderUuid, { [lineUuid]: 1 });
+
+        expect(useOrderStore.getState().orders[refundUuid!]?.fiscal_position_source).toBe('manual');
+    });
+
+    it('leaves an ordinary new order open to any source', async () => {
+        const orderUuid = await createOrder();
+
+        expect(useOrderStore.getState().orders[orderUuid]?.fiscal_position_source).toBe('default');
+
+        setFiscalPosition(orderUuid, 3, 'partner');
+
+        expect(useOrderStore.getState().orders[orderUuid]?.fiscal_position_id).toBe(3);
     });
 });
