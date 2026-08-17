@@ -563,6 +563,17 @@ export const useKitchenStore = createPosStore<KitchenState>((set, get) => {
                 return;
             }
 
+            // A ticket with no lines is an amendment — today, an order note added after the send
+            // (KDS-053). It changes a card; it never creates one. Falling through here built a
+            // *pending* card with zero items for an order this board is not holding, which is what
+            // happens once a served card ages past `done_retention_minutes` and the waiter then adds
+            // "no onions": the server still upserts the row, because the row is still there, and the
+            // pass grew a blank ticket (review of #58).
+            //
+            // Every ticket that should create a card carries lines, including a course fire —
+            // `fireCourse` is note-update *shaped* but lists the course's products.
+            if (ticket.lines.length === 0) return;
+
             const firstStage = sortStages(get().stages)[0];
             const order: KitchenOrder = {
                 id: ticket.prep_order_id,
@@ -574,7 +585,7 @@ export const useKitchenStore = createPosStore<KitchenState>((set, get) => {
                 guest_count: ticket.guest_count,
                 preset_label: null,
                 customer_name: null,
-                order_note: null,
+                order_note: ticket.order_note,
                 state: 'pending',
                 fired_at: ticket.fired_at,
                 first_started_at: null,
