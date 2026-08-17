@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { useSessionStore } from '@shared/auth';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -162,15 +162,14 @@ describe('editing the room', () => {
         expect(getCatalog().tablesById.get(11)?.seats).toBe(16);
     });
 
-    it('marks every selected table, not only the anchor', () => {
+    it('opens with nothing selected, so no swatch can hit a table by accident', () => {
         api();
         render(<FloorEditorScreen onExit={vi.fn()} />);
 
         const canvas = screen.getByRole('application');
 
-        // The anchor drives the panel; a pinned table is still shown as selected, which is what
-        // tells the manager the next swatch will hit both.
         expect(within(canvas).getByLabelText(/^1 —/).getAttribute('aria-pressed')).toBe('false');
+        expect(screen.queryByTestId('floor-editor-selection')).toBeNull();
     });
 
     it('says so when a save fails instead of showing a change that did not happen', async () => {
@@ -310,5 +309,49 @@ describe('recolouring a selection', () => {
         // The second was never attempted, so nothing claims to have changed that did not.
         expect(patch).toHaveBeenCalledTimes(1);
         expect(getCatalog().tablesById.get(12)?.color).toBeNull();
+    });
+});
+
+/**
+ * The frame-vs-gesture split (review of #60).
+ *
+ * `onGeometryChange` fires on every pointer move — right for the back office, whose handler is local
+ * state saved by a form, and wrong here: persisting from it sent a `PATCH` per mousemove, dozens per
+ * drag, each carrying a Dexie write and a full catalog swap, with the last *answer* winning rather
+ * than the last position chosen.
+ *
+ * Driven through the keyboard, which is the one geometry gesture jsdom can deliver: `keydown` on the
+ * table works even though it has neither `PointerEvent` nor focus on an SVG `<g>`. A nudge is a whole
+ * gesture in one press, so it commits at once — and the same commit path is what a released drag
+ * uses.
+ */
+describe('when geometry is written', () => {
+    it('saves a keyboard nudge once, with the position it landed on', async () => {
+        const { patch } = api();
+        render(<FloorEditorScreen onExit={vi.fn()} />);
+
+        const first = within(screen.getByRole('application')).getByLabelText(/^1 —/);
+
+        fireEvent.keyDown(first, { key: 'ArrowRight' });
+
+        await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+
+        const [path, body] = patch.mock.calls.at(-1)!;
+        expect(path).toBe('pos/tables/11');
+        expect(body).toMatchObject({ position_x: 10, position_y: 0 });
+    });
+
+    it('writes nothing for a gesture that moved nothing', async () => {
+        const { patch } = api();
+        render(<FloorEditorScreen onExit={vi.fn()} />);
+
+        const first = within(screen.getByRole('application')).getByLabelText(/^1 —/);
+
+        // Left from x=0 is clamped to x=0 — the same rect it started on. A tap that moved nothing
+        // is not an edit, and sending it would put a write on the wire for every stray press.
+        fireEvent.keyDown(first, { key: 'ArrowLeft' });
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(patch).not.toHaveBeenCalled();
     });
 });

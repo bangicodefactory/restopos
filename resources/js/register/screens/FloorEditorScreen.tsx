@@ -49,6 +49,7 @@ export function FloorEditorScreen({ onExit }: { onExit: () => void }): JSX.Eleme
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [seatsDraft, setSeatsDraft] = useState('');
+    const [draft, setDraft] = useState<{ id: number; rect: Rect } | null>(null);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const scrollToId = useRef<number | null>(null);
@@ -74,19 +75,25 @@ export function FloorEditorScreen({ onExit }: { onExit: () => void }): JSX.Eleme
 
     const canvasTables: CanvasTable[] = useMemo(
         () =>
-            tables.map((table) => ({
-                id: table.id,
-                label: String(table.table_number),
-                shape: table.shape === 'round' ? 'round' : 'square',
-                seats: table.seats,
-                color: table.color,
-                linked: table.parent_id !== null,
-                x: table.position_h,
-                y: table.position_v,
-                width: table.width,
-                height: table.height,
-            })),
-        [tables],
+            tables.map((table) => {
+                // The gesture in progress wins over the stored row, so the table follows the finger
+                // even though nothing has been sent yet.
+                const live = draft?.id === table.id ? draft.rect : null;
+
+                return {
+                    id: table.id,
+                    label: String(table.table_number),
+                    shape: table.shape === 'round' ? 'round' : 'square',
+                    seats: table.seats,
+                    color: table.color,
+                    linked: table.parent_id !== null,
+                    x: live?.x ?? table.position_h,
+                    y: live?.y ?? table.position_v,
+                    width: live?.width ?? table.width,
+                    height: live?.height ?? table.height,
+                };
+            }),
+        [draft, tables],
     );
 
     const canvasLabels = useMemo(
@@ -135,10 +142,38 @@ export function FloorEditorScreen({ onExit }: { onExit: () => void }): JSX.Eleme
         }
     }, []);
 
-    const onGeometryChange = useCallback(
+    /**
+     * A drag reports every frame; only the last one is worth a request.
+     *
+     * `onGeometryChange` fires on each pointer move — which is what makes the drag look live, and is
+     * exactly right for the back office, whose handler is local state saved by a form. Persisting
+     * from it instead sent a `PATCH` per mousemove: dozens of requests for one drag, each with a
+     * Dexie write and a full catalog swap behind it, and the last answer to arrive winning rather
+     * than the last position chosen.
+     *
+     * So the live frames land in `draft` (rendered, never sent) and the gesture is written when the
+     * manager lets go. A keyboard nudge is a whole gesture in one press and commits immediately.
+     */
+    const onGeometryChange = useCallback((id: number, rect: Rect) => {
+        setDraft({ id, rect });
+    }, []);
+
+    const onGeometryCommit = useCallback(
         (id: number, rect: Rect) => {
             const table = tables.find((candidate) => candidate.id === id);
+
+            setDraft(null);
+
             if (!table) return;
+            if (
+                table.position_h === rect.x &&
+                table.position_v === rect.y &&
+                table.width === rect.width &&
+                table.height === rect.height
+            ) {
+                // A tap that moved nothing is not an edit.
+                return;
+            }
 
             void run(() => saveGeometry(table, rect));
         },
@@ -306,6 +341,7 @@ export function FloorEditorScreen({ onExit }: { onExit: () => void }): JSX.Eleme
                             }}
                             onToggleSelect={toggleSelect}
                             onGeometryChange={onGeometryChange}
+                            onGeometryCommit={onGeometryCommit}
                             bounds={bounds}
                             grid={10}
                             snapEnabled

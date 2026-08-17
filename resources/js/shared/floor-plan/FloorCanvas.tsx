@@ -63,6 +63,15 @@ export type FloorCanvasProps = {
     /** Ctrl/Cmd or Shift held while tapping a table: add to the selection rather than replace it. */
     onToggleSelect?: (id: number) => void;
     onGeometryChange: (id: number, rect: Rect) => void;
+    /**
+     * The end of a gesture, rather than every frame of one.
+     *
+     * `onGeometryChange` fires on every pointer move, which is what makes a drag look live. A host
+     * that only keeps local state wants exactly that; a host that *persists* wants to know when the
+     * manager let go. Optional, so the back office — which saves through its own form — is
+     * unchanged.
+     */
+    onGeometryCommit?: (id: number, rect: Rect) => void;
     bounds: Bounds;
     grid: number;
     snapEnabled: boolean;
@@ -107,9 +116,12 @@ export function FloorCanvas({
     labels,
     selectedIds,
     onToggleSelect,
+    onGeometryCommit,
 }: FloorCanvasProps): JSX.Element {
     const svgRef = useRef<SVGSVGElement>(null);
     const suppressFocusSelect = useRef(false);
+    /** The last rect a live gesture produced, so letting go can report where it landed. */
+    const inFlight = useRef<{ id: number; rect: Rect } | null>(null);
     const [drag, setDrag] = useState<Drag>(null);
 
     const effectiveGrid = snapEnabled ? grid || DEFAULT_GRID : 0;
@@ -190,16 +202,25 @@ export function FloorCanvas({
             const dx = (event.clientX - drag.startX) * factor;
             const dy = (event.clientY - drag.startY) * factor;
 
-            if (drag.kind === 'move') {
-                onGeometryChange(drag.id, moveRect(drag.origin, dx, dy, options));
-            } else {
-                onGeometryChange(drag.id, resizeRect(drag.origin, drag.handle, dx, dy, options));
-            }
+            const rect =
+                drag.kind === 'move'
+                    ? moveRect(drag.origin, dx, dy, options)
+                    : resizeRect(drag.origin, drag.handle, dx, dy, options);
+
+            inFlight.current = { id: drag.id, rect };
+            onGeometryChange(drag.id, rect);
         },
         [drag, onGeometryChange, options, scale],
     );
 
-    const endDrag = useCallback(() => setDrag(null), []);
+    const endDrag = useCallback(() => {
+        const landed = inFlight.current;
+
+        inFlight.current = null;
+        setDrag(null);
+
+        if (landed !== null) onGeometryCommit?.(landed.id, landed.rect);
+    }, [onGeometryCommit]);
 
     const onKeyDownTable = useCallback(
         (event: React.KeyboardEvent<SVGGElement>, table: CanvasTable) => {
@@ -229,12 +250,14 @@ export function FloorCanvas({
                 event.preventDefault();
                 onSelect(table.id);
                 // Alt turns the arrows into a resize of the south-east corner.
-                onGeometryChange(
-                    table.id,
-                    event.altKey
-                        ? resizeRect(rect, 'se', delta[0], delta[1], options)
-                        : moveRect(rect, delta[0], delta[1], options),
-                );
+                // A key press is a whole gesture, not a frame of one, so it commits immediately.
+                const moved = event.altKey
+                    ? resizeRect(rect, 'se', delta[0], delta[1], options)
+                    : moveRect(rect, delta[0], delta[1], options);
+
+                onGeometryChange(table.id, moved);
+                onGeometryCommit?.(table.id, moved);
+
                 return;
             }
 
@@ -256,7 +279,7 @@ export function FloorCanvas({
                 onDelete?.(table.id);
             }
         },
-        [effectiveGrid, onDelete, onDuplicate, onGeometryChange, onRotate, onSelect, onToggleSelect, options],
+        [effectiveGrid, onDelete, onDuplicate, onGeometryChange, onGeometryCommit, onRotate, onSelect, onToggleSelect, options],
     );
 
     return (
