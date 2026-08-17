@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 172
+  manual_debt: 169
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -218,8 +218,8 @@ features:
   KDS-002: { status: shipped, surface: user, manual: todo }
   KDS-003: { status: shipped, surface: user, manual: todo }
   KDS-004: { status: shipped, surface: user, manual: todo }
-  KDS-005: { status: shipped, surface: user, manual: todo }
-  KDS-006: { status: shipped, surface: user, manual: todo }
+  KDS-005: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
+  KDS-006: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#what-to-make }
   KDS-007: { status: shipped, surface: user, manual: todo }
   KDS-008: { status: shipped, surface: user, manual: todo }
   KDS-009: { status: shipped, surface: user, manual: todo }
@@ -243,7 +243,7 @@ features:
   KDS-052: { status: shipped, surface: user, manual: todo }
   KDS-053: { status: shipped, surface: user, manual: kitchen/notes.md#a-note-added-after-the-order-was-sent }
   KDS-054: { status: shipped, surface: user, manual: todo }
-  KDS-055: { status: shipped, surface: user, manual: todo }
+  KDS-055: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
   KDS-056: { status: shipped, surface: user, manual: todo }
   KDS-057: { status: shipped, surface: user, manual: todo }
   KDS-058: { status: shipped, surface: user, manual: todo }

@@ -890,3 +890,127 @@ it('does not drag a cancellation along when the card is bumped or recalled', fun
         ->and(DB::table('prep_line_stage_logs')->where('prep_order_line_id', $cancellationId)->count())
         ->toBe(0);
 });
+
+/**
+ * KDS-055 / KDS-005 (BAN-485) — the service mode, on the card and on the ticket.
+ *
+ * `prep_orders.preset_label` and `customer_name` were inserted as literal `null`, and the board has
+ * rendered both since it was built: `TicketCard` falls back through
+ * `table_label ?? preset_label ?? "takeaway"` and shows the customer as a badge. Every counter order
+ * therefore read as a generic takeaway with nobody's name on it — a declared contract with no
+ * supplier, which is this repo's most common defect shape.
+ */
+function takeawayPreset(PosFixtures $fx, string $name = 'Takeaway'): int
+{
+    return DB::table('pos_presets')->insertGetId([
+        'company_id' => $fx->company->getKey(),
+        'name' => $name,
+        'service_at' => 'counter',
+        'identification' => 'none',
+        'sequence' => 10,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+}
+
+it('puts the service mode and the customer on the kitchen card', function (): void {
+    $preset = takeawayPreset($this->fx);
+    $customer = DB::table('customers')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Amina B.',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], [
+            'preset_id' => $preset,
+            'customer_id' => $customer,
+        ])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $card = DB::table('prep_orders')->first();
+
+    expect($card->preset_label)->toBe('Takeaway')
+        ->and($card->customer_name)->toBe('Amina B.');
+});
+
+it('keeps the service mode current when the order is amended', function (): void {
+    // The update branch of `upsertPrepOrder` refreshes table and guests; it has to refresh these
+    // two as well, or a takeaway converted to a dine-in keeps the label it was fired under.
+    $preset = takeawayPreset($this->fx);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $preset])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $dineIn = takeawayPreset($this->fx, 'Dine in');
+    Order::query()->where('uuid', $uuid)->update(['pos_preset_id' => $dineIn]);
+
+    Order::query()->where('uuid', $uuid)->update(['general_customer_note' => 'no onions']);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->first()->preset_label)->toBe('Dine in');
+});
+
+it('leaves the labels null on an order with neither a preset nor a customer', function (): void {
+    $uuid = kitchenOrder($this->fx);
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $card = DB::table('prep_orders')->first();
+
+    // Not the empty string: `TicketCard` falls back on `?? `, which an empty string defeats.
+    expect($card->preset_label)->toBeNull()
+        ->and($card->customer_name)->toBeNull();
+});
+
+it('prints the service mode on the ticket a cook reads', function (): void {
+    $printer = DB::table('pos_printers')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Kitchen printer',
+        'printer_type' => 'epson_epos',
+        'print_all_categories' => true,
+        'characters_per_line' => 42,
+        'copies' => 1,
+        'active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    DB::table('pos_config_printer')->insert([
+        'pos_config_id' => $this->fx->config->getKey(),
+        'pos_printer_id' => $printer,
+    ]);
+    $this->fx->config->forceFill(['use_preparation_printers' => true])->save();
+
+    $preset = takeawayPreset($this->fx);
+    $customer = DB::table('customers')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Amina B.',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $preset, 'customer_id' => $customer])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    $rendered = $this->withHeaders($this->fx->headers())->getJson('/api/kitchen/print-jobs')
+        ->assertOk()
+        ->json('jobs.0.rendered_text');
+
+    // A takeaway and a dine-in used to print identically, distinguishable only by a missing Table
+    // line — the pass inferring the service mode from an absence.
+    expect($rendered)->toContain('TAKEAWAY')
+        ->and($rendered)->toContain('Amina B.');
+});
