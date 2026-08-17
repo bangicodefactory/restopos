@@ -301,6 +301,47 @@ describe('the guest count a preset requires', () => {
         expect((await sendToKitchen(orderUuid)).status).toBe('sent');
     });
 
+    it('refuses a course fire too — it does not go through sendToKitchen (review of #61)', async () => {
+        // `fireCourseAndSend` posts to the fire endpoint, prints and marks sent entirely on its own.
+        // A guard placed only in `sendToKitchen` let a course reach the pass with no cover count:
+        // the same defect through the other door.
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: DINE_IN });
+        const courseUuid = addCourse(orderUuid, 'Starters');
+        const lineUuid = addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        setLineCourse(lineUuid, courseUuid);
+
+        const outcome = await fireCourseAndSend(orderUuid, courseUuid);
+
+        expect(outcome.status).toBe('needs_guests');
+        expect(post).not.toHaveBeenCalled();
+
+        // Refused *before* the course is stamped, so it stays fireable rather than being marked
+        // sent for food that never printed.
+        expect(useOrderStore.getState().courses[courseUuid]?.fired).toBeFalsy();
+    });
+
+    it('fires a course once the count is there', async () => {
+        installPresets();
+
+        const orderUuid = await createOrder({ tableId: 1, presetId: DINE_IN, guestCount: 4 });
+        const courseUuid = addCourse(orderUuid, 'Starters');
+        const lineUuid = addLine({ orderUuid, variantId: PIZZA, quantity: 2 });
+        setLineCourse(lineUuid, courseUuid);
+
+        const outcome = await fireCourseAndSend(orderUuid, courseUuid);
+
+        // Asserting the fire endpoint was actually reached, not just that the call returned 'sent':
+        // a course with no lines attached returns 'nothing' long before the guard, which is how a
+        // mis-wired fixture makes this test pass without exercising anything.
+        expect(outcome.status).toBe('sent');
+        expect(post).toHaveBeenCalledWith(
+            `pos/orders/${orderUuid}/courses/${courseUuid}/fire`,
+            expect.anything(),
+        );
+    });
+
     it('does not ask again when more is added to an order that already has a count', async () => {
         // The rule is "this order has a cover count", not "this order has been sent". A waiter
         // adding a dessert must not be stopped to re-answer a question the kitchen already has.

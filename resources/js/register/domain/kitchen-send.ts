@@ -142,9 +142,9 @@ export async function sendToKitchen(
         return { status: 'nothing', delta };
     }
 
-    // Checked here rather than in the button's handler, so every route to the kitchen is covered:
-    // a guard living in one caller is a guard that one caller has. `fireCourseAndSend` comes through
-    // this same function, and the offline path is below it.
+    // Checked here rather than in the button's handler, so the online and offline paths below are
+    // both covered by one test. `fireCourseAndSend` does *not* come through here — it has its own
+    // complete path and its own copy of this check.
     if (needsGuestCount(orderUuid)) {
         return { status: 'needs_guests', delta };
     }
@@ -226,6 +226,17 @@ export async function fireCourseAndSend(orderUuid: string, courseUuid: string): 
         // Nothing new to fire, but still stamp the course fired so its tag shows (RST-084).
         fireCourse(orderUuid, courseUuid);
         return { status: 'nothing', delta: courseDelta };
+    }
+
+    // RST-072, again — this function does **not** go through `sendToKitchen`. It posts to the fire
+    // endpoint, prints and marks sent entirely on its own, so a guard placed only there let a
+    // course reach the pass with no cover count: the same defect through the other door, which is
+    // exactly what "a guard in one caller is a guard that one caller has" was supposed to mean.
+    //
+    // Before the course is stamped fired, so a refusal leaves it fireable rather than marking a
+    // course sent that never printed.
+    if (needsGuestCount(orderUuid)) {
+        return { status: 'needs_guests', delta: courseDelta };
     }
 
     const courseName = course.name ?? `Service ${course.index}`;
