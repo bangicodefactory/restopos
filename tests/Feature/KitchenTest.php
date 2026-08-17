@@ -7,6 +7,7 @@ use App\Enums\PrepLineState;
 use App\Enums\PrepOrderState;
 use App\Enums\PrintJobState;
 use App\Events\Kitchen\KitchenTicketCreated;
+use App\Models\Identity\Company;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\PosDevice;
@@ -1013,4 +1014,77 @@ it('prints the service mode on the ticket a cook reads', function (): void {
     // line — the pass inferring the service mode from an absence.
     expect($rendered)->toContain('TAKEAWAY')
         ->and($rendered)->toContain('Amina B.');
+});
+
+it('never prints another company preset on this venue ticket (review of #59)', function (): void {
+    // `customer_id` has been ownership-checked since REG-153; `pos_preset_id` never was, because for
+    // a long time nothing read it back. Denormalising the preset *name* onto the card and the ticket
+    // header turned a stored-but-unused untrusted id into a displayed one — the probe on this branch
+    // printed `RIVAL SECRET` on the pass.
+    $foreign = Company::query()->create([
+        'name' => 'Rival Bistro', 'currency_id' => $this->fx->currency->getKey(), 'timezone' => 'UTC',
+    ]);
+
+    $foreignPreset = DB::table('pos_presets')->insertGetId([
+        'company_id' => $foreign->getKey(),
+        'name' => 'RIVAL SECRET',
+        'service_at' => 'counter',
+        'identification' => 'none',
+        'sequence' => 10,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $foreignPreset])],
+    ])->assertOk();
+
+    // Dropped, not rejected: refusing the order would lose a real sale over a label.
+    expect(Order::query()->where('uuid', $uuid)->value('pos_preset_id'))->toBeNull();
+
+    $this->withHeaders($this->fx->headers())->postJson("/api/pos/orders/{$uuid}/preparation")->assertOk();
+
+    expect(DB::table('prep_orders')->value('preset_label'))->toBeNull();
+});
+
+it('drops a foreign preset arriving on an update, not just a create', function (): void {
+    // Both paths write `pos_preset_id` from the same client key, which is why the guard sits at the
+    // batch chokepoint rather than beside either one.
+    $mine = takeawayPreset($this->fx);
+
+    $foreign = Company::query()->create([
+        'name' => 'Rival Bistro', 'currency_id' => $this->fx->currency->getKey(), 'timezone' => 'UTC',
+    ]);
+    $foreignPreset = DB::table('pos_presets')->insertGetId([
+        'company_id' => $foreign->getKey(),
+        'name' => 'RIVAL SECRET',
+        'service_at' => 'counter',
+        'identification' => 'none',
+        'sequence' => 10,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $mine])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $foreignPreset])],
+    ])->assertOk();
+
+    expect(Order::query()->where('uuid', $uuid)->value('pos_preset_id'))->toBeNull();
+});
+
+it('keeps a preset the venue does own', function (): void {
+    $mine = takeawayPreset($this->fx);
+
+    $uuid = (string) Str::uuid();
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $mine])],
+    ])->assertOk();
+
+    expect((int) Order::query()->where('uuid', $uuid)->value('pos_preset_id'))->toBe($mine);
 });
