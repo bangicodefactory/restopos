@@ -57,6 +57,20 @@ export type UiSlice = {
     /** Receipt currently previewed (uuid), so the receipt screen survives a re-render. */
     receiptOrderUuid: string | null;
     lastScanAt: number;
+    /**
+     * Overrides a manager has granted on this device, keyed by line uuid (REG-045, BAN-518).
+     *
+     * Only the *local* half. The authoritative record is the `ApprovalRow` written to IndexedDB and
+     * synced, which the server re-checks on ingest — this is what lets the screen stop refusing the
+     * edit once the manager has said yes. Keyed by line, because that is the scope the approval was
+     * granted at; a removed line's uuid never comes back, so nothing has to clear it.
+     *
+     * Deliberately **not** persisted: this store is plain zustand, so a reload mid-order asks again
+     * even though the approval itself is still in IndexedDB and will still be pushed. Re-asking is
+     * the conservative direction, and a manager standing at the till is cheaper than a screen that
+     * believes it has permission it can no longer show the provenance of.
+     */
+    lineApprovals: Record<string, string[]>;
 
     setScreen: (screen: Screen) => void;
     setPane: (pane: Pane) => void;
@@ -73,6 +87,7 @@ export type UiSlice = {
     resetSplit: () => void;
     setReceiptOrder: (orderUuid: string | null) => void;
     noteScan: () => void;
+    grantLineApproval: (lineUuid: string, ability: string) => void;
 };
 
 export const useUiStore = createPosStore<UiSlice>((set) => ({
@@ -87,6 +102,7 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
     splitSelection: {},
     receiptOrderUuid: null,
     lastScanAt: 0,
+    lineApprovals: {},
 
     setScreen: (screen) => {
         set((state) => {
@@ -177,4 +193,12 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
         set((state) => {
             state.lastScanAt = Date.now();
         }),
+
+    grantLineApproval: (lineUuid, ability) =>
+        set((state) => {
+            const held = state.lineApprovals[lineUuid] ?? [];
+
+            if (!held.includes(ability)) state.lineApprovals[lineUuid] = [...held, ability];
+        }),
+
 }));

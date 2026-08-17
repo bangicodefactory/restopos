@@ -179,6 +179,8 @@ export const registerEn = {
     'reg.order.refundLine': 'Refund',
     'reg.order.noDiscountRight': 'Discounts are not allowed for your role.',
     'reg.order.noPriceRight': 'Price editing is reserved for managers.',
+    'reg.order.discountCapped': 'Held at {limit} % — a manager can approve more for this line.',
+    'reg.order.askManager': 'Ask a manager',
     'reg.order.selectLine': 'Select a line first',
 
     // ── customer ─────────────────────────────────────────────────────────────
@@ -516,6 +518,8 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.order.refundLine': 'Rembourser',
     'reg.order.noDiscountRight': 'Les remises ne sont pas autorisées pour votre rôle.',
     'reg.order.noPriceRight': 'La modification du prix est réservée aux managers.',
+    'reg.order.discountCapped': 'Limité à {limit} % — un manager peut en autoriser plus sur cette ligne.',
+    'reg.order.askManager': 'Demander un manager',
     'reg.order.selectLine': 'Sélectionnez d’abord une ligne',
 
     'reg.customer.title': 'Client',

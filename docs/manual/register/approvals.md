@@ -55,6 +55,17 @@ If any of those fail, the action is refused server-side even though the till acc
 the attempt is recorded against the cashier who pushed it — not against the manager whose name was
 used. **A till claiming a permission its manager does not have is worth knowing about.**
 
+### Asking for an override at the till
+
+A cashier who cannot set a price sees the **Price** key marked with a lock rather than greyed out.
+Tapping it asks for a manager: they pick their name, enter their PIN on the cashier's device, and
+the key unlocks **for that line**.
+
+Discounts work the other way round, because a cashier is entitled to discount up to the house
+limit. Typing past it holds the line at the limit and offers **Ask a manager**; approving applies
+the figure that was typed. Nothing changes if the manager is refused or walks away — the line stays
+exactly as it was.
+
 ### One approval covers one line
 
 When you approve an override on a particular line, that is the line it applies to. Approving a 90 %

@@ -559,6 +559,14 @@ export type PosConfigRow = {
     amount_authorized_diff: Money | null;
     restrict_price_control: boolean;
     manual_discount: boolean;
+    /**
+     * The house cap on a line discount, as a percentage (BAN-518).
+     *
+     * Server-owned and not a `pos_configs` column — it comes from `config/pos.php` and is attached
+     * to the payload by hand. Anything above it needs `line.discount.above_limit`; the server caps
+     * it regardless, so this is what lets the till *ask* first rather than find out afterwards.
+     */
+    discount_limit_percent: Money;
     ship_later: boolean;
     set_maximum_difference: boolean;
 

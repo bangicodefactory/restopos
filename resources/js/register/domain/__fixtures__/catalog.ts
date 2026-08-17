@@ -227,6 +227,7 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         amount_authorized_diff: null,
         restrict_price_control: false,
         manual_discount: true,
+        discount_limit_percent: '30',
         ship_later: false,
         set_maximum_difference: false,
         receipt_header: null,

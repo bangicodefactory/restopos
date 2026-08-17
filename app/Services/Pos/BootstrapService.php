@@ -484,6 +484,13 @@ final readonly class BootstrapService
         $row['trusted_config_ids'] = $config->trustedConfigs()->pluck('pos_configs.id')->all();
         $row['channel'] = $config->channelName();
 
+        // The house discount cap (BAN-518). It lives in `config/pos.php`, not on `pos_configs`, so
+        // `attributesToArray()` above does not carry it — and without it the till has no idea when a
+        // discount needs a manager. It accepted 90 %, the server cut it to 30, and the cashier found
+        // out from a warning after the sale. A string, like every other compared decimal: a
+        // percentage that reaches `bccomp` must not have been through a float first.
+        $row['discount_limit_percent'] = (string) $this->config->get('pos.discount_limit_percent', 30);
+
         return $row;
     }
 
