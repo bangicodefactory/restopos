@@ -747,8 +747,8 @@ final readonly class PreparationService
                 'tracking_number' => $order->tracking_number,
                 'table_label' => $this->tableLabel($order),
                 'guest_count' => (int) $order->guest_count,
-                'preset_label' => null,
-                'customer_name' => null,
+                'preset_label' => $this->presetLabel($order),
+                'customer_name' => $this->customerName($order),
                 'order_note' => $order->general_customer_note,
                 'state' => PrepOrderState::Pending->value,
                 'fired_at' => $now,
@@ -762,6 +762,8 @@ final readonly class PreparationService
             $this->connection->table('prep_orders')->where('id', $prepOrderId)->update([
                 'guest_count' => (int) $order->guest_count,
                 'table_label' => $this->tableLabel($order),
+                'preset_label' => $this->presetLabel($order),
+                'customer_name' => $this->customerName($order),
                 'order_note' => $order->general_customer_note,
                 'updated_at' => $now,
             ]);
@@ -900,6 +902,36 @@ final readonly class PreparationService
         }
 
         return $jobs;
+    }
+
+    /**
+     * The service mode this order was taken under — "Takeaway", "Delivery", "Dine in" (KDS-055).
+     *
+     * `prep_orders.preset_label` and `customer_name` were inserted as literal `null`, and the board
+     * has been rendering both since it was built: `TicketCard` falls back through
+     * `table_label ?? preset_label ?? "takeaway"` and shows the customer as a badge. So every
+     * counter order read as a generic takeaway with nobody's name on it, because the two columns the
+     * card reads were never written — a declared contract with no supplier.
+     *
+     * Denormalised onto the row rather than joined at read time: the card is what a cook sees when
+     * the order is long gone from `pos_orders`' hot path, and the label is a snapshot of what was
+     * true when the food was fired.
+     */
+    private function presetLabel(Order $order): ?string
+    {
+        $name = $order->preset?->name;
+
+        // `preset_label` is `string(32)`. MySQL refuses an overlong value outright, so a venue with a
+        // wordy preset name would lose the whole send rather than a few characters of a label.
+        return is_string($name) && $name !== '' ? mb_substr($name, 0, 32) : null;
+    }
+
+    /** Who to call when the food is up (KDS-005) — `customer_name` is `string(96)`. */
+    private function customerName(Order $order): ?string
+    {
+        $name = $order->customer?->name;
+
+        return is_string($name) && $name !== '' ? mb_substr($name, 0, 96) : null;
     }
 
     /**

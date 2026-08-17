@@ -24,6 +24,7 @@ use App\Models\Pos\Payment as OrderPayment;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
+use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosSession;
 use App\Models\Restaurant\OrderCourse;
 use App\Services\Audit\AuditRecorder;
@@ -182,6 +183,7 @@ final readonly class OrderSyncService
         // left to violate the foreign key (REG-153).
         if (isset($command['order']) && is_array($command['order'])) {
             $command['order'] = $this->resolvePlaceholderCustomer($config, $command['order'], $customerIdMap);
+            $command['order'] = $this->resolveOwnedPreset($config, $command['order']);
         }
 
         try {
@@ -234,6 +236,48 @@ final readonly class OrderSyncService
      * refused loudly instead of vanishing quietly. A legitimate client cannot reach this — the
      * replica it picks ids from is already company-scoped.
      *
+     * @param  array<string, mixed>  $order
+     * @param  array<int, int>  $customerIdMap
+     * @return array<string, mixed>
+     */
+    /**
+     * Drop a preset that is not this company's (BAN-485, review of #59).
+     *
+     * `customer_id` has been checked for ownership since REG-153; `pos_preset_id` never was, because
+     * for a long time nothing read it back. BAN-485 changed that — the preset's **name** is now
+     * denormalised onto `prep_orders.preset_label` and printed in the ticket header — so a crafted
+     * `preset_id` puts another tenant's preset name on this venue's kitchen tickets. A probe against
+     * this branch printed `RIVAL SECRET` on the pass.
+     *
+     * Dropped to null rather than rejected, matching how every other unusable id on an order command
+     * is handled: refusing the order would lose a real sale over a field the kitchen only uses as a
+     * label. Both the create and the update path run through here, which is the reason it lives at
+     * this chokepoint rather than next to either one.
+     *
+     * @param  array<string, mixed>  $order
+     * @return array<string, mixed>
+     */
+    private function resolveOwnedPreset(PosConfig $config, array $order): array
+    {
+        foreach (['preset_id', 'pos_preset_id'] as $key) {
+            if (! isset($order[$key])) {
+                continue;
+            }
+
+            $owned = PosPreset::query()
+                ->whereKey((int) $order[$key])
+                ->where('company_id', $config->company_id)
+                ->exists();
+
+            if (! $owned) {
+                $order[$key] = null;
+            }
+        }
+
+        return $order;
+    }
+
+    /**
      * @param  array<string, mixed>  $order
      * @param  array<int, int>  $customerIdMap
      * @return array<string, mixed>

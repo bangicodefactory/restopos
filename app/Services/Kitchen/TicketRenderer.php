@@ -50,6 +50,11 @@ final readonly class TicketRenderer
                 'config' => (string) $config->name,
                 'table' => $this->tableLabel($order),
                 'floor' => $this->floorLabel($order),
+                // KDS-055 — a printed ticket said where the food was going only when it was going to
+                // a table. A takeaway and a delivery printed identically to a dine-in with the table
+                // missing, which is the one distinction the pass most needs to make.
+                'preset' => $order->preset?->name,
+                'customer' => $order->customer?->name,
                 'guests' => (int) $order->guest_count,
                 'tracking_number' => $order->tracking_number,
                 'order_name' => $order->name ?? $order->receipt_number,
@@ -89,6 +94,16 @@ final readonly class TicketRenderer
             $lines[] = str_repeat('-', $width);
         }
 
+        // Above the table, because it is the first thing that changes what the cook does with the
+        // plate: a takeaway is bagged, a dine-in is run. Printed whenever it is known, including for
+        // a dine-in preset — "Table 4" alone left the pass inferring the service mode from the
+        // absence of a line (KDS-055).
+        if (($header['preset'] ?? null) !== null) {
+            $lines[] = $this->pair('Service', strtoupper((string) $header['preset']), $width);
+        }
+        if (($header['customer'] ?? null) !== null) {
+            $lines[] = $this->pair('Customer', (string) $header['customer'], $width);
+        }
         if (($header['table'] ?? null) !== null) {
             $lines[] = $this->pair('Table', (string) $header['table'], $width);
         }
