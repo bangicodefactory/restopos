@@ -452,6 +452,8 @@ export type PosPresetRow = {
     name: string;
     service_at: PresetServiceAt;
     identification: PresetIdentification;
+    /** This service mode needs a cover count before the kitchen sees the order (RST-072). */
+    use_guest: boolean;
     pricelist_id: number | null;
     fiscal_position_id: number | null;
     is_timing: boolean;

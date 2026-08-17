@@ -275,6 +275,7 @@ export function makePreset(partial: Partial<PosPresetRow> & Pick<PosPresetRow, '
         name: `Preset ${partial.id}`,
         service_at: 'table',
         identification: 'none',
+        use_guest: false,
         pricelist_id: null,
         fiscal_position_id: null,
         is_timing: false,

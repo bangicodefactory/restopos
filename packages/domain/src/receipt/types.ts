@@ -280,6 +280,14 @@ export type PrepTicketView = {
     trackingNumber: string | null;
     tableName: string | null;
     presetName: string | null;
+    /**
+     * Covers on the table (RST-073) — the number a chef plates to.
+     *
+     * The receipt has carried it since it was written; the prep ticket, which is the copy the
+     * kitchen actually reads, did not. Null where it is unknown or meaningless (a takeaway), and
+     * zero is treated the same way: "0 guests" printed on a ticket is worse than no line.
+     */
+    guests: number | null;
     cashierName: string | null;
     firedAt: string;
     courseName: string | null;

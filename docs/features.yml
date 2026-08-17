@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 168
+  manual_debt: 167
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -189,7 +189,8 @@ features:
   # Guest count (RST-070 … RST-079) — user
   RST-070: { status: shipped, surface: user, manual: todo }
   RST-071: { status: shipped, surface: user, manual: todo }
-  RST-073: { status: shipped, surface: user, manual: todo }
+  RST-072: { status: shipped, surface: user, manual: register/orders.md#guests }
+  RST-073: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
   RST-074: { status: shipped, surface: user, manual: todo }
 
   # Courses (RST-080 … RST-099) — user

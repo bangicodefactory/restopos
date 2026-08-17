@@ -180,6 +180,14 @@ export function App(): JSX.Element {
     const onSend = useCallback(async (): Promise<boolean> => {
         if (selectedOrderUuid === null) return false;
         const outcome = await sendToKitchen(selectedOrderUuid);
+        if (outcome.status === 'needs_guests') {
+            // RST-072 — this service mode plates to a cover count, and the order has none. Ask for
+            // it rather than sending a ticket the kitchen cannot work from; the same dialog the
+            // guests button opens, so there is one place the number is entered.
+            openDialog('guests');
+            toast.show({ tone: 'warn', title: t('reg.order.guestsRequired') });
+            return false;
+        }
         if (outcome.status === 'outdated') {
             toast.show({ tone: 'warn', title: t('reg.order.sentOutdated') });
             return false;
@@ -188,7 +196,7 @@ export function App(): JSX.Element {
             toast.show({ tone: 'success', title: t('reg.order.sentOk') });
         }
         return outcome.status === 'sent' || outcome.status === 'nothing';
-    }, [selectedOrderUuid, t, toast]);
+    }, [openDialog, selectedOrderUuid, t, toast]);
 
     const onFireCourse = useCallback(
         async (courseUuid: string) => {

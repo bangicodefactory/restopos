@@ -5,6 +5,7 @@ features:
   - KDS-005
   - KDS-006
   - KDS-055
+  - RST-073
 ---
 
 # Reading a kitchen ticket
@@ -28,7 +29,7 @@ If a service line is missing, the order was taken without one — treat a ticket
 dine-in and one without as counter collection, and ask if it matters.
 
 **Guests** is how many people are eating, not how many dishes to make. Quantities are always on the
-items themselves.
+items themselves. It is absent on a takeaway, and on any order taken without a cover count.
 
 ## What to make
 
