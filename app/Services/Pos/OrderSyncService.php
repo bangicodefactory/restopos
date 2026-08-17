@@ -2243,7 +2243,7 @@ final readonly class OrderSyncService
             // balances and the session still reconciles against what was declared, so nothing else
             // in the system has any reason to notice (BAN-410).
             if ($settled) {
-                $verdict = $this->settledPaymentVerdict($op, $command, $existing[$uuid] ?? null);
+                $verdict = $this->settledPaymentVerdict($op, $command, $existing[$uuid] ?? null, $config, $order);
 
                 if ($verdict === SettledOrder::Reject) {
                     $results[] = $this->refuseSettledWrite($config, $order, $device, $employeeId, 'payment', $op, $uuid, [
@@ -2406,14 +2406,34 @@ final readonly class OrderSyncService
     }
 
     /**
-     * May this payment command touch a settled order? (BAN-410)
+     * May this payment command touch a settled order? (BAN-410, BAN-494)
      *
-     * Nothing about a payment may move, so the only permitted answer is `Noop` — the resend of an
-     * unchanged row that every reprint produces.
+     * Almost nothing may move, so the usual permitted answer is `Noop` — the resend of an unchanged
+     * row that every reprint produces.
+     *
+     * **One door, and it is the other half of the tip door.** `settledLineVerdict` deliberately lets
+     * a tip *line* join a paid order, because that is what a tip is. Nothing let the *payment* follow
+     * it, so the tip landed as revenue with no money behind it: the order's total rose by the tip,
+     * the card payment stayed at the pre-tip figure, and a settled sale was left reading
+     * `paid 12.10, due 2.00`. The customer's card was charged the tip in the real world and the
+     * session's takings were permanently short of it.
+     *
+     * The opening is deliberately the narrowest one that closes that hole:
+     *
+     *  - only where the register tips after payment at all — the same gate the line side uses;
+     *  - only an **increase**, so this can never be used to reduce a tender after the fact, which is
+     *    the skim BAN-410 exists to refuse;
+     *  - only up to the order's own total, which already includes the tip line. That makes the door
+     *    self-limiting: it can close a due a tip created and can never overpay a sale;
+     *  - only the `amount` field. Method, `is_change` and `is_refund` stay frozen — moving a
+     *    settled tender from card to cash is not tipping.
+     *
+     * A refusal is still recorded either way, so an attempt that misses these bounds is on the
+     * record rather than merely absent.
      *
      * @param  array<string, mixed>  $command
      */
-    private function settledPaymentVerdict(string $op, array $command, ?int $paymentId): string
+    private function settledPaymentVerdict(string $op, array $command, ?int $paymentId, ?PosConfig $config = null, ?Order $order = null): string
     {
         if ($op === 'delete') {
             return $paymentId === null ? SettledOrder::Noop : SettledOrder::Reject;
@@ -2444,7 +2464,76 @@ final readonly class OrderSyncService
             ], static fn (mixed $v): bool => $v !== null),
         );
 
-        return $changes === [] ? SettledOrder::Noop : SettledOrder::Reject;
+        if ($changes === []) {
+            return SettledOrder::Noop;
+        }
+
+        return $this->isTipTopUp($changes, $command, $held, $config, $order) ? SettledOrder::Allow : SettledOrder::Reject;
+    }
+
+    /**
+     * Is this the payment half of a tip (BAN-494)?
+     *
+     * @param  array<string, mixed>  $changes
+     * @param  array<string, mixed>  $command
+     */
+    private function isTipTopUp(array $changes, array $command, OrderPayment $held, ?PosConfig $config, ?Order $order): bool
+    {
+        if ($config === null || $order === null) {
+            return false;
+        }
+
+        if (! SettledOrder::acceptsTipAfterPayment((bool) $config->enable_tips, (bool) $config->tip_after_payment)) {
+            return false;
+        }
+
+        // Only the amount. A settled tender that changes method is not a tip.
+        if (array_keys($changes) !== ['amount']) {
+            return false;
+        }
+
+        // From the command, not from the diff: `AuditRecorder::diff` reports a from/to pair per
+        // field, which is what a log wants and not a number.
+        $was = (string) $held->getRawOriginal('amount');
+        $now = (string) ($command['amount'] ?? $was);
+
+        // Upwards only: a reduction after the receipt is printed is the skim BAN-410 refuses.
+        if (bccomp($now, $was, 4) <= 0) {
+            return false;
+        }
+
+        // Nothing to follow if the order declares no tip.
+        $tip = (string) ($order->getRawOriginal('tip_amount') ?? '0');
+
+        if (bccomp($tip, '0', 4) <= 0) {
+            return false;
+        }
+
+        // And the payments together must not exceed the goods plus the declared tip.
+        //
+        // **An absolute cap, not a per-payment allowance.** "May rise by no more than the tip" reads
+        // fine and leaves two holes: a split tender where two cards each rise by the full tip in one
+        // push and collect it twice, and a resend where every push adds the tip again and inflates
+        // the card without limit. A device token is a real credential, and BAN-410 exists precisely
+        // because a tampered till must not be able to restate money. Capping the *sum* refuses both
+        // by construction — once the payments equal what the order is worth, nothing further fits.
+        //
+        // Built from `soldTotal` + `tip_amount` rather than from `amount_total` or from all the
+        // lines, and the reason is ordering. Line commands are applied before payment commands, so
+        // the tip line is in the table by now — but it is not *priced* until the recompute that runs
+        // after every child command lands, and `amount_total` is likewise still the pre-tip figure
+        // (probed: `total_at_payment_time 12.1000` on a push settling at 14.10). `soldTotal`
+        // deliberately excludes tip lines, so it counts exactly the lines that *are* priced, and the
+        // declared tip supplies the rest.
+        $cap = bcadd($this->soldTotal($config, $order), $tip, 4);
+
+        $others = (string) OrderPayment::query()
+            ->where('pos_order_id', $order->getKey())
+            ->whereKeyNot($held->getKey())
+            ->whereNull('deleted_at')
+            ->sum('amount');
+
+        return bccomp(bcadd($others, $now, 4), $cap, 4) <= 0;
     }
 
     /**

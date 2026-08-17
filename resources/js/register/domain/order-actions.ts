@@ -33,6 +33,7 @@ import {
     type OrderSlice,
 } from '../state/order-store';
 import { resolveFiscalPosition, type FiscalPositionSource } from './fiscal-position-precedence';
+import { tipDelta, tipTopUp } from './tips';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
@@ -1108,10 +1109,35 @@ export function setTip(orderUuid: string, amount: string): void {
         }
     }
 
+    const previousTip = snapshot().orders[orderUuid]?.tip_amount ?? '0';
+
     updateOrder(orderUuid, (order) => {
         order.is_tipped = true;
         order.tip_amount = amount;
     });
+
+    // RST-125 — the card has to follow the tip.
+    //
+    // On a settled order the tip line raises the total, and without this the payment stays at the
+    // pre-tip figure: the till shows a closed sale that owes money, and the session's takings come
+    // up short of what the acquirer actually charged. The server opens exactly one door for this —
+    // an increase, on the amount alone, no larger than the declared tip — and this aims at the same
+    // target so the push is accepted rather than silently refused.
+    //
+    // Written through `mutate` rather than `setPaymentAmount`, which refuses on a frozen order by
+    // design. That refusal is right for every other caller.
+    const topUp = tipTopUp(paymentsOf(snapshot(), orderUuid), tipDelta(previousTip, amount));
+
+    if (topUp !== null) {
+        mutate((draft) => {
+            const payment = draft.payments[topUp.paymentUuid];
+            if (!payment) return;
+            payment.amount = topUp.amount;
+            payment.rev += 1;
+        });
+    }
+
+    commit(orderUuid);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

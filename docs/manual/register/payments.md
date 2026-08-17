@@ -22,6 +22,7 @@ features:
   - RST-107
   - RST-111
   - REG-337
+  - RST-125
 ---
 
 # Taking payment
@@ -204,3 +205,22 @@ Validation is blocked, with the reason on screen, when:
 - **cash does not match the rounding rule**, or change is due on a till with no cash method
 
 Set the missing thing and validate again. Nothing is lost in the meantime.
+
+## Tips
+
+A tip is added **after** the sale is settled — that is what a tip is — so the till lets one onto a
+closed order even though nothing else about it can change.
+
+Applying a tip does two things: it adds the tip to the order, and it raises the tender it was left
+on, because that is what the card is actually charged. A €12.10 meal with a €2.00 tip becomes a
+€14.10 sale paid €14.10, not a €14.10 sale that still owes €2.00.
+
+**Which tender it lands on.** Card, and where a bill was split across two cards, the larger one. A
+cash tip needs no adjustment — the money is already in the drawer and the count will find it.
+
+**What the till will not do.** It will not reduce a payment after the receipt has printed, will not
+move a settled payment from card to cash, and will not raise a tender by more than the tip you
+entered. Those are the same protections that keep a printed receipt and the drawer honest; every
+refused attempt is recorded.
+
+Your register must have tipping and after-payment tipping switched on for any of this to be offered.
