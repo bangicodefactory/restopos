@@ -565,6 +565,50 @@ describe('a feature the diff claims has to be recorded (BAN-519)', () => {
             expect(warnings.some((w) => w.includes('REG-404'))).toBe(false);
         });
 
+        it('exempts a test file, exactly as rule 4 does (review of #57)', () => {
+            // The rules disagreed about the same file. `addedSince` narrows the diff with the
+            // `WATCHED` pathspec, which knows nothing of `WATCH_EXCEPTIONS`, so a test-only commit
+            // printed `0 behaviour` on its summary line — rule 4 seeing correctly that nothing was
+            // owed — and then failed on the file it had just called exempt.
+            //
+            // Not a hypothetical: the register tests cite ids constantly and 173 features are still
+            // unrecorded, so adding coverage for any of them failed a gate whose own documentation
+            // promises tests are exempt.
+            const { errors } = run({
+                features: ledger,
+                changedFiles: ['resources/js/register/components/numpad.test.tsx'],
+                citedIds: [{ id: 'REG-208', file: 'resources/js/register/components/numpad.test.tsx' }],
+            });
+
+            expect(errors).toEqual([]);
+        });
+
+        it('exempts a fixture even for an id the spec does not define', () => {
+            // The unwaivable half has to respect the exemption too, or a fixture naming a made-up
+            // id becomes a build failure with no escape hatch at all.
+            const { errors } = run({
+                features: ledger,
+                changedFiles: ['resources/js/register/domain/__fixtures__/catalog.ts'],
+                citedIds: [{ id: 'REG-404', file: 'resources/js/register/domain/__fixtures__/catalog.ts' }],
+                skipDiffGate: true,
+            });
+
+            expect(errors).toEqual([]);
+        });
+
+        it('counts only the claims it examined', () => {
+            const { diff: summary } = run({
+                features: ledger,
+                changedFiles: ['app/X.php'],
+                citedIds: [
+                    { id: 'REG-001', file: 'app/X.php' },
+                    { id: 'REG-208', file: 'tests/Feature/XTest.php' },
+                ],
+            });
+
+            expect(summary.cited).toBe(1);
+        });
+
         it('asks nothing when no diff was requested', () => {
             expect(run({ features: ledger, citedIds: [{ id: 'REG-208', file: 'app/X.php' }] }).errors).toEqual([]);
         });

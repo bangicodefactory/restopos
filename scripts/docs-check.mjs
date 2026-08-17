@@ -393,7 +393,16 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, cite
         // failure this rule was written to catch. The always-on sibling of this check — every id in
         // the ledger exists in the spec — has never been waivable; the diff-mode one should not be
         // either, or a refactor carrying `[skip docs]` becomes the way to smuggle one in.
-        for (const { id, file } of citedIds) {
+        // Through `isWatched`, not the raw path, so this rule exempts exactly what rule 4 exempts.
+        // `addedSince` narrows the diff with the `WATCHED` pathspec but knows nothing of
+        // `WATCH_EXCEPTIONS`, so tests and fixtures arrived here — and a test-only commit reported
+        // `0 behaviour` on the summary line while failing on the very file it had just called
+        // exempt. The register tests cite feature ids constantly and 173 features are still
+        // unrecorded, so that is a gate failing pull requests its own documentation promises to
+        // ignore. Two definitions of one exemption; this leaves one.
+        const claimed = citedIds.filter(({ file }) => isWatched(file));
+
+        for (const { id, file } of claimed) {
             if (!specIds.has(id)) {
                 errors.push(
                     `${file} claims ${id}, which ${SPEC_FILE} does not define.
@@ -421,7 +430,9 @@ export function checkDocs({ features, specIds, manual, changedFiles = null, cite
             watched: watched.length,
             docs: docs.length,
             migrations: migrations.length,
-            cited: citedIds.length,
+            // What it examined, not what it harvested — a count including the ids it exempted would
+            // report claims nobody was ever asked about.
+            cited: claimed.length,
         };
     }
 

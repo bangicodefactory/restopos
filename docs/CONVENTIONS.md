@@ -247,7 +247,9 @@ lower the number. It may only ever fall.
 
    Ranges are not claims: `REG-001 … REG-039` and `BOF-070…079` orient the reader, and twenty ids
    cited that way turned out never to have been defined at all. Only added lines count — re-touching
-   a line that already cited an id is not a new feature.
+   a line that already cited an id is not a new feature. **Tests and fixtures are exempt**, the same
+   exemption rule 4 grants and through the same `isWatched` check: the register tests cite ids
+   constantly, and a PR that only adds coverage ships no feature to record.
 
    The rule has two halves and they are **not** equally waivable. *Cited but unrecorded* is
    documentation debt, waived with the opt-out like rules 4 and 5. *Cited but nowhere in
