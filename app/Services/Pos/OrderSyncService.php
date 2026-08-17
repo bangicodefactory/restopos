@@ -2502,21 +2502,38 @@ final readonly class OrderSyncService
             return false;
         }
 
-        // And by no more than the tip the order itself declares.
-        //
-        // Bounded on `tip_amount` rather than on the order total, because of ordering: `updateOrder`
-        // has already written the tip columns by the time payment commands are judged, but the
-        // *total* is recomputed after every child command has landed, so at this point it is still
-        // the pre-tip figure and a total-based bound would refuse the very top-up it exists to
-        // permit. Tying the rise to the declared tip is also the truer rule — the payment may grow
-        // by the tip and by nothing else.
+        // Nothing to follow if the order declares no tip.
         $tip = (string) ($order->getRawOriginal('tip_amount') ?? '0');
 
         if (bccomp($tip, '0', 4) <= 0) {
             return false;
         }
 
-        return bccomp(bcsub($now, $was, 4), $tip, 4) <= 0;
+        // And the payments together must not exceed the goods plus the declared tip.
+        //
+        // **An absolute cap, not a per-payment allowance.** "May rise by no more than the tip" reads
+        // fine and leaves two holes: a split tender where two cards each rise by the full tip in one
+        // push and collect it twice, and a resend where every push adds the tip again and inflates
+        // the card without limit. A device token is a real credential, and BAN-410 exists precisely
+        // because a tampered till must not be able to restate money. Capping the *sum* refuses both
+        // by construction — once the payments equal what the order is worth, nothing further fits.
+        //
+        // Built from `soldTotal` + `tip_amount` rather than from `amount_total` or from all the
+        // lines, and the reason is ordering. Line commands are applied before payment commands, so
+        // the tip line is in the table by now — but it is not *priced* until the recompute that runs
+        // after every child command lands, and `amount_total` is likewise still the pre-tip figure
+        // (probed: `total_at_payment_time 12.1000` on a push settling at 14.10). `soldTotal`
+        // deliberately excludes tip lines, so it counts exactly the lines that *are* priced, and the
+        // declared tip supplies the rest.
+        $cap = bcadd($this->soldTotal($config, $order), $tip, 4);
+
+        $others = (string) OrderPayment::query()
+            ->where('pos_order_id', $order->getKey())
+            ->whereKeyNot($held->getKey())
+            ->whereNull('deleted_at')
+            ->sum('amount');
+
+        return bccomp(bcadd($others, $now, 4), $cap, 4) <= 0;
     }
 
     /**

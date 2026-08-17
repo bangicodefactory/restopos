@@ -234,3 +234,55 @@ it('is idempotent on a resend, which the outbox produces routinely', function ()
     expect(amountOf($paymentUuid))->toBe(14.10)
         ->and((float) Order::query()->where('uuid', $orderUuid)->firstOrFail()->amount_due)->toBe(0.0);
 });
+
+it('will not let a split tender collect the tip twice (review of #64)', function (): void {
+    // The hole a per-payment allowance leaves. "Each payment may rise by no more than the tip" is
+    // satisfied by *both* cards rising by the full tip in one push, and the till collects 4.00 for a
+    // 2.00 tip. Capping the sum of the payments refuses the second by construction.
+    $orderUuid = (string) Str::uuid();
+    $first = (string) Str::uuid();
+    $second = (string) Str::uuid();
+
+    push([$this->fx->orderCommand($orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+        'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+    ]], ['state' => 'paid'], [
+        ['op' => 'create', 'uuid' => $first, 'payment_method_id' => $this->fx->card->getKey(),
+            'amount' => '6.10', 'is_change' => false, 'is_refund' => false, 'payment_status' => 'done'],
+        ['op' => 'create', 'uuid' => $second, 'payment_method_id' => $this->fx->card->getKey(),
+            'amount' => '6.00', 'is_change' => false, 'is_refund' => false, 'payment_status' => 'done'],
+    ])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    push([$this->fx->orderCommand($orderUuid, [[
+        'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => tipVariantId($this->fx),
+        'qty' => '1', 'price_unit' => '2.00', 'price_type' => 'manual', 'discount' => '0',
+    ]], ['state' => 'paid', 'is_tipped' => true, 'tip_amount' => '2.00'], [
+        ['op' => 'update', 'uuid' => $first, 'amount' => '8.10',
+            'payment_method_id' => $this->fx->card->getKey(), 'payment_status' => 'done'],
+        ['op' => 'update', 'uuid' => $second, 'amount' => '8.00',
+            'payment_method_id' => $this->fx->card->getKey(), 'payment_status' => 'done'],
+    ])])->assertOk();
+
+    // 12.10 of goods plus a 2.00 tip is 14.10, and no arrangement of the two cards may exceed it.
+    $collected = (float) DB::table('pos_payments')->where('uuid', $first)->value('amount')
+        + (float) DB::table('pos_payments')->where('uuid', $second)->value('amount');
+
+    expect($collected)->toBeLessThanOrEqual(14.10);
+});
+
+it('will not let a resend keep adding the tip', function (): void {
+    // The other hole. Each push on its own looks like a legal rise by the tip; together they inflate
+    // the card without limit, and a device token is a real credential.
+    $orderUuid = (string) Str::uuid();
+    $paymentUuid = (string) Str::uuid();
+
+    settledCardSale($this->fx, $orderUuid, $paymentUuid);
+    tipPush($this->fx, $orderUuid, $paymentUuid, '2.00', '14.10')->assertOk();
+
+    push([$this->fx->orderCommand($orderUuid, [], ['state' => 'paid', 'is_tipped' => true, 'tip_amount' => '2.00'], [[
+        'op' => 'update', 'uuid' => $paymentUuid, 'amount' => '16.10',
+        'payment_method_id' => $this->fx->card->getKey(), 'payment_status' => 'done',
+    ]])])->assertOk();
+
+    expect(amountOf($paymentUuid))->toBe(14.10);
+});
