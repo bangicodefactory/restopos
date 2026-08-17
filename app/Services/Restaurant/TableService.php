@@ -421,4 +421,73 @@ final readonly class TableService
             childTableIds: $childIds,
         ));
     }
+
+    /**
+     * Tables on this floor that still hold a live bill (RST-032, RST-039).
+     *
+     * Deleting an occupied table strands its order: the row keeps a `restaurant_table_id` pointing at
+     * something that no longer exists, the floor screen cannot draw it, the ticket list filters by
+     * table and misses it, and the money on it is unreachable from every screen a waiter has. The
+     * bill does not vanish — which is worse, because nothing tells anyone it is there.
+     *
+     * Returns the table numbers rather than a boolean so the refusal can name them. "You cannot
+     * delete this floor" sends a manager hunting; "tables 4 and 7 still have open bills" is a job.
+     *
+     * @return list<string>
+     */
+    public function occupiedTablesOnFloor(int $floorId): array
+    {
+        return RestaurantTable::query()
+            ->where('restaurant_floor_id', $floorId)
+            ->whereIn('id', $this->tableIdsWithDrafts())
+            ->orderBy('table_number')
+            ->pluck('table_number')
+            ->map(static fn (mixed $number): string => (string) $number)
+            ->values()
+            ->all();
+    }
+
+    /** Does this one table still hold a live bill? */
+    public function tableHasDraftOrder(int $tableId): bool
+    {
+        return in_array($tableId, $this->tableIdsWithDrafts(), true);
+    }
+
+    /**
+     * Tables a guest is still sitting at.
+     *
+     * Soft-deleted orders are excluded — a deleted bill is not money anybody is coming back for.
+     *
+     * **Merged children count.** When two tables are pushed together the bill lives on the parent
+     * and the child carries no order of its own, so a naive draft lookup says the child is free and
+     * lets it be deleted out from under a seated party. The room then shows one table where there
+     * are two, and the merge link dangles. A child of an occupied table is a table somebody is
+     * sitting at, which is the rule this guard is actually enforcing (review of #66).
+     *
+     * @return list<int>
+     */
+    private function tableIdsWithDrafts(): array
+    {
+        $occupied = Order::query()
+            ->whereNull('deleted_at')
+            ->where('state', OrderState::Draft->value)
+            ->whereNotNull('restaurant_table_id')
+            ->distinct()
+            ->pluck('restaurant_table_id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->values()
+            ->all();
+
+        if ($occupied === []) {
+            return [];
+        }
+
+        $children = RestaurantTable::query()
+            ->whereIn('parent_id', $occupied)
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+
+        return array_values(array_unique([...$occupied, ...$children]));
+    }
 }

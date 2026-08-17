@@ -263,6 +263,7 @@ export async function createFloor(name: string, copyFromFloorId?: number): Promi
         ...catalog.floors,
         {
             id: floorId,
+            uuid: String(unwrap(response.data).floor.uuid),
             name: String(unwrap(response.data).floor.name),
             sequence: Number(unwrap(response.data).floor.sequence ?? 0),
             background_color: (unwrap(response.data).floor.background_color as string | null) ?? null,
@@ -298,8 +299,15 @@ export async function createFloor(name: string, copyFromFloorId?: number): Promi
 
 export async function renameFloor(floorId: number, name: string): Promise<void> {
     const runtime = getRuntime();
+    const floor = getCatalog().floors.find((candidate) => candidate.id === floorId);
 
-    await runtime.api.patch(`pos/floors/${floorId}`, { name });
+    if (floor === undefined) return;
+
+    // Addressed by **uuid**, not by the numeric id the catalog is keyed on. `HasUuid` resolves route
+    // bindings by uuid, and unlike `table` there is no permissive binding for `floor` — BAN-499
+    // deliberately pinned addressing to uuids — so `pos/floors/{id}` never reached the controller and
+    // renaming a floor from the till silently 404'd (BAN-452).
+    await runtime.api.patch(`pos/floors/${floor.uuid}`, { name });
 
     const catalog = getCatalog();
 
