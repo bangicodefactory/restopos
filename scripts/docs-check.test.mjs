@@ -451,7 +451,11 @@ describe('a feature the diff claims has to be recorded (BAN-519)', () => {
     // The gate could tell that *some* doc had moved and that the ledger was internally consistent.
     // Neither noticed a feature shipping unrecorded, which is the thing it exists to prevent —
     // BAN-434 annotated four in its source, recorded none, and passed green.
-    const diff = (...lines) => lines.join(String.fromCharCode(10));
+    // The `---` line is not decoration: `git diff` always emits the pair, and since the review of
+    // #57 the parser requires it, because `+++ ` on its own is also what an added line of code
+    // beginning with `++ ` looks like. Fixtures that omitted it were testing a diff git never
+    // produces.
+    const diff = (...lines) => ['--- a/x', ...lines].join(String.fromCharCode(10));
 
     describe('reading the claims out of a diff', () => {
         it('takes an id from an added line, with the file that claims it', () => {
@@ -622,5 +626,40 @@ describe('a feature the diff claims has to be recorded (BAN-519)', () => {
 
             expect(summary.cited).toBe(1);
         });
+    });
+});
+
+describe('the diff header, when a line of code looks like one (review of #57)', () => {
+    it('does not lose a claim to an added line beginning with "++ "', () => {
+        // `++ $i;` at column 0 arrives in a unified diff as `+++ $i;`. Matching `+++ ` on the prefix
+        // alone took that for a file header, set the current file to `$i;`, and — because that is
+        // not a watched path — dropped every id after it in the hunk without a word.
+        const diff = [
+            '--- a/app/Counter.php',
+            '+++ b/app/Counter.php',
+            '@@ -1,0 +1,3 @@',
+            '+++ $i;',
+            '+// REG-208 pay later',
+        ].join('\n');
+
+        expect(citedFeatureIds(diff)).toEqual([{ id: 'REG-208', file: 'app/Counter.php' }]);
+    });
+
+    it('still follows a real header across several files', () => {
+        const diff = [
+            '--- a/app/A.php',
+            '+++ b/app/A.php',
+            '@@ @@',
+            '+// REG-001',
+            '--- a/app/B.php',
+            '+++ b/app/B.php',
+            '@@ @@',
+            '+// REG-002',
+        ].join('\n');
+
+        expect(citedFeatureIds(diff)).toEqual([
+            { id: 'REG-001', file: 'app/A.php' },
+            { id: 'REG-002', file: 'app/B.php' },
+        ]);
     });
 });
