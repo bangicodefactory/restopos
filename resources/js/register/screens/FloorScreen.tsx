@@ -27,7 +27,14 @@ import { useUiStore } from '../state/ui-store';
  * (RST-058).
  */
 
-export function FloorScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => void }): JSX.Element {
+export function FloorScreen({
+    onOpenOrder,
+    onEditRoom,
+}: {
+    onOpenOrder: (uuid: string) => void;
+    /** Absent on a surface with no editor to open — the screen simply shows no toggle. */
+    onEditRoom?: () => void;
+}): JSX.Element {
     const t = useT();
     const money = useMoney();
     const catalog = useCatalog();
@@ -132,6 +139,14 @@ export function FloorScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => vo
                 })}
 
                 <span className="ms-auto flex gap-2">
+                    {/* RST-030 — the room is rearranged by whoever is standing in it, which is why
+                        the toggle lives here and not only in the back office. `config.manage` is a
+                        manager ability, so a cashier never sees it; the server checks again. */}
+                    {onEditRoom !== undefined && can('config.manage') ? (
+                        <Button size="sm" variant="secondary" onClick={onEditRoom} data-testid="floor-edit-toggle">
+                            {t('reg.floorEdit.enter')}
+                        </Button>
+                    ) : null}
                     <Button
                         size="sm"
                         variant="secondary"

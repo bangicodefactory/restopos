@@ -10,6 +10,8 @@ import type {
     PosCategoryRow,
     PosConfigRow,
     PosPresetRow,
+    RestaurantFloorRow,
+    RestaurantTableRow,
     ProductAttributeLineValueRow,
     ProductAttributeValueRow,
     ProductRow,
@@ -322,6 +324,8 @@ export type CatalogParts = {
     paymentMethods?: readonly PaymentMethodRow[];
     attributeValues?: readonly ProductAttributeValueRow[];
     attributeLineValues?: readonly ProductAttributeLineValueRow[];
+    floors?: readonly RestaurantFloorRow[];
+    tables?: readonly RestaurantTableRow[];
 };
 
 export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
@@ -390,6 +394,10 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
         pricelistResolver:
             parts.pricelists === undefined ? null : PricelistResolver.fromArray([...parts.pricelists]),
 
+        floors: parts.floors ?? [],
+        tables: parts.tables ?? [],
+        tablesById: new Map((parts.tables ?? []).map((table) => [table.id, table])),
+
         presets: parts.presets ?? [],
         paymentMethods: parts.paymentMethods ?? [],
         employees: parts.employees ?? [],
@@ -442,4 +450,35 @@ export function makeNomenclature(
     row: BarcodeNomenclatureRow = NOMENCLATURE_ROW,
 ): Nomenclature {
     return buildNomenclature(row, rules);
+}
+
+// ── restaurant floor plan ────────────────────────────────────────────────────
+
+export function makeFloor(partial: Partial<RestaurantFloorRow> & Pick<RestaurantFloorRow, 'id'>): RestaurantFloorRow {
+    return {
+        name: `Floor ${partial.id}`,
+        sequence: partial.id,
+        background_color: null,
+        active: true,
+        ...partial,
+    } as RestaurantFloorRow;
+}
+
+export function makeTable(
+    partial: Partial<RestaurantTableRow> & Pick<RestaurantTableRow, 'id' | 'floor_id'>,
+): RestaurantTableRow {
+    return {
+        parent_id: null,
+        table_number: String(partial.id),
+        identifier: `tok${partial.id}`,
+        seats: 4,
+        shape: 'square',
+        position_h: 0,
+        position_v: 0,
+        width: 80,
+        height: 80,
+        color: null,
+        active: true,
+        ...partial,
+    } as RestaurantTableRow;
 }

@@ -19,6 +19,7 @@ import { orderTotals } from './domain/totals';
 import { useT } from './i18n';
 import { useCatalog, useSelectedOrderUuid } from './hooks/use-register';
 import { BootScreen } from './screens/BootScreen';
+import { FloorEditorScreen } from './screens/FloorEditorScreen';
 import { FloorScreen } from './screens/FloorScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { PairingScreen } from './screens/PairingScreen';
@@ -270,8 +271,11 @@ export function App(): JSX.Element {
                             selectOrder(uuid);
                             setScreen('products');
                         }}
+                        onEditRoom={() => setScreen('floorEditor')}
                     />
                 ) : null}
+
+                {screen === 'floorEditor' ? <FloorEditorScreen onExit={() => setScreen('floor')} /> : null}
 
                 {screen === 'products' ? (
                     <ProductScreen

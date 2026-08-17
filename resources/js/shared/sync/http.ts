@@ -78,6 +78,11 @@ export class ApiClient {
         return this.request<T>('POST', path, body, options);
     }
 
+    /** Partial updates — floors and tables, from the register's floor editor (BAN-449). */
+    patch<T>(path: string, body: unknown, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+        return this.request<T>('PATCH', path, body, options);
+    }
+
     /** DELETE with a body — the register's deletes carry the approving manager's credentials. */
     delete<T>(path: string, body?: unknown, options: RequestOptions = {}): Promise<ApiResponse<T>> {
         return this.request<T>('DELETE', path, body, options);

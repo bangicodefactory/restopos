@@ -11,7 +11,7 @@
  * `lib/money`.
  */
 
-import type { Rect } from '../../components/floor-plan/geometry';
+import type { Rect } from '@shared/floor-plan/geometry';
 
 export type FloorListRow = {
     id: number;

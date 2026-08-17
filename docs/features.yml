@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 169
+  manual_debt: 168
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -167,7 +167,14 @@ features:
   RST-016: { status: shipped, surface: user, manual: todo }
 
   # Floor editor (RST-030 … RST-049) — user
-  RST-030: { status: shipped, surface: user, manual: todo }
+  RST-030: { status: shipped, surface: user, manual: register/floor-plan.md#getting-in-and-out }
+  RST-031: { status: shipped, surface: user, manual: register/floor-plan.md#moving-and-resizing }
+  RST-033: { status: shipped, surface: user, manual: register/floor-plan.md#changing-a-table }
+  RST-034: { status: shipped, surface: user, manual: register/floor-plan.md#adding-copying-and-removing }
+  RST-035: { status: shipped, surface: user, manual: register/floor-plan.md#adding-copying-and-removing }
+  RST-036: { status: shipped, surface: user, manual: register/floor-plan.md#floors }
+  RST-037: { status: shipped, surface: user, manual: register/floor-plan.md#floors }
+  RST-038: { status: shipped, surface: user, manual: register/floor-plan.md#changing-several-at-once }
 
   # Tables: linking, transfer, merge (RST-050 … RST-069) — user
   RST-050: { status: shipped, surface: user, manual: todo }

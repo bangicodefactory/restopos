@@ -221,7 +221,7 @@ function clientApiReferences(): array
         ->exclude(['__fixtures__', '__mocks__']);
 
     // `api.get('…')` / `this.client.post('…')` — verb is the method name, path the first argument.
-    $verbCall = '/\b(?:api|client)\.(get|post|delete)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
+    $verbCall = '/\b(?:api|client)\.(get|post|patch|delete)(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*([\'"`])([^\'"`]+)\2/';
     // `api.request('METHOD', '…')` — verb is the first argument, path the second.
     $request = '/\b(?:api|client|this)\.request(?![A-Za-z0-9_])\s*(?:<[^>]*>)?\s*\(\s*[\'"`]([A-Z]+)[\'"`]\s*,\s*([\'"`])([^\'"`]+)\2/';
     // Absolute `'/api/…'` literals (e.g. the reachability probe's `fetch`). Single/double quotes
@@ -347,9 +347,12 @@ it('every api call uses a method its route accepts', function (): void {
 });
 
 it('the scanner knows every verb the ApiClient exposes', function (): void {
-    // The scanner reads `.get(`, `.post(` and `.request('VERB',`. If the client grows a `patch()`
-    // or `delete()` helper, those calls become invisible to this contract and the guard above
-    // quietly stops guarding. Fail here instead, pointing at the regex that needs widening.
+    // The scanner reads `.get(`, `.post(`, `.patch(`, `.delete(` and `.request('VERB',`. If the
+    // client grows another helper, those calls become invisible to this contract and the guard
+    // above quietly stops guarding. Fail here instead, pointing at the regex that needs widening.
+    //
+    // It has already earned its keep once: BAN-449 added `patch()` for the register's floor editor
+    // and this failed the same run, before a single floor call could go unchecked.
     $source = (string) file_get_contents(base_path('resources/js/shared/sync/http.ts'));
 
     // The generic parameter is optional. An earlier version required a `<` before the paren, so a
@@ -357,7 +360,7 @@ it('the scanner knows every verb the ApiClient exposes', function (): void {
     // had gone blind in the same way.
     preg_match_all('/^\s{4}(?:async\s+)?([a-z][A-Za-z0-9]*)\s*(?:<[^>]*>)?\s*\(/m', $source, $matches);
 
-    $known = ['get', 'post', 'delete', 'request', 'constructor'];
+    $known = ['get', 'post', 'patch', 'delete', 'request', 'constructor'];
     $unknown = array_values(array_diff(array_unique($matches[1]), $known));
 
     expect($unknown)->toBe(
