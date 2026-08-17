@@ -1,8 +1,8 @@
 /**
  * `Floors/Edit` — the floor-plan editor (`GET /floors/{floor}/edit`, RST-030…049).
  *
- * The canvas is `components/floor-plan/FloorCanvas`; every operation it performs — snap, clamp,
- * move, resize-from-handle, rotate, duplicate, overlap — lives in `components/floor-plan/geometry`
+ * The canvas is `@shared/floor-plan/FloorCanvas`; every operation it performs — snap, clamp,
+ * move, resize-from-handle, rotate, duplicate, overlap — lives in `@shared/floor-plan/geometry`
  * as pure functions, which is what makes the hard part of this screen testable without a DOM.
  * This file is the editor *around* the canvas: selection, the inspector, the guards, the save.
  *
@@ -30,7 +30,7 @@ import { Head, router, useForm } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn } from '@shared/ui';
 import { useCallback, useMemo, useState, type JSX } from 'react';
 
-import { FloorCanvas, type CanvasTable } from '../../components/floor-plan/FloorCanvas';
+import { FloorCanvas, type CanvasTable } from '@shared/floor-plan/FloorCanvas';
 import {
     DEFAULT_GRID,
     duplicateRect,
@@ -39,7 +39,7 @@ import {
     rotateRect,
     snapRect,
     type Rect,
-} from '../../components/floor-plan/geometry';
+} from '@shared/floor-plan/geometry';
 import {
     ColorField,
     ImageField,
@@ -73,6 +73,17 @@ let nextLocalId = -1;
 
 export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Element {
     const t = useT();
+
+    // The canvas moved to `shared/` when the register grew its own edit mode (BAN-449), so it takes
+    // its strings from whichever surface is hosting it rather than reaching for one dictionary.
+    const canvasLabels = useMemo(
+        () => ({
+            canvas: (count: number) => t('floor.canvasLabel', { count }),
+            seats: t('floor.seats'),
+            linked: t('floor.linked'),
+        }),
+        [t],
+    );
 
     const initialPlan = useMemo(() => tables.map(toPlanTable), [tables]);
     const [plan, setPlan] = useState<PlanTable[]>(initialPlan);
@@ -262,6 +273,7 @@ export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Elemen
 
                         <FloorCanvas
                             tables={canvasTables}
+                            labels={canvasLabels}
                             selectedId={selectedId}
                             onSelect={setSelectedId}
                             onGeometryChange={onGeometryChange}

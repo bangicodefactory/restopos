@@ -10,12 +10,15 @@
  * tracking stays correct when the plan is scaled to fit a narrow screen.
  *
  * All geometry lives in `./geometry`; this file only turns gestures into calls on it.
+ *
+ * Lives in `shared/` because two surfaces edit the same room: the back office, and — since BAN-449 —
+ * the register. It therefore takes its three strings as a `labels` prop rather than reaching for a
+ * `useT`, since the two surfaces carry separate dictionaries and a shared component cannot know
+ * which one it is inside.
  */
 
 import { FOCUS_RING, cn } from '@shared/ui';
 import { useCallback, useMemo, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
-
-import { useT } from '../../i18n';
 
 import {
     DEFAULT_GRID,
@@ -39,10 +42,26 @@ export type CanvasTable = Rect & {
     linked: boolean;
 };
 
+/** The canvas's own strings, supplied by whichever surface is hosting it. */
+export type FloorCanvasLabels = {
+    canvas: (count: number) => string;
+    seats: string;
+    linked: string;
+};
+
 export type FloorCanvasProps = {
     tables: readonly CanvasTable[];
     selectedId: number | null;
     onSelect: (id: number | null) => void;
+    labels: FloorCanvasLabels;
+    /**
+     * Every selected table, when the host supports selecting more than one (RST-038). `selectedId`
+     * stays the *anchor* — the one the keyboard drives and the property panel describes — so a host
+     * that never passes this keeps exactly its old behaviour.
+     */
+    selectedIds?: readonly number[];
+    /** Ctrl/Cmd or Shift held while tapping a table: add to the selection rather than replace it. */
+    onToggleSelect?: (id: number) => void;
     onGeometryChange: (id: number, rect: Rect) => void;
     bounds: Bounds;
     grid: number;
@@ -85,9 +104,12 @@ export function FloorCanvas({
     onRotate,
     onDuplicate,
     onDelete,
+    labels,
+    selectedIds,
+    onToggleSelect,
 }: FloorCanvasProps): JSX.Element {
-    const t = useT();
     const svgRef = useRef<SVGSVGElement>(null);
+    const suppressFocusSelect = useRef(false);
     const [drag, setDrag] = useState<Drag>(null);
 
     const effectiveGrid = snapEnabled ? grid || DEFAULT_GRID : 0;
@@ -115,6 +137,23 @@ export function FloorCanvas({
             if (event.button !== 0) return;
             event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
+
+            // Ctrl/Cmd or Shift extends the selection instead of replacing it, and deliberately does
+            // **not** start a drag: the gesture is "also this one", and moving the room while the
+            // manager is still picking tables would be a surprise they have to undo by hand.
+            if (onToggleSelect && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+                onToggleSelect(table.id);
+
+                // Pressing a table focuses it, and `onFocus` sets the anchor — which for an
+                // ordinary tap is exactly right and for a modifier tap undoes the toggle, because
+                // the host then rebuilds the selection around the newly focused table alone. The
+                // focus still has to happen (the plan is keyboard-navigable); it just must not
+                // *select* this time.
+                suppressFocusSelect.current = true;
+
+                return;
+            }
+
             onSelect(table.id);
             setDrag({
                 kind: 'move',
@@ -124,7 +163,7 @@ export function FloorCanvas({
                 origin: { x: table.x, y: table.y, width: table.width, height: table.height },
             });
         },
-        [onSelect],
+        [onSelect, onToggleSelect],
     );
 
     const onPointerDownHandle = useCallback(
@@ -174,6 +213,17 @@ export function FloorCanvas({
                 ArrowDown: [0, step],
             };
 
+            // Space toggles this table into the selection (RST-038). The plan is deliberately
+            // keyboard-operable — that is the whole reason it is SVG and not `<canvas>` — so a
+            // multi-select reachable only by Ctrl-tapping with a mouse would contradict the design
+            // it lives in, and leave the bulk operations unusable on a keyboard.
+            if ((event.key === ' ' || event.key === 'Spacebar') && onToggleSelect) {
+                event.preventDefault();
+                onToggleSelect(table.id);
+
+                return;
+            }
+
             const delta = moves[event.key];
             if (delta) {
                 event.preventDefault();
@@ -206,7 +256,7 @@ export function FloorCanvas({
                 onDelete?.(table.id);
             }
         },
-        [effectiveGrid, onDelete, onDuplicate, onGeometryChange, onRotate, onSelect, options],
+        [effectiveGrid, onDelete, onDuplicate, onGeometryChange, onRotate, onSelect, onToggleSelect, options],
     );
 
     return (
@@ -214,7 +264,7 @@ export function FloorCanvas({
             <svg
                 ref={svgRef}
                 role="application"
-                aria-label={t('floor.canvasLabel', { count: tables.length })}
+                aria-label={labels.canvas(tables.length)}
                 viewBox={`0 0 ${bounds.width} ${bounds.height}`}
                 className="block h-auto w-full touch-none select-none"
                 style={{ backgroundColor: backgroundColor ?? '#f8fafc', aspectRatio: `${bounds.width} / ${bounds.height}` }}
@@ -251,7 +301,10 @@ export function FloorCanvas({
                 {snapEnabled ? <rect x={0} y={0} width={bounds.width} height={bounds.height} fill="url(#floor-grid)" /> : null}
 
                 {tables.map((table) => {
-                    const selected = table.id === selectedId;
+                    // The anchor drives the keyboard and the property panel; a table in a
+                    // multi-selection is still "selected" for the purposes of how it looks.
+                    const anchored = table.id === selectedId;
+                    const selected = anchored || (selectedIds?.includes(table.id) ?? false);
                     const colliding = collisions.get(table.id) === true;
                     const centre = centreOf(table);
                     const fill = table.color ?? '#ffffff';
@@ -261,11 +314,19 @@ export function FloorCanvas({
                             key={table.id}
                             tabIndex={0}
                             role="button"
-                            aria-label={`${table.label} — ${table.seats} ${t('floor.seats')}`}
+                            aria-label={`${table.label} — ${table.seats} ${labels.seats}`}
                             aria-pressed={selected}
                             onPointerDown={(event) => onPointerDownTable(event, table)}
                             onKeyDown={(event) => onKeyDownTable(event, table)}
-                            onFocus={() => onSelect(table.id)}
+                            onFocus={() => {
+                                if (suppressFocusSelect.current) {
+                                    suppressFocusSelect.current = false;
+
+                                    return;
+                                }
+
+                                onSelect(table.id);
+                            }}
                             className={cn('cursor-move outline-none', FOCUS_RING)}
                         >
                             {seatPositions(table, table.seats, table.shape === 'round').map((seat, index) => (
@@ -316,11 +377,14 @@ export function FloorCanvas({
                                     fill="#475569"
                                     pointerEvents="none"
                                 >
-                                    ⛓ {t('floor.linked')}
+                                    ⛓ {labels.linked}
                                 </text>
                             ) : null}
 
-                            {selected
+                            {/* Handles only on the anchor. Eight resize grips on every table of a
+                                ten-table selection is a thicket, and resize is a single-table
+                                gesture anyway — the bulk operations are colour and seats. */}
+                            {anchored
                                 ? HANDLES.map((handle) => {
                                       const position = handlePosition(table, handle);
                                       return (

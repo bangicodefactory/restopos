@@ -355,3 +355,103 @@ it('never lets a device address another register order', function (): void {
         ->patchJson("/api/pos/orders/{$foreign}/guests", ['guest_count' => 3])
         ->assertStatus(404);
 });
+
+/**
+ * RST-030…038 (BAN-449) — the room a device is allowed to rearrange.
+ *
+ * `index` has always scoped its read through `$config->floors()`. The four write endpoints scoped
+ * nothing: they took a route-bound model and force-filled it, so a device token — issued per config
+ * and the only credential these routes require — could move, recolour or delete **any table in the
+ * database**, another company's included.
+ *
+ * That cost little while nothing called them from a till. The register's edit mode is what makes it
+ * reachable, and the spec is explicit that "client-side ability checks are UX; the ingest check is
+ * the control" — a manager-gated button with an unguarded endpoint behind it is not a control.
+ */
+function foreignFloorAndTable(): array
+{
+    // A second `make()` counts the venues already built and gives itself its own company.
+    $other = PosFixtures::make()->withFloor();
+
+    return [$other->floor->getKey(), $other->tableOne->getKey(), $other->tableOne->table_number];
+}
+
+it('refuses to move a table belonging to another company', function (): void {
+    [$foreignFloor, $foreignTable, $number] = foreignFloorAndTable();
+
+    $before = DB::table('restaurant_tables')->where('id', $foreignTable)->first();
+
+    // 404, not 403: a device has no business learning that this id exists somewhere else.
+    $this->withHeaders($this->fx->headers())
+        ->patchJson("/api/pos/tables/{$foreignTable}", [
+            'restaurant_floor_id' => $foreignFloor,
+            'table_number' => $number,
+            'position_x' => '999',
+            'position_y' => '999',
+        ])
+        ->assertNotFound();
+
+    $after = DB::table('restaurant_tables')->where('id', $foreignTable)->first();
+
+    expect($after->position_x)->toBe($before->position_x)
+        ->and($after->position_y)->toBe($before->position_y);
+});
+
+it('refuses to delete a table belonging to another company', function (): void {
+    [, $foreignTable] = foreignFloorAndTable();
+
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/tables/{$foreignTable}")
+        ->assertNotFound();
+
+    expect(DB::table('restaurant_tables')->where('id', $foreignTable)->whereNull('deleted_at')->exists())->toBeTrue();
+});
+
+it('refuses to rename or delete a floor belonging to another company', function (): void {
+    [$foreignFloor] = foreignFloorAndTable();
+
+    $this->withHeaders($this->fx->headers())
+        ->patchJson("/api/pos/floors/{$foreignFloor}", ['name' => 'Owned'])
+        ->assertNotFound();
+
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/floors/{$foreignFloor}")
+        ->assertNotFound();
+
+    expect(DB::table('restaurant_floors')->where('id', $foreignFloor)->value('name'))->not->toBe('Owned');
+});
+
+it('refuses to file a new table onto another company floor', function (): void {
+    [$foreignFloor] = foreignFloorAndTable();
+
+    $this->withHeaders($this->fx->headers())
+        ->postJson('/api/pos/tables', [
+            'restaurant_floor_id' => $foreignFloor,
+            'table_number' => 99,
+            'seats' => 4,
+            'shape' => 'square',
+            'position_x' => '10', 'position_y' => '10', 'width' => '80', 'height' => '80',
+        ])
+        ->assertNotFound();
+
+    // The two `withFloor()` built, and nothing of ours filed alongside them.
+    expect(DB::table('restaurant_tables')->where('restaurant_floor_id', $foreignFloor)->count())->toBe(2);
+});
+
+it('still lets a manager rearrange its own room', function (): void {
+    $tableId = $this->fx->tableOne->getKey();
+
+    $this->withHeaders($this->fx->headers())
+        ->patchJson("/api/pos/tables/{$tableId}", [
+            'restaurant_floor_id' => $this->fx->floor->getKey(),
+            'table_number' => $this->fx->tableOne->table_number,
+            'position_x' => '340',
+            'position_y' => '220',
+        ])
+        ->assertOk();
+
+    $row = DB::table('restaurant_tables')->where('id', $tableId)->first();
+
+    expect((float) $row->position_x)->toBe(340.0)
+        ->and((float) $row->position_y)->toBe(220.0);
+});

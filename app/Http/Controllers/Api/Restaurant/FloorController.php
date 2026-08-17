@@ -15,6 +15,7 @@ use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Floors and tables: the register reads them, the floor editor writes them
@@ -87,6 +88,8 @@ final class FloorController extends Controller
     /** `PATCH /api/pos/floors/{floor}` */
     public function update(FloorRequest $request, Floor $floor): JsonResponse
     {
+        $this->assertOwnedFloor($request, $floor);
+
         // `tables[]` is the back-office plan editor's concern (see Backoffice\FloorController);
         // this endpoint writes floor attributes only.
         $data = $request->validated();
@@ -98,8 +101,10 @@ final class FloorController extends Controller
     }
 
     /** `DELETE /api/pos/floors/{floor}` */
-    public function destroy(Floor $floor): JsonResponse
+    public function destroy(Request $request, Floor $floor): JsonResponse
     {
+        $this->assertOwnedFloor($request, $floor);
+
         $floor->delete();
 
         return new JsonResponse(null, 204);
@@ -109,6 +114,15 @@ final class FloorController extends Controller
     public function storeTable(TableRequest $request): JsonResponse
     {
         [, $config] = $this->deviceContext($request);
+
+        // `company_id` is taken from the device, so a created table is always this tenant's — but
+        // the *floor* it lands on comes from the request, and an unchecked one would file this
+        // company's table inside another company's room.
+        $floorId = $request->validated('restaurant_floor_id');
+
+        if ($floorId !== null && ! $config->floors()->whereKey((int) $floorId)->exists()) {
+            throw new NotFoundHttpException('No such floor.');
+        }
 
         /** @var RestaurantTable $table */
         $table = RestaurantTable::query()->create([
@@ -125,6 +139,8 @@ final class FloorController extends Controller
     /** `PATCH /api/pos/tables/{table}` */
     public function updateTable(TableRequest $request, RestaurantTable $table): JsonResponse
     {
+        $this->assertOwnedTable($request, $table);
+
         $data = $request->validated();
         $parentId = $data['parent_id'] ?? null;
         unset($data['parent_id']);
@@ -146,10 +162,51 @@ final class FloorController extends Controller
     }
 
     /** `DELETE /api/pos/tables/{table}` */
-    public function destroyTable(RestaurantTable $table): JsonResponse
+    public function destroyTable(Request $request, RestaurantTable $table): JsonResponse
     {
+        $this->assertOwnedTable($request, $table);
+
         $table->delete();
 
         return new JsonResponse(null, 204);
+    }
+
+    /**
+     * The room this device is allowed to rearrange (BAN-449).
+     *
+     * `index` has always scoped its read through `$config->floors()`. The four write endpoints did
+     * not scope anything: they took a route-bound model and force-filled it, so a device token —
+     * which is issued per config and is the only credential these routes require — could move,
+     * recolour or delete **any table in the database**, including another company's.
+     *
+     * That cost little while nothing called them from a till; the register's edit mode is what makes
+     * it reachable, and the spec is explicit that "client-side ability checks are UX; the ingest
+     * check is the control". A manager-gated button with an unguarded endpoint behind it is not a
+     * control.
+     *
+     * 404 rather than 403: a device has no business learning that a given table id exists somewhere
+     * else.
+     */
+    private function assertOwnedTable(Request $request, RestaurantTable $table): void
+    {
+        [, $config] = $this->deviceContext($request);
+
+        $reachable = $config->floors()
+            ->whereKey($table->restaurant_floor_id)
+            ->exists();
+
+        if (! $reachable || (int) $table->company_id !== (int) $config->company_id) {
+            throw new NotFoundHttpException('No such table.');
+        }
+    }
+
+    /** The floor half of {@see assertOwnedTable()}. */
+    private function assertOwnedFloor(Request $request, Floor $floor): void
+    {
+        [, $config] = $this->deviceContext($request);
+
+        if (! $config->floors()->whereKey($floor->getKey())->exists()) {
+            throw new NotFoundHttpException('No such floor.');
+        }
     }
 }
