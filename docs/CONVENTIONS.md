@@ -239,13 +239,35 @@ lower the number. It may only ever fall.
    fixtures are exempt.
 5. **A migration moved with `docs/spec/01-schema.md`.** This project already followed that rule on
    every ticket; it had simply never been written down or checked.
+6. **A feature the diff claims is recorded.** Feature ids appearing on *added* lines under the
+   watched trees must exist in `docs/features.yml`. Rules 1–5 could tell that *some* doc had moved
+   and that the ledger was self-consistent; none of them noticed a feature shipping unrecorded,
+   which is the thing this gate exists to prevent — BAN-434 annotated four in its source, recorded
+   none, and passed green.
+
+   Ranges are not claims: `REG-001 … REG-039` and `BOF-070…079` orient the reader, and twenty ids
+   cited that way turned out never to have been defined at all. Only added lines count — re-touching
+   a line that already cited an id is not a new feature. **Tests and fixtures are exempt**, the same
+   exemption rule 4 grants and through the same `isWatched` check: the register tests cite ids
+   constantly, and a PR that only adds coverage ships no feature to record.
+
+   The rule has two halves and they are **not** equally waivable. *Cited but unrecorded* is
+   documentation debt, waived with the opt-out like rules 4 and 5. *Cited but nowhere in
+   `02-features.md`* is not a judgement call — it is an id that does not exist, and no opt-out
+   clears it.
 
 ### The opt-out
 
 Refactors, dependency bumps and CI fixes genuinely change no behaviour. Put `[skip docs]` **on a
 line of its own** in the PR body (a reason may follow it on the same line), or add the `docs: none`
-label. It waives rules 4 and 5 only — the ledger still has to be internally consistent — and the
-waiver is printed in the log whether or not a rule ends up firing.
+label. It waives rules 4, 5 and the *unrecorded* half of rule 6 — the ledger still has to be
+internally consistent, and an id the spec does not define still fails — and the waiver is printed in
+the log whether or not a rule ends up firing.
+
+Keeping the undefined-id half hard is deliberate. The waiver answers "does this change owe
+documentation"; it was never meant to answer "may this change name a feature that does not exist".
+Waivable, `[skip docs]` would have been the documented way to reintroduce BAN-430 — a shipped test
+suite asserting two ability names that existed nowhere, because nothing validated them.
 
 The token must start the line because matching it anywhere meant any PR that *mentioned* the escape
 hatch silently had no gate. This feature's own pull request described the opt-out twice in its

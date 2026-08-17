@@ -108,7 +108,7 @@ export function ProductScreen({
                         openDialog('customer', { barcode: action.code });
                         break;
                     case 'discount': {
-                        // REG-091 — a discount barcode applies to the selected line, or to every
+                        // REG-083 — a discount barcode applies to the selected line, or to every
                         // line on the order when nothing is selected (Odoo's whole-order behaviour).
                         const snapshot = orderSnapshot();
                         const targets = snapshot.selectedLineUuid
