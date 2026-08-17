@@ -1,5 +1,7 @@
 import { createPosStore } from '@shared/store';
 
+import type { SplitTender } from '../domain/split-order';
+
 import { recordOrderScreen } from '../domain/order-actions';
 import { useOrderStore } from './order-store';
 
@@ -61,7 +63,7 @@ export type UiSlice = {
      * that this tender is one guest's quarter rather than the whole bill. Null means "the balance",
      * which is the ordinary case.
      */
-    splitTender: string | null;
+    splitTender: SplitTender | null;
     /** Receipt currently previewed (uuid), so the receipt screen survives a re-render. */
     receiptOrderUuid: string | null;
     lastScanAt: number;
@@ -92,7 +94,7 @@ export type UiSlice = {
     closeDialog: () => void;
     startTransfer: (orderUuid: string | null) => void;
     setSplitQuantity: (lineUuid: string, quantity: number) => void;
-    setSplitTender: (amount: string | null) => void;
+    setSplitTender: (tender: SplitTender | null) => void;
     resetSplit: () => void;
     setReceiptOrder: (orderUuid: string | null) => void;
     noteScan: () => void;
@@ -189,9 +191,9 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
             else state.splitSelection[lineUuid] = quantity;
         }),
 
-    setSplitTender: (amount) =>
+    setSplitTender: (tender) =>
         set((state) => {
-            state.splitTender = amount;
+            state.splitTender = tender;
         }),
 
     resetSplit: () =>

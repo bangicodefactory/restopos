@@ -85,7 +85,7 @@ export function SplitScreen({
 
     /** Hand the payment screen one share and let it collect; the rest is the ordinary payment flow. */
     const takeMoneySplit = (share: string): void => {
-        setSplitTender(clampSplitAmount(share, outstanding));
+        setSplitTender({ orderUuid, amount: clampSplitAmount(share, outstanding) });
         onDone(orderUuid);
     };
 

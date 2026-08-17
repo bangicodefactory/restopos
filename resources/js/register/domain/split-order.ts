@@ -97,6 +97,29 @@ export function clampSplitAmount(requested: string, outstanding: string): string
     return Decimal.of(outstanding).sub(want).toString().startsWith('-') ? Decimal.of(outstanding).toString() : want.toString();
 }
 
+/** A share, and the bill it belongs to. */
+export type SplitTender = { orderUuid: string; amount: string };
+
+/**
+ * What the payment screen should pre-fill (review of #62).
+ *
+ * The share has to name its order. As a bare amount it was a global that outlived the split: take
+ * one guest's quarter, walk away to another table without finishing, and the *next* order's payment
+ * screen pre-filled with a stale share of a bill it has nothing to do with — a wrong tender on the
+ * wrong sale, which is the worst kind of quiet.
+ *
+ * Clearing it on every exit was the alternative, and it is the weaker one: it works only for the
+ * exits somebody remembered. Naming the order makes the leak impossible instead of merely unlikely.
+ *
+ * Still clamped to the balance, so a share left over from before a part-payment cannot tender more
+ * than is owed.
+ */
+export function tenderTargetFor(orderUuid: string, tender: SplitTender | null, due: string): string {
+    if (tender === null || tender.orderUuid !== orderUuid) return due;
+
+    return clampSplitAmount(tender.amount, due);
+}
+
 /** Is the bill settled — nothing left to collect? */
 export function isFullySplit(outstanding: string): boolean {
     return Decimal.of(outstanding).isZero();

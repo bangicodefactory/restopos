@@ -1,7 +1,7 @@
 import { Decimal } from '@domain/money/decimal';
 import { describe, expect, it } from 'vitest';
 
-import { clampSplitAmount, evenSplitAmounts, isFullySplit, remainderAfter } from './split-order';
+import { clampSplitAmount, evenSplitAmounts, isFullySplit, remainderAfter, tenderTargetFor } from './split-order';
 
 /**
  * RST-104, RST-105 (BAN-487) — dividing a bill by money.
@@ -125,5 +125,37 @@ describe('clamping what a waiter types', () => {
     it('treats zero and negatives as nothing', () => {
         expect(clampSplitAmount('0.00', '40.00')).toBe('0.00');
         expect(clampSplitAmount('-5.00', '40.00')).toBe('0.00');
+    });
+});
+
+/**
+ * The share has to name its bill (review of #62).
+ *
+ * As a bare amount it was a global that outlived the split: take one guest's quarter, walk away to
+ * another table without finishing, and the *next* order's payment screen pre-filled with a stale
+ * share of a bill it had nothing to do with. A wrong tender on the wrong sale, and quiet about it.
+ *
+ * Clearing it on every exit was the alternative and it is the weaker one — it works only for the
+ * exits somebody remembered to write.
+ */
+describe('which bill a share belongs to', () => {
+    const SHARE = { orderUuid: 'order-a', amount: '10.00' };
+
+    it('pre-fills the share on the bill it was taken against', () => {
+        expect(tenderTargetFor('order-a', SHARE, '40.00')).toBe('10.00');
+    });
+
+    it('pre-fills the full balance on any other bill', () => {
+        expect(tenderTargetFor('order-b', SHARE, '25.00')).toBe('25.00');
+    });
+
+    it('pre-fills the full balance when no split is running', () => {
+        expect(tenderTargetFor('order-a', null, '25.00')).toBe('25.00');
+    });
+
+    it('never offers more than the bill still owes', () => {
+        // Part-paid since the share was taken: €10 of a €6 balance would tender change against an
+        // order that is not finished.
+        expect(tenderTargetFor('order-a', SHARE, '6.00')).toBe('6.00');
     });
 });

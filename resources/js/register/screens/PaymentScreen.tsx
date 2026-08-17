@@ -20,7 +20,7 @@ import {
     setTip,
 } from '../domain/order-actions';
 import { openDrawer } from '../domain/printing';
-import { clampSplitAmount } from '../domain/split-order';
+import { tenderTargetFor } from '../domain/split-order';
 import {
     useCatalog,
     useMoney,
@@ -101,10 +101,9 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const splitTender = useUiStore((state) => state.splitTender);
     const resetSplit = useUiStore((state) => state.resetSplit);
 
-    // A money split (RST-104, RST-105) pre-fills one guest's share instead of the whole balance.
-    // Clamped to what is still owed, so a stale share left over from an earlier split cannot tender
-    // more than the bill — and never above the balance, which is what keeps `settlesOrder` honest.
-    const target = splitTender === null ? totals.due : clampSplitAmount(splitTender, totals.due);
+    // A money split (RST-104, RST-105) pre-fills one guest's share instead of the whole balance —
+    // but only for the bill it was taken against, and never above what that bill still owes.
+    const target = tenderTargetFor(orderUuid, splitTender, totals.due);
 
     const prefillFor = useCallback(
         (methodId: number): string =>
@@ -294,7 +293,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                 {/* RST-107 — the split loop is not a place the register navigates *to*; the bill
                     stays open and the balance shrinks with each share. Saying what is left is what
                     turns that into something a waiter can work through without re-finding the tab. */}
-                {splitTender !== null && Decimal.of(totals.due).signum() > 0 ? (
+                {splitTender?.orderUuid === orderUuid && Decimal.of(totals.due).signum() > 0 ? (
                     <p className="rounded-pos bg-brand-50 px-3 py-2 font-semibold" data-testid="split-remaining">
                         {t('reg.split.remaining', { amount: money(totals.due) })}
                     </p>
