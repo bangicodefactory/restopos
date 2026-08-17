@@ -454,17 +454,21 @@ final readonly class TableService
     }
 
     /**
-     * Table ids carrying a draft order.
+     * Tables a guest is still sitting at.
      *
-     * Soft-deleted orders are excluded — a deleted bill is not money anybody is coming back for — but
-     * a draft on a *merged child* table counts through its parent, because that is where the bill
-     * actually lives and deleting the child would orphan the link.
+     * Soft-deleted orders are excluded — a deleted bill is not money anybody is coming back for.
+     *
+     * **Merged children count.** When two tables are pushed together the bill lives on the parent
+     * and the child carries no order of its own, so a naive draft lookup says the child is free and
+     * lets it be deleted out from under a seated party. The room then shows one table where there
+     * are two, and the merge link dangles. A child of an occupied table is a table somebody is
+     * sitting at, which is the rule this guard is actually enforcing (review of #66).
      *
      * @return list<int>
      */
     private function tableIdsWithDrafts(): array
     {
-        return Order::query()
+        $occupied = Order::query()
             ->whereNull('deleted_at')
             ->where('state', OrderState::Draft->value)
             ->whereNotNull('restaurant_table_id')
@@ -473,5 +477,17 @@ final readonly class TableService
             ->map(static fn (mixed $id): int => (int) $id)
             ->values()
             ->all();
+
+        if ($occupied === []) {
+            return [];
+        }
+
+        $children = RestaurantTable::query()
+            ->whereIn('parent_id', $occupied)
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+
+        return array_values(array_unique([...$occupied, ...$children]));
     }
 }

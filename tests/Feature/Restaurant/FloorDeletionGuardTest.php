@@ -145,3 +145,40 @@ it('still refuses a floor belonging to another company, now that the address act
 
     expect(DB::table('restaurant_floors')->where('id', $other->floor->getKey())->value('name'))->not->toBe('Owned');
 });
+
+it('refuses a merged child of an occupied table (review of #66)', function (): void {
+    // Two tables pushed together for a large party: the bill lives on the parent and the child
+    // carries no order of its own. A naive draft lookup calls the child free and deletes it out from
+    // under a seated party — the room then shows one table where there are two and the merge link
+    // dangles. The bill survives, so no money is lost, which is exactly why nobody would notice.
+    //
+    // The docblock claimed this case was handled before the code did.
+    $parent = $this->fx->tableOne;
+    $child = $this->fx->tableTwo;
+
+    DB::table('restaurant_tables')->where('id', $child->getKey())->update(['parent_id' => $parent->getKey()]);
+    occupy($this->fx, $parent->getKey());
+
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/tables/{$child->getKey()}")
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'table_occupied');
+
+    expect(DB::table('restaurant_tables')->where('id', $child->getKey())->whereNull('deleted_at')->exists())
+        ->toBeTrue();
+});
+
+it('still deletes a linked child once the parent bill is settled', function (): void {
+    // The link alone is not a reason to refuse — only a link to a table somebody is sitting at.
+    $parent = $this->fx->tableOne;
+    $child = $this->fx->tableTwo;
+
+    DB::table('restaurant_tables')->where('id', $child->getKey())->update(['parent_id' => $parent->getKey()]);
+    $orderUuid = occupy($this->fx, $parent->getKey());
+
+    Order::query()->where('uuid', $orderUuid)->update(['state' => 'paid']);
+
+    $this->withHeaders($this->fx->headers())
+        ->deleteJson("/api/pos/tables/{$child->getKey()}")
+        ->assertNoContent();
+});
