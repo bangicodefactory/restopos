@@ -334,6 +334,13 @@ export const registerEn = {
     'reg.split.nothing': 'Select the quantities to move.',
     'reg.split.created': 'Split bill {name} created',
     'reg.split.byQuantity': 'Tap a line to move one unit at a time.',
+    'reg.split.evenly': 'Evenly',
+    'reg.split.byAmount': 'By amount',
+    'reg.split.ways': 'Ways',
+    'reg.split.of': 'of {total} outstanding',
+    'reg.split.amount': 'Amount',
+    'reg.split.take': 'Take this amount',
+    'reg.split.remaining': '{amount} still to collect',
 
     // ── sync / status ────────────────────────────────────────────────────────
     'reg.sync.title': 'Synchronisation',
@@ -695,6 +702,13 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.split.nothing': 'Sélectionnez les quantités à déplacer.',
     'reg.split.created': 'Addition {name} créée',
     'reg.split.byQuantity': 'Touchez une ligne pour déplacer une unité à la fois.',
+    'reg.split.evenly': 'Également',
+    'reg.split.byAmount': 'Par montant',
+    'reg.split.ways': 'Parts',
+    'reg.split.of': 'sur {total} restant',
+    'reg.split.amount': 'Montant',
+    'reg.split.take': 'Encaisser ce montant',
+    'reg.split.remaining': 'Reste {amount} à encaisser',
 
     'reg.sync.title': 'Synchronisation',
     'reg.sync.pending': '{count} en attente',

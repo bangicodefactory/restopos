@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useT } from '../i18n';
 import { splitOrder } from '../domain/order-actions';
 import { cycleSplitQuantity, splitPreview } from '../domain/split';
+import { clampSplitAmount, evenSplitAmounts } from '../domain/split-order';
 import { computeTotals } from '../domain/totals';
 import { getCatalog } from '../data/catalog';
 import { useMoney, useOrder, useOrderLines, useOrderPayments } from '../hooks/use-register';
@@ -20,7 +21,19 @@ import { useUiStore } from '../state/ui-store';
  *
  * The confirm button disables itself while the split runs — RST-106 exists because a double-tap
  * here duplicates revenue.
+ *
+ * **Three modes, two mechanisms.** Splitting by item moves lines onto a new order, because "she had
+ * the fish" is a real second bill with its own correctly taxed contents. Splitting evenly or by a
+ * fixed amount moves no lines at all — there is nothing to move when four people halve a table — and
+ * is taken as **successive payments against the one order** (RST-104, RST-105). Manufacturing four
+ * orders would mean inventing lines at a blended tax rate, which stops being arithmetic and starts
+ * being a false VAT return the moment a bill mixes food and drink.
+ *
+ * That choice is what makes "keep splitting" free: the remainder is not a new document to find, it
+ * is this order's outstanding balance.
  */
+
+type SplitMode = 'items' | 'evenly' | 'amount';
 
 export function SplitScreen({
     orderUuid,
@@ -39,7 +52,11 @@ export function SplitScreen({
     const selection = useUiStore((state) => state.splitSelection);
     const setSplitQuantity = useUiStore((state) => state.setSplitQuantity);
     const resetSplit = useUiStore((state) => state.resetSplit);
+    const setSplitTender = useUiStore((state) => state.setSplitTender);
     const [busy, setBusy] = useState(false);
+    const [mode, setMode] = useState<SplitMode>('items');
+    const [ways, setWays] = useState(2);
+    const [amount, setAmount] = useState('');
 
     const preview = useMemo(() => splitPreview(lines, selection), [lines, selection]);
 
@@ -55,15 +72,115 @@ export function SplitScreen({
         return computeTotals(order, virtual, payments, getCatalog()).roundedTotal;
     }, [order, payments, preview.remaining]);
 
+    // What the bill still owes — the figure both money modes divide, and the one the loop ends on.
+    const outstanding = useMemo(() => {
+        if (!order) return '0.00';
+
+        return computeTotals(order, lines, payments, getCatalog()).due;
+    }, [lines, order, payments]);
+
+    const shares = useMemo(() => evenSplitAmounts(outstanding, Math.max(1, ways)), [outstanding, ways]);
+
     if (!order) return <p className="p-6">{t('reg.tickets.none')}</p>;
+
+    /** Hand the payment screen one share and let it collect; the rest is the ordinary payment flow. */
+    const takeMoneySplit = (share: string): void => {
+        setSplitTender({ orderUuid, amount: clampSplitAmount(share, outstanding) });
+        onDone(orderUuid);
+    };
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
-            <header className="flex items-center gap-3">
+            <header className="flex flex-wrap items-center gap-3">
                 <h1 className="text-xl font-bold">{t('reg.split.title')}</h1>
-                <p className="text-sm text-slate-500">{t('reg.split.byQuantity')}</p>
+
+                <div className="flex gap-1" role="tablist" aria-label={t('reg.split.title')}>
+                    {(['items', 'evenly', 'amount'] as const).map((candidate) => (
+                        <button
+                            key={candidate}
+                            type="button"
+                            role="tab"
+                            aria-selected={mode === candidate}
+                            data-testid={`split-mode-${candidate}`}
+                            onClick={() => setMode(candidate)}
+                            className={cn(
+                                'min-h-touch rounded-pos px-3 font-semibold ring-1 ring-inset',
+                                mode === candidate ? 'bg-brand-600 text-white ring-brand-700' : 'bg-white ring-slate-300',
+                            )}
+                        >
+                            {t(
+                                candidate === 'items'
+                                    ? 'reg.split.byQuantity'
+                                    : candidate === 'evenly'
+                                      ? 'reg.split.evenly'
+                                      : 'reg.split.byAmount',
+                            )}
+                        </button>
+                    ))}
+                </div>
             </header>
 
+            {mode === 'evenly' ? (
+                <section className="flex flex-col gap-3 rounded-pos bg-slate-50 p-3" data-testid="split-evenly">
+                    <label className="flex items-center gap-3">
+                        <span className="font-semibold">{t('reg.split.ways')}</span>
+                        <input
+                            type="number"
+                            min={1}
+                            max={99}
+                            value={ways}
+                            className="min-h-touch w-24 rounded-pos border border-slate-300 px-2 tabular-nums"
+                            onChange={(event) => {
+                                const next = Number(event.target.value);
+                                setWays(Number.isInteger(next) && next >= 1 ? Math.min(next, 99) : 1);
+                            }}
+                        />
+                        <span className="text-slate-600">{t('reg.split.of', { total: money(outstanding) })}</span>
+                    </label>
+
+                    {/* Every share is offered, not just the first: the shares differ by a cent when
+                        the total does not divide evenly, and the waiter collects them in whatever
+                        order the table hands over the cards. */}
+                    <div className="flex flex-wrap gap-2">
+                        {shares.map((share, index) => (
+                            <Button
+                                key={`${share}-${index}`}
+                                variant="secondary"
+                                data-testid={`split-share-${index}`}
+                                onClick={() => takeMoneySplit(share)}
+                            >
+                                {money(share)}
+                            </Button>
+                        ))}
+                    </div>
+                </section>
+            ) : null}
+
+            {mode === 'amount' ? (
+                <section className="flex flex-col gap-3 rounded-pos bg-slate-50 p-3" data-testid="split-amount">
+                    <label className="flex items-center gap-3">
+                        <span className="font-semibold">{t('reg.split.amount')}</span>
+                        <input
+                            inputMode="decimal"
+                            value={amount}
+                            className="min-h-touch w-40 rounded-pos border border-slate-300 px-2 tabular-nums"
+                            onChange={(event) => setAmount(event.target.value.replace(/[^0-9.,]/g, '').replace(',', '.'))}
+                        />
+                        <span className="text-slate-600">{t('reg.split.of', { total: money(outstanding) })}</span>
+                    </label>
+
+                    <Button
+                        size="lg"
+                        data-testid="split-amount-take"
+                        disabled={clampSplitAmount(amount === '' ? '0' : amount, outstanding) === '0.00'}
+                        onClick={() => takeMoneySplit(amount === '' ? '0' : amount)}
+                    >
+                        {t('reg.split.take')}
+                    </Button>
+                </section>
+            ) : null}
+
+            {mode === 'items' ? (
             <ul className="min-h-0 flex-1 overflow-auto divide-y divide-slate-200">
                 {lines.map((line) => {
                     const taken = selection[line.uuid] ?? 0;
@@ -92,8 +209,9 @@ export function SplitScreen({
                     );
                 })}
             </ul>
+            ) : null}
 
-            <footer className="grid grid-cols-2 gap-3">
+            <footer className={cn('grid grid-cols-2 gap-3', mode !== 'items' && 'mt-auto')}>
                 <div className="rounded-pos bg-slate-100 p-3">
                     <p className="text-sm text-slate-600">{t('reg.split.original')}</p>
                     <p className="text-xl font-bold tabular-nums">{money(remainingTotal)}</p>

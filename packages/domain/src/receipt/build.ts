@@ -1,5 +1,5 @@
 import { EscPosBuilder } from '../escpos/builder';
-import type { EscPosDoc } from '../escpos/doc';
+import type { EscPosDoc, EscPosNode } from '../escpos/doc';
 import { Decimal } from '../money/decimal';
 import { formatDateTime, formatMoney, formatPercent, formatQuantity } from './format';
 import type {
@@ -167,16 +167,43 @@ export function buildReceiptDoc(order: ReceiptOrderView, config: ReceiptConfigVi
 }
 
 /** The pre-payment bill handed to the table: same lines, no payments, no drawer, no portal QR. */
-export function buildBillDoc(order: ReceiptOrderView, config: ReceiptConfigView): EscPosDoc {
+export function buildBillDoc(
+    order: ReceiptOrderView,
+    config: ReceiptConfigView,
+    gratuity: readonly number[] = [],
+): EscPosDoc {
     const billOrder: ReceiptOrderView = { ...order, payments: [], amountPaid: '0', amountChange: '0' };
     const billConfig: ReceiptConfigView = { ...config, openDrawer: false, portalDisplay: 'none' };
     const doc = buildReceiptDoc(billOrder, billConfig);
+
+    // RST-111 — suggested gratuity on the proforma, which is the piece of paper the customer is
+    // looking at when they decide. Computed on the total *as printed*, so the arithmetic the guest
+    // can check by hand matches. Off unless a venue asks for it: a tip line is a cultural default,
+    // not a universal one, and printing one where tipping is not customary reads as a demand.
+    const tips: EscPosNode[] =
+        gratuity.length === 0
+            ? []
+            : [
+                  { t: 'rule', char: '-' },
+                  { t: 'text', v: config.labels.gratuity, style: { bold: true } },
+                  ...gratuity.map((percent): EscPosNode => {
+                      const tip = Decimal.of(order.amountTotal).mul(String(percent)).div('100', 2);
+
+                      return {
+                          t: 'row',
+                          left: `${percent}%`,
+                          right: formatMoney(Decimal.of(order.amountTotal).add(tip).toString(), config.currency),
+                      };
+                  }),
+              ];
+
     return {
         ...doc,
         meta: { ...doc.meta, kind: 'bill' },
         nodes: [
             { t: 'text', v: config.labels.bill, style: { align: 'center', bold: true, size: 'lg' } },
             ...doc.nodes,
+            ...tips,
         ],
     };
 }

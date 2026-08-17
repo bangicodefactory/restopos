@@ -20,6 +20,7 @@ import {
     setTip,
 } from '../domain/order-actions';
 import { openDrawer } from '../domain/printing';
+import { tenderTargetFor } from '../domain/split-order';
 import {
     useCatalog,
     useMoney,
@@ -97,15 +98,21 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     );
     const hasCash = methods.some((method) => method.is_cash_count);
     const cashRounding = catalog.cashRounding;
+    const splitTender = useUiStore((state) => state.splitTender);
+    const resetSplit = useUiStore((state) => state.resetSplit);
+
+    // A money split (RST-104, RST-105) pre-fills one guest's share instead of the whole balance —
+    // but only for the bill it was taken against, and never above what that bill still owes.
+    const target = tenderTargetFor(orderUuid, splitTender, totals.due);
 
     const prefillFor = useCallback(
         (methodId: number): string =>
             prefillAmount(
-                totals.due,
+                target,
                 catalog.paymentMethods.find((candidate) => candidate.id === methodId),
                 cashRounding,
             ),
-        [cashRounding, catalog.paymentMethods, totals.due],
+        [cashRounding, catalog.paymentMethods, target],
     );
 
     const paidInFull = settlesOrder(totals.due, payments, catalog.paymentMethods, cashRounding);
@@ -256,8 +263,12 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
             setError(t('reg.pay.saveFailed'));
             return;
         }
+        // The split is over the moment the bill settles; leaving the share set would pre-fill the
+        // next order with one guest's quarter of a table that has already left.
+        resetSplit();
         onValidated();
     }, [
+        resetSplit,
         cashRounding,
         catalog.paymentMethods,
         hasCash,
@@ -279,6 +290,15 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 till:flex-row">
             <section className="flex min-w-0 flex-1 flex-col gap-3">
+                {/* RST-107 — the split loop is not a place the register navigates *to*; the bill
+                    stays open and the balance shrinks with each share. Saying what is left is what
+                    turns that into something a waiter can work through without re-finding the tab. */}
+                {splitTender?.orderUuid === orderUuid && Decimal.of(totals.due).signum() > 0 ? (
+                    <p className="rounded-pos bg-brand-50 px-3 py-2 font-semibold" data-testid="split-remaining">
+                        {t('reg.split.remaining', { amount: money(totals.due) })}
+                    </p>
+                ) : null}
+
                 <header className="rounded-pos bg-slate-900 p-4 text-white">
                     <p className="text-sm opacity-80">{t('reg.pay.due')}</p>
                     <p className="text-total tabular-nums">{money(totals.roundedTotal)}</p>

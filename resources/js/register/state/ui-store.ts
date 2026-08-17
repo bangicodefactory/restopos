@@ -1,5 +1,7 @@
 import { createPosStore } from '@shared/store';
 
+import type { SplitTender } from '../domain/split-order';
+
 import { recordOrderScreen } from '../domain/order-actions';
 import { useOrderStore } from './order-store';
 
@@ -54,6 +56,14 @@ export type UiSlice = {
     transferOrderUuid: string | null;
     /** Split-bill working selection, keyed by line uuid. */
     splitSelection: Record<string, number>;
+    /**
+     * The share the next tender should be pre-filled with (RST-104, RST-105).
+     *
+     * A money split does not move lines, so there is nothing on the order to tell the payment screen
+     * that this tender is one guest's quarter rather than the whole bill. Null means "the balance",
+     * which is the ordinary case.
+     */
+    splitTender: SplitTender | null;
     /** Receipt currently previewed (uuid), so the receipt screen survives a re-render. */
     receiptOrderUuid: string | null;
     lastScanAt: number;
@@ -84,6 +94,7 @@ export type UiSlice = {
     closeDialog: () => void;
     startTransfer: (orderUuid: string | null) => void;
     setSplitQuantity: (lineUuid: string, quantity: number) => void;
+    setSplitTender: (tender: SplitTender | null) => void;
     resetSplit: () => void;
     setReceiptOrder: (orderUuid: string | null) => void;
     noteScan: () => void;
@@ -100,6 +111,7 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
     dialog: null,
     transferOrderUuid: null,
     splitSelection: {},
+    splitTender: null,
     receiptOrderUuid: null,
     lastScanAt: 0,
     lineApprovals: {},
@@ -179,9 +191,15 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
             else state.splitSelection[lineUuid] = quantity;
         }),
 
+    setSplitTender: (tender) =>
+        set((state) => {
+            state.splitTender = tender;
+        }),
+
     resetSplit: () =>
         set((state) => {
             state.splitSelection = {};
+            state.splitTender = null;
         }),
 
     setReceiptOrder: (orderUuid) =>

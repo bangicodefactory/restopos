@@ -189,6 +189,10 @@ features:
   # Guest count (RST-070 … RST-079) — user
   RST-070: { status: shipped, surface: user, manual: todo }
   RST-071: { status: shipped, surface: user, manual: todo }
+  RST-104: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
+  RST-105: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
+  RST-107: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
+  RST-111: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-072: { status: shipped, surface: user, manual: register/orders.md#guests }
   RST-073: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
   RST-074: { status: shipped, surface: user, manual: todo }
