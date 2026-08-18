@@ -29,6 +29,7 @@ import { ProductScreen } from './screens/ProductScreen';
 import { ReceiptScreen } from './screens/ReceiptScreen';
 import { SessionScreen } from './screens/SessionScreen';
 import { SplitScreen } from './screens/SplitScreen';
+import { TipScreen } from './screens/TipScreen';
 import { TicketScreen } from './screens/TicketScreen';
 import { useBootStore, useSyncStore } from './state/boot-store';
 import { linesOf, unsyncedCount, useOrderStore } from './state/order-store';
@@ -260,6 +261,13 @@ export function App(): JSX.Element {
                 <NavButton active={screen === 'products'} onClick={() => setScreen('products')}>
                     {t('reg.nav.products')}
                 </NavButton>
+                {/* RST-127 — the shift pass. Reachable on its own, because settling a stack of
+                    slips is a job a manager starts, not something they arrive at from a sale. */}
+                {catalog.config?.enable_tips ? (
+                    <NavButton active={screen === 'tip'} onClick={() => setScreen('tip')}>
+                        {t('reg.tip.title')}
+                    </NavButton>
+                ) : null}
                 <NavButton active={screen === 'tickets'} onClick={() => setScreen('tickets')}>
                     {t('reg.nav.tickets')}
                 </NavButton>
@@ -316,7 +324,15 @@ export function App(): JSX.Element {
                         onBack={() => setScreen('products')}
                         onValidated={() => {
                             setReceiptOrder(selectedOrderUuid);
-                            setScreen('receipt');
+                            // RST-122 — the sale is settled and the tab is not finished. Straight to
+                            // the tip screen, which is the whole point of the mode: the slip prints,
+                            // comes back signed, and the number is keyed while the customer is still
+                            // at the table.
+                            setScreen(
+                                catalog.config?.enable_tips && catalog.config?.tip_after_payment
+                                    ? 'tip'
+                                    : 'receipt',
+                            );
                         }}
                     />
                 ) : null}
@@ -338,6 +354,10 @@ export function App(): JSX.Element {
                             setScreen(catalog.config?.is_restaurant ? 'floor' : 'products');
                         }}
                     />
+                ) : null}
+
+                {screen === 'tip' ? (
+                    <TipScreen orderUuid={receiptOrderUuid} onDone={() => setScreen('tickets')} />
                 ) : null}
 
                 {screen === 'tickets' ? (

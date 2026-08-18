@@ -156,6 +156,8 @@ export type PosConfigOptions = {
     presets: { id: number; name: string; service_at: string }[];
     printers: { id: number; name: string; printer_type: string }[];
     categories: { id: number; name: string; parent_id: number | null }[];
+    /** Products marked `special_kind = tip` — the only ones a tip can be booked against (RST-120). */
+    tip_products: { id: number; name: string }[];
     employees: { id: number; name: string; default_role: string }[];
 };
 
@@ -195,6 +197,8 @@ export const WRITABLE_CONFIG_KEYS = [
     'is_restaurant',
     'use_pricelists',
     'limit_categories',
+    'tip_after_payment',
+    'tip_product_id',
     'use_fiscal_positions',
     'has_cash_control',
     'set_maximum_difference',

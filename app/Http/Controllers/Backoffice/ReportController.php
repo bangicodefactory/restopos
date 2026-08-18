@@ -125,6 +125,14 @@ final class ReportController extends Controller
                 'base_amount',
             ),
             'byPaymentMethod' => $this->paymentPanel($frozenIds, $liveIds),
+            // RST-129 (BAN-522) — tips per cashier.
+            //
+            // Read over **every** session in the range rather than split frozen-from-live like the
+            // panels above. Those read frozen summary tables that a close writes; tips are read from
+            // `pos_orders.tip_amount`, which is still there after a close, so there is no frozen
+            // copy to prefer and no second source to double-count against. Splitting here would
+            // report zero for every closed session.
+            'byCashierTips' => $this->summaries->tipsByCashierRows($sessionIds),
         ]);
     }
 

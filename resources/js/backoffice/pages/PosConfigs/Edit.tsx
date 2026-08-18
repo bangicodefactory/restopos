@@ -63,6 +63,8 @@ type ConfigForm = {
     is_restaurant: boolean;
     use_pricelists: boolean;
     limit_categories: boolean;
+    tip_after_payment: boolean;
+    tip_product_id: number | null;
     use_fiscal_positions: boolean;
     has_cash_control: boolean;
     set_maximum_difference: boolean;
@@ -96,6 +98,8 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         is_restaurant: config.is_restaurant,
         use_pricelists: config.use_pricelists,
         limit_categories: config.limit_categories,
+        tip_after_payment: config.tip_after_payment,
+        tip_product_id: config.tip_product_id,
         use_fiscal_positions: config.use_fiscal_positions,
         has_cash_control: config.has_cash_control,
         set_maximum_difference: config.set_maximum_difference,
@@ -309,13 +313,42 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                         onChange={(checked) => form.setData('enable_tips', checked)}
                                         hint="Les montants sont stockés ; aucun endpoint d’ajustement n’existe encore (spec 05 §15)."
                                     />
+                                    {/* RST-122 — the mode the whole tip flow hangs off. The column
+                                        has existed since the config table was written and was not in
+                                        the controller's validated set, so this was shown locked: the
+                                        only way to switch a venue into it was to edit the database. */}
                                     <ToggleField
                                         label="Pourboire après paiement"
-                                        checked={config.tip_after_payment}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.tip_after_payment}
+                                        disabled={!form.data.enable_tips}
+                                        onChange={(checked) => form.setData('tip_after_payment', checked)}
+                                        hint="Le pourboire est saisi une fois la vente encaissée, sur le ticket signé."
                                     />
+                                    {/* RST-120 — where tips are booked. Only products marked as tips
+                                        are offered: a catalogue-wide picker would be a search box,
+                                        and this is not something a manager browses for. */}
+                                    <label className="flex flex-col gap-1">
+                                        <span className="text-sm text-slate-600">Produit pourboire</span>
+                                        <select
+                                            className="min-h-touch rounded border border-slate-300 bg-white px-2 disabled:opacity-50"
+                                            data-testid="tip-product"
+                                            disabled={!form.data.enable_tips}
+                                            value={form.data.tip_product_id ?? ''}
+                                            onChange={(event) =>
+                                                form.setData(
+                                                    'tip_product_id',
+                                                    event.target.value === '' ? null : Number(event.target.value),
+                                                )
+                                            }
+                                        >
+                                            <option value="">Aucun</option>
+                                            {(options?.tip_products ?? []).map((product) => (
+                                                <option key={product.id} value={product.id}>
+                                                    {product.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
                                 </FormSection>
                             </>
                         ) : null}

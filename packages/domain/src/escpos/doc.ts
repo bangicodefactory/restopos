@@ -64,7 +64,7 @@ export type ReceiptWidth = 32 | 42 | 48;
 
 export type Codepage = 'cp437' | 'cp850' | 'cp858' | 'cp1252' | 'utf8';
 
-export type DocKind = 'receipt' | 'bill' | 'prep' | 'cash_move' | 'report' | 'test' | 'drawer';
+export type DocKind = 'receipt' | 'bill' | 'prep' | 'cash_move' | 'report' | 'test' | 'drawer' | 'tip_slip';
 
 export type EscPosDoc = {
     /** Characters per line at font A. */

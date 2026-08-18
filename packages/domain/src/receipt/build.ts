@@ -221,6 +221,60 @@ export function buildBillDoc(
 }
 
 /**
+ * The signature tip slip (RST-124).
+ *
+ * The piece of paper the customer writes on. It is not a receipt and deliberately carries none of
+ * one: no line table, no tax breakdown, no portal QR. What it needs is the amount already charged,
+ * an empty rule to write a tip on, another to write the new total, and somewhere to sign — and it
+ * needs those to be *writable*, which is why they are printed as ruled blanks rather than as rows
+ * with values.
+ *
+ * Marked "merchant copy", because that is what it is: the venue keeps this one, and it is the
+ * document the tip is later keyed from at the settlement grid (RST-127). A slip that could be
+ * mistaken for the customer's copy is a slip that leaves the building with the only record of the
+ * tip written on it.
+ *
+ * The total charged is printed once, plainly, so the figure being tipped on cannot be argued with
+ * afterwards.
+ */
+export function buildTipSlipDoc(order: ReceiptOrderView, config: ReceiptConfigView): EscPosDoc {
+    const l = config.labels;
+    const b = new EscPosBuilder({
+        width: config.width,
+        codepage: config.codepage,
+        kind: 'tip_slip',
+        orderUuid: order.uuid,
+    });
+
+    b.text(config.companyName, { align: 'center', bold: true, size: 'lg' });
+    for (const line of config.companyAddress) b.subtitle(line);
+
+    b.rule('=');
+    b.text(l.merchantCopy, { align: 'center', bold: true });
+    b.rule('=');
+
+    b.row(order.name, formatDateTime(order.orderedAt, { date: true }));
+    if (order.tableName) b.row(l.table, order.tableName);
+    if (order.cashierName) b.row(l.cashier, order.cashierName);
+
+    b.rule('-');
+
+    // What was already taken. The tip is written *on top of* this, so it is the one number on the
+    // slip that must not be a blank.
+    b.row(l.total, formatMoney(order.amountTotal, config.currency));
+
+    b.feed(1);
+    b.row(l.tipLine, '________________');
+    b.feed(1);
+    b.row(l.tipTotalLine, '________________');
+    b.feed(2);
+    b.text(`${l.signature}: ______________________`);
+    b.feed(2);
+
+    return b.build();
+}
+
+/**
  * The drawer-movement slip (REG-013).
  *
  * Deliberately not a receipt: nothing was sold, so there is no line table, no tax breakdown and no
