@@ -481,8 +481,10 @@ Batch cap: 200 orders (`pos.sync.max_orders_per_batch`).
    - On a create, the field falls through to the register's default.
    - On an update, the field is left alone. Writing `null` would clear a value the order legitimately
      had — an order correctly configured for an export exemption, silently re-taxed at the standard
-     rate by one stale push. (`restaurant_table_id` is the exception and still clears: a table that
-     is not ours means the order sits on no table, which is a fact worth recording.)
+     rate by one stale push, or a seated bill detached from the table it is actually on (BAN-524).
+
+   An **explicit `null`** is a different message and is still obeyed: "take this order off its
+   table" clears the column. Only "put it on a table I cannot use" is ignored.
 
 Refunds are represented by **negative quantities**, not by a document sign flag.
 

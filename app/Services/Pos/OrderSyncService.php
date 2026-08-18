@@ -278,7 +278,23 @@ final readonly class OrderSyncService
                 ->exists();
 
             if (! $reachable) {
-                $order[$key] = null;
+                // Ignored, not cleared (BAN-524). On a create the two are identical — the write is
+                // `$attributes['table_id'] ?? $attributes['restaurant_table_id'] ?? null`, so an
+                // absent key lands on null either way, and the behaviour BAN-471 pins is unchanged.
+                //
+                // On an update they are not. `updateOrder` writes any key that is *present*, so a
+                // null detached an order from the table it was actually sitting on. No attacker
+                // needed: a device holding a stale id after the table is deleted or moved off its
+                // floors sends exactly this on its next routine push, and the register re-pushes
+                // every draft when it is paid (BAN-506). The bill then exists on no table — the
+                // floor screen cannot draw it and the waiter cannot find it from the room, which is
+                // the failure BAN-452 guards against from the other direction.
+                //
+                // An *explicit* `table_id: null` — the waiter moving an order off its table — is
+                // untouched by this, because `isset()` is already false for null and the loop skips
+                // it. "Take this order off its table" still means what it says; only "put it on a
+                // table I cannot use" is now ignored rather than obeyed.
+                unset($order[$key]);
             }
         }
 
@@ -386,7 +402,11 @@ final readonly class OrderSyncService
                 ->exists();
 
             if (! $owned) {
-                $order[$key] = null;
+                // Same reasoning as the table above (BAN-524): identical on create, and on update it
+                // stops one stale push erasing the service mode the order was actually taken under.
+                // The preset drives the kitchen ticket header and whether a cover count is even
+                // asked for, so losing it quietly changes what the pass is told.
+                unset($order[$key]);
             }
         }
 
