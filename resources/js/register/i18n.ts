@@ -351,6 +351,13 @@ export const registerEn = {
     'reg.split.amount': 'Amount',
     'reg.split.take': 'Take this amount',
     'reg.split.remaining': '{amount} still to collect',
+    'reg.split.destination': 'Seat the new bill at',
+    'reg.split.stayFloating': 'Leave it floating',
+    'reg.split.tableOccupied': 'T {number} — merges with the bill there',
+    'reg.split.seatedAt': 'New bill seated at T {number}',
+    'reg.split.mergedAt': 'New bill merged into the bill on T {number}',
+    'reg.split.seatFailed': 'The bill was split but could not be seated. It is floating — move it from the order list.',
+    'reg.split.seatOffline': 'The bill was split but merging needs a connection. It is floating for now.',
 
     // ── sync / status ────────────────────────────────────────────────────────
     'reg.sync.title': 'Synchronisation',
@@ -729,6 +736,13 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.split.amount': 'Montant',
     'reg.split.take': 'Encaisser ce montant',
     'reg.split.remaining': 'Reste {amount} à encaisser',
+    'reg.split.destination': 'Placer la nouvelle addition à',
+    'reg.split.stayFloating': 'La laisser flottante',
+    'reg.split.tableOccupied': 'T {number} — fusionne avec l’addition en place',
+    'reg.split.seatedAt': 'Nouvelle addition placée à T {number}',
+    'reg.split.mergedAt': 'Nouvelle addition fusionnée avec celle de T {number}',
+    'reg.split.seatFailed': 'L’addition a été divisée mais n’a pas pu être placée. Elle est flottante — déplacez-la depuis la liste.',
+    'reg.split.seatOffline': 'L’addition a été divisée mais la fusion nécessite une connexion. Elle reste flottante.',
 
     'reg.sync.title': 'Synchronisation',
     'reg.sync.pending': '{count} en attente',

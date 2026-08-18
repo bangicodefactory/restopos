@@ -18,6 +18,7 @@ features:
   - REG-219
   - REG-220
   - RST-104
+  - RST-106
   - RST-105
   - RST-107
   - RST-111
@@ -182,6 +183,25 @@ next person.
 
 You cannot take more than is outstanding — typing more simply settles it, rather than making change
 against a table that has not finished paying.
+
+### Moving the new bill to another table
+
+Four guests get up and move to the bar while the rest of the table carries on eating. Split their
+lines off as usual, and before you confirm, pick the table they moved to under **Seat the new bill
+at**.
+
+- Choose a **free** table and the new bill is seated there.
+- Choose a table that already has a bill and the two are **merged** — the list says so before you
+  confirm, so you are never surprised by it.
+- Leave it on **Leave it floating** and nothing changes from how splitting has always worked: the new
+  bill has no table and the original keeps its own.
+
+Seating a free table works with no connection. Merging into a table that is already occupied does
+not, because the two bills have to be combined in one place where every till can see the result. If
+that fails, the split still stands — the new bill is simply floating, and you can move it later from
+the order list. The till says so rather than leaving you to find out.
+
+The kitchen is not told anything twice: whatever was already sent stays sent, on both bills.
 
 ### What is happening underneath
 
