@@ -114,6 +114,14 @@ export function SplitScreen({
         if (outcome.seatingError !== null) {
             // The split happened; only the seating did not. Kept on screen rather than navigating
             // away, because the waiter needs to know the bill is floating before they walk off.
+            //
+            // The selection is cleared all the same, and that is the part that matters. Leaving it
+            // live re-enables confirm, and "it could not be seated" reads as something to retry — so
+            // the next tap splits *again*, taking another unit off the parent and leaving the table
+            // on three bills. Cleared, confirm disables itself, and the only thing the message can
+            // lead to is reading it (review of #74).
+            resetSplit();
+            setDestination(null);
             setSeatingError(outcome.seatingError === 'offline' ? t('reg.split.seatOffline') : t('reg.split.seatFailed'));
             return;
         }
