@@ -84,7 +84,9 @@ Route::middleware(['auth'])->group(function (): void {
 
     Route::get('floors', [FloorController::class, 'index'])->name('floors.index');
     Route::get('floors/{floor}/edit', [FloorController::class, 'edit'])->name('floors.edit');
+    Route::post('floors', [FloorController::class, 'store'])->name('floors.store');
     Route::patch('floors/{floor}', [FloorController::class, 'update'])->name('floors.update');
+    Route::delete('floors/{floor}', [FloorController::class, 'destroy'])->name('floors.destroy');
     Route::post('tables/{table}/rotate-token', [FloorController::class, 'rotateTableToken'])->name('tables.rotate-token');
 
     Route::get('orders', [OrderController::class, 'index'])->name('orders.index');

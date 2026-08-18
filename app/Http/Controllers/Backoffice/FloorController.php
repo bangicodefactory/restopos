@@ -10,10 +10,12 @@ use App\Http\Requests\Restaurant\FloorRequest;
 use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Restaurant\TableService;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -42,6 +44,8 @@ final class FloorController extends Controller
 
     public function index(): Response
     {
+        Gate::authorize('viewAny', Floor::class);
+
         return Inertia::render('Floors/Index', [
             'floors' => Floor::query()->orderBy('sequence')->withCount('tables')->get()
                 ->map(static fn (Floor $f): array => [
@@ -58,6 +62,8 @@ final class FloorController extends Controller
 
     public function edit(Floor $floor): Response
     {
+        Gate::authorize('view', $floor);
+
         return Inertia::render('Floors/Edit', [
             'floor' => $floor->attributesToArray(),
             'tables' => RestaurantTable::query()
@@ -70,8 +76,91 @@ final class FloorController extends Controller
         ]);
     }
 
+    /**
+     * `POST /floors` — add a room (BOF-116).
+     *
+     * A venue that opens a terrace could not say so: floors could be renamed and recoloured, and the
+     * list was whatever the seeder produced.
+     */
+    public function store(FloorRequest $request): RedirectResponse
+    {
+        Gate::authorize('create', Floor::class);
+
+        $data = $request->validated();
+        unset($data['tables']);
+
+        $companyId = ActingCompany::id();
+
+        // A super-admin acts across companies and has none of their own. Refused rather than
+        // guessed — a room filed against the wrong tenant is invisible to the venue that needs it.
+        if (! is_int($companyId)) {
+            throw ValidationException::withMessages([
+                'name' => 'Choose a company before adding a floor.',
+            ]);
+        }
+
+        Floor::query()->create([
+            ...$data,
+            'uuid' => (string) Str::uuid(),
+            'company_id' => $companyId,
+            'sequence' => $data['sequence'] ?? ((int) Floor::query()->max('sequence') + 1),
+        ]);
+
+        return back()->with('success', 'Floor added.');
+    }
+
+    /**
+     * `DELETE /floors/{floor}` — remove a room (BOF-116).
+     *
+     * Two different refusals, and the difference matters.
+     *
+     * A floor with **open bills** is refused outright: deleting it strands the money. The orders keep
+     * a `restaurant_table_id` pointing at nothing, the floor screen cannot draw them and the ticket
+     * list filters them out — the bill does not disappear, which is worse, because nothing says it is
+     * there (RST-032, the same rule the register endpoint enforces).
+     *
+     * A floor with **tables but no bills** is refused *until confirmed*. That is not a formality: the
+     * tables go with it, and each one carries the QR capability token printed on the physical card at
+     * that table. Re-creating the room later mints new tokens and every printed QR in the room is
+     * dead. Worth a deliberate second press.
+     */
+    public function destroy(Request $request, Floor $floor): RedirectResponse
+    {
+        Gate::authorize('delete', $floor);
+
+        $occupied = $this->tables->occupiedTablesOnFloor((int) $floor->getKey());
+
+        if ($occupied !== []) {
+            throw ValidationException::withMessages([
+                // Named, not merely refused: "you cannot delete this floor" sends a manager hunting
+                // through the room; a list of table numbers is a job they can finish.
+                'floor' => 'Still open on this floor: '.implode(', ', $occupied).'.',
+            ]);
+        }
+
+        $tableCount = RestaurantTable::query()->where('restaurant_floor_id', $floor->getKey())->count();
+
+        if ($tableCount > 0 && ! $request->boolean('confirm')) {
+            throw ValidationException::withMessages([
+                'floor' => 'This room still has '.$tableCount.' table(s). Deleting it removes them and'
+                    .' invalidates their printed QR codes. Confirm to continue.',
+            ]);
+        }
+
+        $this->connection->transaction(function () use ($floor): void {
+            RestaurantTable::query()->where('restaurant_floor_id', $floor->getKey())->get()
+                ->each(static fn (RestaurantTable $t): ?bool => $t->delete());
+
+            $floor->delete();
+        });
+
+        return back()->with('success', 'Floor removed.');
+    }
+
     public function update(FloorRequest $request, Floor $floor): RedirectResponse
     {
+        Gate::authorize('update', $floor);
+
         $data = $request->validated();
         $tables = $data['tables'] ?? null;
         unset($data['tables']);
