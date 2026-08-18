@@ -113,14 +113,24 @@ export function FloorScreen({
 
         // A child of a linked group has no bill of its own — the link moved it onto the parent —
         // so tapping it opens the group's bill rather than an empty screen (RST-050).
-        const targetId = billTableFor(table, catalog.tables).id;
+        const billTable = billTableFor(table, catalog.tables);
+        const targetId = billTable.id;
         const existing = orderOnTable(state, targetId);
         if (existing) {
             onOpenOrder(existing.uuid);
             return;
         }
 
-        const created = await createOrder({ tableId: targetId, guestCount: table.seats });
+        // The covers of the whole group, not of the one table that was tapped. Two fours pushed
+        // together seat eight, and the tile says so — opening the bill for four would disagree with
+        // the screen it was opened from, and the guest count is what per-cover reporting and course
+        // pacing are counted against (review of #70).
+        const seats = linkedChildren(billTable, catalog.tables).reduce(
+            (total, row) => total + row.seats,
+            billTable.seats,
+        );
+
+        const created = await createOrder({ tableId: targetId, guestCount: seats });
         setTable(created, targetId);
         onOpenOrder(created);
     };
@@ -147,6 +157,16 @@ export function FloorScreen({
     const dropOn = async (target: RestaurantTableRow | null): Promise<void> => {
         const child = armed;
         cancelDrag();
+
+        // A drop that landed on a tile is followed by that tile's click, and opening the table the
+        // waiter just dropped onto is not what they asked for. Set here rather than when the drag
+        // armed, so a drag that ended in a cancel leaves nothing behind: it produces no click to
+        // swallow, and the flag survived to eat the *next* real tap — change your mind about moving
+        // a table, then tap one to take an order, and nothing happened (review of #70).
+        //
+        // Set even when the drop is refused below: dropping on an illegal target should still not
+        // open it.
+        if (target !== null) draggedRef.current = true;
 
         // Dropped on empty canvas, or on a table the link rules refuse. Being able to change your
         // mind without a dialog is most of why this is a drag and not a two-tap gesture.
@@ -293,10 +313,7 @@ export function FloorScreen({
                             // offers a drop that is about to come back as a 422.
                             droppable={armed !== null && canLink(armed, table)}
                             hovered={hoverId === table.id}
-                            onArm={() => {
-                                draggedRef.current = true;
-                                setArmedId(table.id);
-                            }}
+                            onArm={() => setArmedId(table.id)}
                             onHover={() => {
                                 if (armedId !== null && armedId !== table.id) setHoverId(table.id);
                             }}
@@ -383,109 +400,107 @@ function TableTile({
     const groupSeats = group.reduce((sum, row) => sum + row.seats, table.seats);
 
     return (
-        <button
-            type="button"
-            onClick={onTap}
-            onPointerDown={(event) => {
-                originRef.current = { x: event.clientX, y: event.clientY };
-                holdRef.current = setTimeout(() => {
-                    holdRef.current = null;
-                    onArm();
-                }, HOLD_MS);
-            }}
-            onPointerMove={(event) => {
-                const origin = originRef.current;
-                if (holdRef.current === null || !origin) return;
-
-                const moved = Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y);
-                if (moved > HOLD_SLOP_PX) clearHold();
-            }}
-            onPointerEnter={dragging ? onHover : undefined}
-            onPointerUp={() => {
-                clearHold();
-                if (dragging) onDrop();
-            }}
-            onPointerCancel={clearHold}
-            // A table's only accessible name is "<number> <n> places" — localised, and it changes
-            // with the cover count. Specs address it by these instead (BAN-505).
-            data-testid="table-tile"
-            data-table-number={table.table_number}
-            data-occupied={occupied ? 'true' : 'false'}
-            data-armed={armed ? 'true' : 'false'}
-            data-droppable={dragging && droppable ? 'true' : 'false'}
+        // The tile is a positioned wrapper rather than one big button, because unlink has to be a
+        // control of its own. Nested inside the button it was invalid HTML, and a screen reader
+        // reaches it by walking into a control it has already been told is a single button — so the
+        // one action on this tile that cannot be undone by tapping again was the least reachable.
+        <div
             style={{
                 position: 'absolute',
                 left: table.position_h,
                 top: table.position_v,
                 width: Math.max(64, table.width),
                 height: Math.max(64, table.height),
-                borderRadius: table.shape === 'round' ? '9999px' : undefined,
-                backgroundColor: table.color ?? undefined,
-                // Without this the browser claims the gesture for scrolling and the hold never
-                // completes on a touch screen — which is every screen this runs on.
-                touchAction: dragging ? 'none' : undefined,
             }}
-            className={cn(
-                'flex flex-col items-center justify-center rounded-pos p-1 text-center shadow-pos ring-2',
-                isChild && 'opacity-60',
-                armed && 'z-10 scale-105 ring-4 ring-brand-600',
-                dragging && droppable && !armed && 'ring-4 ring-brand-400',
-                dragging && hovered && droppable && 'ring-brand-600',
-                occupied
-                    ? stale
-                        ? 'bg-danger-soft ring-danger text-danger-fg'
-                        : 'bg-warn-soft ring-warn text-warn-fg'
-                    : 'bg-ok-soft ring-ok text-ok-fg',
-            )}
-            aria-label={`${t('order.table')} ${groupNumbers ?? table.table_number}`}
         >
-            <span className="text-lg font-bold">{groupNumbers ?? table.table_number}</span>
-            {occupied && totals ? (
-                <>
-                    <span className="text-sm font-semibold tabular-nums">{money(totals.roundedTotal)}</span>
-                    {minutes !== null ? (
-                        <span className="text-xs">{t('reg.floor.minutes', { count: minutes })}</span>
-                    ) : null}
-                </>
-            ) : (
-                <span className="text-xs">{t('reg.floor.seats', { count: groupSeats })}</span>
-            )}
-            {changes > 0 ? (
-                <span className="absolute end-1 top-1 min-w-5 rounded-full bg-warn px-1 text-xs font-bold text-white">
-                    {changes}
-                </span>
-            ) : null}
-            {isChild ? (
-                <span className="absolute start-1 top-1 text-xs" aria-hidden>
-                    🔗
-                </span>
-            ) : null}
-            {/* Unlink sits on the child, because the child is the table that was pushed over — and
-                it is a nested control rather than a second gesture so that breaking a link is
-                deliberate. Separating the furniture leaves the bill on the parent; splitting the
-                money is a different action (RST-052). */}
+            <button
+                type="button"
+                onClick={onTap}
+                onPointerDown={(event) => {
+                    originRef.current = { x: event.clientX, y: event.clientY };
+                    holdRef.current = setTimeout(() => {
+                        holdRef.current = null;
+                        onArm();
+                    }, HOLD_MS);
+                }}
+                onPointerMove={(event) => {
+                    const origin = originRef.current;
+                    if (holdRef.current === null || !origin) return;
+
+                    const moved = Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y);
+                    if (moved > HOLD_SLOP_PX) clearHold();
+                }}
+                onPointerEnter={dragging ? onHover : undefined}
+                onPointerUp={() => {
+                    clearHold();
+                    if (dragging) onDrop();
+                }}
+                onPointerCancel={clearHold}
+                // A table's only accessible name is "<number> <n> places" — localised, and it
+                // changes with the cover count. Specs address it by these instead (BAN-505).
+                data-testid="table-tile"
+                data-table-number={table.table_number}
+                data-occupied={occupied ? 'true' : 'false'}
+                data-armed={armed ? 'true' : 'false'}
+                data-droppable={dragging && droppable ? 'true' : 'false'}
+                style={{
+                    borderRadius: table.shape === 'round' ? '9999px' : undefined,
+                    backgroundColor: table.color ?? undefined,
+                    // Without this the browser claims the gesture for scrolling and the hold never
+                    // completes on a touch screen — which is every screen this runs on.
+                    touchAction: dragging ? 'none' : undefined,
+                }}
+                className={cn(
+                    'absolute inset-0 flex flex-col items-center justify-center rounded-pos p-1 text-center shadow-pos ring-2',
+                    isChild && 'opacity-60',
+                    armed && 'z-10 scale-105 ring-4 ring-brand-600',
+                    dragging && droppable && !armed && 'ring-4 ring-brand-400',
+                    dragging && hovered && droppable && 'ring-brand-600',
+                    occupied
+                        ? stale
+                            ? 'bg-danger-soft ring-danger text-danger-fg'
+                            : 'bg-warn-soft ring-warn text-warn-fg'
+                        : 'bg-ok-soft ring-ok text-ok-fg',
+                )}
+                aria-label={`${t('order.table')} ${groupNumbers ?? table.table_number}`}
+            >
+                <span className="text-lg font-bold">{groupNumbers ?? table.table_number}</span>
+                {occupied && totals ? (
+                    <>
+                        <span className="text-sm font-semibold tabular-nums">{money(totals.roundedTotal)}</span>
+                        {minutes !== null ? (
+                            <span className="text-xs">{t('reg.floor.minutes', { count: minutes })}</span>
+                        ) : null}
+                    </>
+                ) : (
+                    <span className="text-xs">{t('reg.floor.seats', { count: groupSeats })}</span>
+                )}
+                {changes > 0 ? (
+                    <span className="absolute end-1 top-1 min-w-5 rounded-full bg-warn px-1 text-xs font-bold text-white">
+                        {changes}
+                    </span>
+                ) : null}
+                {isChild ? (
+                    <span className="absolute start-1 top-1 text-xs" aria-hidden>
+                        🔗
+                    </span>
+                ) : null}
+            </button>
+
+            {/* Unlink sits on the child, because the child is the table that was pushed over.
+                Separating the furniture leaves the bill on the parent; splitting the money is a
+                different action (RST-052). */}
             {isChild && canUnlink ? (
-                <span
-                    role="button"
-                    tabIndex={0}
+                <button
+                    type="button"
                     data-testid="table-unlink"
-                    className="absolute end-1 bottom-1 rounded-pos bg-white/80 px-1 text-xs font-semibold text-slate-700"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onUnlink();
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onPointerUp={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onUnlink();
-                    }}
+                    className="absolute end-1 bottom-1 z-20 rounded-pos bg-white/80 px-1 text-xs font-semibold text-slate-700"
+                    onClick={onUnlink}
+                    aria-label={`${t('reg.floor.unlink')} ${table.table_number}`}
                 >
                     {t('reg.floor.unlink')}
-                </span>
+                </button>
             ) : null}
-        </button>
+        </div>
     );
 }

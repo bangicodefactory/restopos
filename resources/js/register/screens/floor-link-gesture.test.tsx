@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCatalog } from '../data/catalog';
 import { clearRuntime, setRuntime } from '../data/runtime';
 import { installCatalog, makeConfig, makeFloor, makeTable, resetRegisterState } from '../domain/__fixtures__/catalog';
+import { useOrderStore } from '../state/order-store';
 import { FloorScreen } from './FloorScreen';
 
 /**
@@ -229,6 +230,26 @@ describe('the drop', () => {
         expect(onOpenOrder.mock.calls.length).toBeLessThanOrEqual(1);
     });
 
+    it('leaves the next ordinary tap working after the drag is cancelled', async () => {
+        // The suppression that stops a drop from also opening the table was armed with the drag, and
+        // a cancelled drag produces no tap to consume it — so the flag survived and ate the next
+        // real tap. In service: change your mind about moving a table, tap one to take an order,
+        // nothing happens, tap again (review of #70).
+        const onOpenOrder = vi.fn();
+        render(<FloorScreen onOpenOrder={onOpenOrder} />);
+
+        hold(tile('4'));
+        fireEvent.pointerUp(screen.getByTestId('floor-canvas'));
+        await act(async () => {});
+
+        pointer(tile('3'), 'pointerdown', 0, 0);
+        fireEvent.pointerUp(tile('3'));
+        fireEvent.click(tile('3'));
+        await act(async () => {});
+
+        expect(onOpenOrder).toHaveBeenCalled();
+    });
+
     it('reports a refusal instead of leaving the room looking linked', async () => {
         const { patch } = api();
         patch.mockRejectedValueOnce(new Error('boom'));
@@ -287,6 +308,37 @@ describe('a linked pair', () => {
         render(<FloorScreen onOpenOrder={vi.fn()} />);
 
         expect(screen.queryByTestId('table-unlink')).toBeNull();
+    });
+
+    it('opens a new bill with the covers of the whole group', async () => {
+        // The tile says eight; opening the bill for four would disagree with the screen it was
+        // opened from, and the guest count is what per-cover reporting and course pacing are
+        // counted against (review of #70).
+        api();
+        const onOpenOrder = vi.fn();
+        render(<FloorScreen onOpenOrder={onOpenOrder} />);
+
+        pointer(tile('4'), 'pointerdown', 0, 0);
+        fireEvent.pointerUp(tile('4'));
+        fireEvent.click(tile('4'));
+
+        await vi.waitFor(() => expect(onOpenOrder).toHaveBeenCalled());
+
+        const uuid = onOpenOrder.mock.calls[0]?.[0] as string;
+        expect(useOrderStore.getState().orders[uuid]?.guest_count).toBe(8);
+    });
+
+    it('offers unlink as a control of its own, not one buried inside the tile', () => {
+        // Nested in the tile's button it was invalid HTML, and assistive tech reaches it only by
+        // walking into a control it has been told is a single button — leaving the one action here
+        // that a second tap cannot undo the least reachable thing on the screen.
+        api();
+        render(<FloorScreen onOpenOrder={vi.fn()} />);
+
+        const unlink = screen.getByTestId('table-unlink');
+
+        expect(unlink.tagName).toBe('BUTTON');
+        expect(unlink.closest('button')).toBe(unlink);
     });
 
     it('never offers the child as a drop target, which would re-home the whole group', () => {
