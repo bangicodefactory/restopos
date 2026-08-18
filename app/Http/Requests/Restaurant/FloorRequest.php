@@ -20,7 +20,9 @@ final class FloorRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:64'],
+            // Required on create, `sometimes` on update: a save from the colour picker must not
+            // blank the name because that form did not render it (BAN-439).
+            'name' => [$this->route('floor') === null ? 'required' : 'sometimes', 'string', 'max:64'],
             'background_color' => ['nullable', 'string', 'max:24'],
             'sequence' => ['nullable', 'integer'],
             'active' => ['nullable', 'boolean'],
