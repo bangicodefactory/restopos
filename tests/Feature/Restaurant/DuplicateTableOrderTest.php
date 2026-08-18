@@ -164,3 +164,41 @@ it('is idempotent on a resend, which the outbox produces routinely', function ()
         ->and(DB::table('pos_order_merges')->count())->toBe(0)
         ->and(Order::query()->where('uuid', $uuid)->exists())->toBeTrue();
 });
+
+it('never merges into another company bill, even when the table id is foreign (review of #67)', function (): void {
+    // `restaurant_table_id` is not ownership-checked at ingest (BAN-520), so a device can name any
+    // table id in the database. Unscoped, the collision lookup finds the other tenant's bill and
+    // hands it to a merge that moves lines, courses and the prep snapshot across — a cross-tenant
+    // merge, well past the label leak BAN-520 describes.
+    //
+    // The probe that found this was refused for an unrelated reason: "unknown tax id 2", from the
+    // second fixture's catalogue. A venue whose tax ids happened to line up would have merged, so
+    // the tenancy rule is asserted here directly rather than through a push that might fail for
+    // some other reason first.
+    $other = PosFixtures::make()->withSession()->withFloor();
+    $foreignTable = $other->tableOne->getKey();
+
+    $theirs = (string) Str::uuid();
+    test()->withHeaders($other->headers())->postJson('/api/pos/sync', [
+        'orders' => [$other->orderCommand($theirs, [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $other->variant->getKey(),
+            'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+        ]], ['table_id' => $foreignTable, 'guest_count' => 2])],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $theirId = (int) Order::query()->where('uuid', $theirs)->value('id');
+    $linesBefore = OrderLine::query()->where('pos_order_id', $theirId)->count();
+
+    $ours = (string) Str::uuid();
+
+    // Accepted, not rejected: the sale is ours and real. The unusable table reference is dropped,
+    // the way an unusable customer or preset already is.
+    pushOrder($this->fx, $ours, $foreignTable, '5')->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect(DB::table('pos_orders')->where('uuid', $ours)->value('restaurant_table_id'))->toBeNull();
+
+    // Whatever became of our push, theirs is untouched and nothing was merged.
+    expect(OrderLine::query()->where('pos_order_id', $theirId)->count())->toBe($linesBefore)
+        ->and(DB::table('pos_order_merges')->count())->toBe(0)
+        ->and(DB::table('pos_orders')->where('uuid', $theirs)->value('state'))->toBe('draft');
+});

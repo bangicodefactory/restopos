@@ -187,6 +187,7 @@ final readonly class OrderSyncService
         if (isset($command['order']) && is_array($command['order'])) {
             $command['order'] = $this->resolvePlaceholderCustomer($config, $command['order'], $customerIdMap);
             $command['order'] = $this->resolveOwnedPreset($config, $command['order']);
+            $command['order'] = $this->resolveOwnedTable($config, $command['order']);
         }
 
         try {
@@ -243,6 +244,44 @@ final readonly class OrderSyncService
      * @param  array<int, int>  $customerIdMap
      * @return array<string, mixed>
      */
+    /**
+     * Drop a table that is not on one of this register's floors (BAN-471, review of #67).
+     *
+     * `restaurant_table_id` arrives from the client unchecked — BAN-520 covers that generally — and
+     * two things here make it urgent rather than theoretical. The collision lookup would otherwise
+     * find another tenant's bill sitting on that table and merge into it, moving lines, courses and
+     * the prep snapshot across companies. And refusing *only* the merge is not enough either: the
+     * insert then hits `pos_orders_draft_table_unique` and the order is rejected outright, which is
+     * exactly the lost sale this ticket exists to stop.
+     *
+     * Dropped to null rather than rejected, matching `resolvePlaceholderCustomer` and
+     * `resolveOwnedPreset`: the sale is real and belongs to this register, and losing it over a
+     * table reference nobody can use would be the worse outcome.
+     *
+     * @param  array<string, mixed>  $order
+     * @return array<string, mixed>
+     */
+    private function resolveOwnedTable(PosConfig $config, array $order): array
+    {
+        foreach (['table_id', 'restaurant_table_id'] as $key) {
+            if (! isset($order[$key])) {
+                continue;
+            }
+
+            $reachable = $config->floors()
+                ->whereKey(
+                    RestaurantTable::query()->whereKey((int) $order[$key])->value('restaurant_floor_id') ?? 0
+                )
+                ->exists();
+
+            if (! $reachable) {
+                $order[$key] = null;
+            }
+        }
+
+        return $order;
+    }
+
     /**
      * Drop a preset that is not this company's (BAN-485, review of #59).
      *
@@ -765,7 +804,7 @@ final readonly class OrderSyncService
         $mergeIntoId = null;
 
         if ($order === null) {
-            $mergeIntoId = $this->sittingDraftOnTable($attributes);
+            $mergeIntoId = $this->sittingDraftOnTable($config, $attributes);
 
             if ($mergeIntoId !== null) {
                 // Detached at insert; the table comes back with the merge.
@@ -1012,7 +1051,7 @@ final readonly class OrderSyncService
      *
      * @param  array<string, mixed>  $attributes
      */
-    private function sittingDraftOnTable(array $attributes): ?int
+    private function sittingDraftOnTable(PosConfig $config, array $attributes): ?int
     {
         $tableId = $attributes['table_id'] ?? $attributes['restaurant_table_id'] ?? null;
 
@@ -1024,6 +1063,12 @@ final readonly class OrderSyncService
 
         $existing = Order::query()
             ->where('restaurant_table_id', (int) $tableId)
+            // Defence in depth, and labelled as such: `resolveOwnedTable` already drops a table
+            // this register cannot reach, so nothing foreign should arrive here at all. Removing
+            // this clause does not fail a test, and the honest reason is that the guard above is
+            // what stops the attack — this only makes the merge target provably same-tenant however
+            // the id got here (review of #67).
+            ->where('company_id', $config->company_id)
             ->where('state', OrderState::Draft->value)
             ->orderBy('id')
             ->lockForUpdate()
