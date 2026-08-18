@@ -26,6 +26,8 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosSession;
+use App\Models\Pricing\FiscalPosition;
+use App\Models\Pricing\Pricelist;
 use App\Models\Restaurant\OrderCourse;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Audit\AuditRecorder;
@@ -188,6 +190,7 @@ final readonly class OrderSyncService
             $command['order'] = $this->resolvePlaceholderCustomer($config, $command['order'], $customerIdMap);
             $command['order'] = $this->resolveOwnedPreset($config, $command['order']);
             $command['order'] = $this->resolveOwnedTable($config, $command['order']);
+            $command['order'] = $this->resolveOwnedReferences($config, $command['order']);
         }
 
         try {
@@ -296,6 +299,77 @@ final readonly class OrderSyncService
      * label. Both the create and the update path run through here, which is the reason it lives at
      * this chokepoint rather than next to either one.
      *
+     * @param  array<string, mixed>  $order
+     * @return array<string, mixed>
+     */
+    /**
+     * The last two client-supplied foreign keys on an order command (BAN-520).
+     *
+     * `customer_id` has been ownership-checked since REG-153, `pos_preset_id` since BAN-485 and
+     * `restaurant_table_id` since BAN-471. These two were left, and they are the pair that touches
+     * money rather than labels:
+     *
+     * - **`fiscal_position_id`** was stored verbatim and handed to the tax calculator, which loads
+     *   `fiscal_position_taxes` by id and scopes it to nothing. So a crafted id applies *another
+     *   tenant's tax mapping* to this venue's sale — including a mapping to an exemption, which
+     *   zeroes the VAT on a document that has legal weight. Probed before the fix: the order came
+     *   back `ok` with the foreign id persisted.
+     *
+     * - **`pricelist_id`** never leaked, because `PricelistResolver` only holds the pricelists this
+     *   config loaded and throws on anything else. It did something worse: the throw becomes
+     *   `ingest_failed`, the client classifies a rejection as permanent, and the outbox quarantines
+     *   the push. A stale id left on a device after a pricelist is unlinked — no attacker needed —
+     *   silently loses the sale. Dropping the id prices the order off the register's own default
+     *   instead, which is what an order with no pricelist has always done.
+     *
+     * Scoped to the company rather than to the config's linked sets: the company is the security
+     * boundary, and refusing a pricelist that is merely not linked to *this* register would reject
+     * configurations that are legitimate today.
+     *
+     * Dropped to null rather than rejected, the established convention for an unusable id on an
+     * order command — losing a real sale over one of these is the failure this is preventing, not a
+     * lesser version of it. `null` then falls through to the config's default at the write below.
+     *
+     * @param  array<string, mixed>  $order
+     * @return array<string, mixed>
+     */
+    private function resolveOwnedReferences(PosConfig $config, array $order): array
+    {
+        $owned = [
+            'pricelist_id' => Pricelist::class,
+            'fiscal_position_id' => FiscalPosition::class,
+        ];
+
+        foreach ($owned as $key => $model) {
+            if (! isset($order[$key])) {
+                continue;
+            }
+
+            $exists = $model::query()
+                ->whereKey((int) $order[$key])
+                ->where('company_id', $config->company_id)
+                ->exists();
+
+            if (! $exists) {
+                // **Unset**, not set to null. On create the two are the same — `??` falls through to
+                // the register's default either way. On update they are not: the writable loop
+                // writes any key that is *present*, so a null would clear the value the order
+                // already had. An order correctly configured for an export exemption, then touched
+                // by one stale or tampered push, would silently lose its mapping and be re-taxed at
+                // the standard rate (review of #72).
+                //
+                // This is where the money pair differs from `resolveOwnedTable`: a table that is not
+                // ours means the order sits on no table, which is a real fact worth writing. A
+                // pricelist or tax mapping that is not ours means only that this command cannot say
+                // anything about it — the field is ignored, not answered.
+                unset($order[$key]);
+            }
+        }
+
+        return $order;
+    }
+
+    /**
      * @param  array<string, mixed>  $order
      * @return array<string, mixed>
      */

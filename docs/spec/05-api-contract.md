@@ -465,6 +465,24 @@ Batch cap: 200 orders (`pos.sync.max_orders_per_batch`).
 4. **A closed session never loses a sale.** Orders reroute into the open session, or into a rescue session.
 5. **The server recomputes every monetary field** — subtotals, tax split, order totals, `amount_paid`, `amount_change`, `amount_due`, margins — from primary facts. Line **tax ids are derived from the catalog**, not from the payload: a client cannot zero the VAT by omitting them.
 6. `sequence_number` and `name` are assigned once, gaplessly per session, at the moment the order leaves `draft`.
+7. **Every id on an order command is checked against the device's own company** — `customer_id`,
+   `pos_preset_id`, `restaurant_table_id`, `pricelist_id` and `fiscal_position_id`. A device token is
+   scoped to one config, so the realistic source is a tampered or stale device rather than a hostile
+   tenant; either way the ingest boundary is where it is settled. This closes the sibling of
+   guarantee 5: a client cannot zero the VAT by *omitting* tax ids, and it cannot zero it by
+   **naming another tenant's fiscal position** either, which maps the venue's taxes by rules the
+   venue never wrote.
+
+   An id that does not pass is **ignored, not rejected and not cleared**:
+
+   - The order is still accepted. Refusing it would lose a real sale over one field — and a
+     rejection is classified permanent, so the outbox quarantines it and never retries. A foreign or
+     stale `pricelist_id` used to do exactly that.
+   - On a create, the field falls through to the register's default.
+   - On an update, the field is left alone. Writing `null` would clear a value the order legitimately
+     had — an order correctly configured for an export exemption, silently re-taxed at the standard
+     rate by one stale push. (`restaurant_table_id` is the exception and still clears: a table that
+     is not ours means the order sits on no table, which is a fact worth recording.)
 
 Refunds are represented by **negative quantities**, not by a document sign flag.
 
