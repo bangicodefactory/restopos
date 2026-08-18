@@ -290,11 +290,17 @@ it('resolves two duplicate table drafts into one order on the table-open path (R
 
     $oldest = tableOrder($this->fx, $tableId, '2');
 
-    // A partial unique index normally rejects a second draft on the table; drop it to reproduce the
-    // offline race that slipped a duplicate past the guard — exactly what resolveDuplicateTableOrders
-    // exists to clean up.
+    // Two things now stand between a table and a second draft: the partial unique index, and — since
+    // BAN-471 — ingest itself, which folds a colliding order into the sitting one rather than losing
+    // it. So a duplicate can no longer be produced *through the API* at all.
+    //
+    // This test is about the repair endpoint, which still has to cope with duplicates that reached
+    // the table by some other route: rows from a release before either guard existed, or a restore.
+    // Built directly, so the subject under test is the resolver rather than the path that now
+    // prevents it.
     DB::statement('DROP INDEX pos_orders_draft_table_unique');
-    $newer = tableOrder($this->fx, $tableId, '3');
+    $newer = tableOrder($this->fx, null, '3');
+    Order::query()->where('uuid', $newer)->update(['restaurant_table_id' => $tableId]);
 
     expect(Order::query()->where('restaurant_table_id', $tableId)->where('state', 'draft')->count())->toBe(2);
 
