@@ -327,6 +327,12 @@ export const registerEn = {
     'reg.floor.link': 'Link the tables',
     'reg.floor.unlink': 'Unlink',
     'reg.floor.unlinkDone': 'Tables unlinked',
+    'reg.floor.linkArmed': 'Drop table {number} on another to push them together',
+    'reg.floor.linkDone': 'Tables linked',
+    'reg.floor.linkFailed': 'Could not link those tables. Try again.',
+    'reg.floor.linkOffline': 'Linking tables needs a connection.',
+    'reg.floor.linkedWith': 'With {tables}',
+
     'reg.floor.newDirectSale': 'Direct sale',
     'reg.floor.changes': '{count} to send',
 
@@ -700,6 +706,12 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.floor.link': 'Lier les tables',
     'reg.floor.unlink': 'Délier',
     'reg.floor.unlinkDone': 'Tables déliées',
+    'reg.floor.linkArmed': 'Déposez la table {number} sur une autre pour les réunir',
+    'reg.floor.linkDone': 'Tables liées',
+    'reg.floor.linkFailed': 'Impossible de lier ces tables. Réessayez.',
+    'reg.floor.linkOffline': 'Lier des tables nécessite une connexion.',
+    'reg.floor.linkedWith': 'Avec {tables}',
+
     'reg.floor.newDirectSale': 'Vente directe',
     'reg.floor.changes': '{count} à envoyer',
 

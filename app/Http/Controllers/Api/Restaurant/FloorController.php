@@ -166,11 +166,27 @@ final class FloorController extends Controller
         $table->forceFill($data)->save();
 
         if (array_key_exists('parent_id', $request->validated())) {
+            // RST-050 (BAN-463) — the *child* is ownership-checked above; the parent was resolved
+            // with a bare `find()`, and `parent_id`'s only rule is `exists:restaurant_tables,id`,
+            // which does not care whose table it is. So a device could name any table in the
+            // database as the parent — and `link()` does not merely set a column, it moves the
+            // child's draft order onto the parent, merging it into the parent's bill if there is
+            // one. That is a cross-tenant order merge: another company's table acquires our lines,
+            // our courses and our prep snapshot, and our bill stops existing.
+            //
+            // It cost little while the only way to reach it was a hand-written PATCH. This ticket
+            // makes it a drag gesture, which is exactly when an unguarded endpoint stops being
+            // theoretical.
+            $parent = $parentId === null ? null : $this->ownedTable($request, (int) $parentId);
+
+            if ($parentId !== null && $parent === null) {
+                return new JsonResponse([
+                    'error' => ['code' => 'invalid_link', 'message' => 'No such table.'],
+                ], 422);
+            }
+
             try {
-                $this->tables->link(
-                    $table,
-                    $parentId === null ? null : RestaurantTable::query()->find((int) $parentId),
-                );
+                $this->tables->link($table, $parent);
             } catch (DomainException $e) {
                 return new JsonResponse(['error' => ['code' => 'invalid_link', 'message' => $e->getMessage()]], 422);
             }
@@ -227,6 +243,27 @@ final class FloorController extends Controller
         if (! $reachable || (int) $table->company_id !== (int) $config->company_id) {
             throw new NotFoundHttpException('No such table.');
         }
+    }
+
+    /**
+     * A table this device may name in a request *body* — the lookup half of
+     * {@see assertOwnedTable()}, which guards route-bound models.
+     *
+     * Returns null rather than throwing: a foreign id in a body is a refusal for that field, not a
+     * missing route.
+     */
+    private function ownedTable(Request $request, int $id): ?RestaurantTable
+    {
+        [, $config] = $this->deviceContext($request);
+
+        /** @var RestaurantTable|null $table */
+        $table = RestaurantTable::query()->whereKey($id)->first();
+
+        if ($table === null || (int) $table->company_id !== (int) $config->company_id) {
+            return null;
+        }
+
+        return $config->floors()->whereKey($table->restaurant_floor_id)->exists() ? $table : null;
     }
 
     /** The floor half of {@see assertOwnedTable()}. */

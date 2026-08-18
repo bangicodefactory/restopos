@@ -31,6 +31,7 @@ features:
   - RST-057
   - RST-140
   - RST-141
+  - RST-050
 ---
 
 # Taking orders
@@ -192,3 +193,29 @@ From the order list, pick **Move to…** on an open order and choose a table.
 You do not have to decide which of those you are doing: it follows from the table you pick. This is
 the way to seat an order that is not on a table yet — a counter sale the customer decides to eat in —
 which the floor plan cannot help with, because there is nothing there to drag.
+
+## Pushing two tables together
+
+A party of eight arrives and you seat them at two tables of four. On the floor plan, **hold one
+table for a moment until it lifts, then drag it onto the other and let go.**
+
+- The two tables become one, shown as a single tile — `3 & 4`, with the covers of both.
+- If the table you dragged already had a bill, it moves onto the other one. If both had bills, they
+  are merged into one.
+- Tapping either table now opens the same bill.
+
+Only tables in the same room can be pushed together, and only onto a table that is not already part
+of a group. Tables that cannot take the drop simply do not light up while you are dragging.
+
+**Changed your mind?** Let go anywhere that is not a table, or press Escape. Nothing happens until
+you drop onto a table.
+
+A short tap still opens the table as usual, and sliding your finger to scroll the room does not pick
+a table up — the hold is what tells the two apart.
+
+### Separating them again
+
+Press **Unlink** on the table that was pushed over.
+
+The bill stays where it is. Unlinking separates the furniture; it does not split the money. To give
+one group its own bill again, use the payment screen's split, or undo the merge from the order list.
