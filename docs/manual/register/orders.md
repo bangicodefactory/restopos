@@ -2,6 +2,8 @@
 title: Taking orders
 audience: cashier
 features:
+  - REG-373
+  - REG-374
   - REG-100
   - REG-101
   - REG-103
@@ -219,3 +221,14 @@ Press **Unlink** on the table that was pushed over.
 
 The bill stays where it is. Unlinking separates the furniture; it does not split the money. To give
 one group its own bill again, use the payment screen's split, or undo the merge from the order list.
+
+## Bills from another till
+
+Where two registers are set up to share, each one lists the other's open bills so a table started on
+the terrace can be finished at the bar. Those rows are marked with the till they came from, so you
+know whose sale you are editing.
+
+If the other till uses a **different currency**, its bills are listed but cannot be opened here, and
+the till says which register to use instead. The amounts on such a bill are in another unit, and this
+register would offer its own payment methods against them — the sale would balance to a number that
+was never the price, and nothing afterwards would look wrong.

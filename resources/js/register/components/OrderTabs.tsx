@@ -7,6 +7,8 @@ import { currentDelta } from '../domain/kitchen-send';
 import { createOrder } from '../domain/order-actions';
 import { useCatalog, useMoney } from '../hooks/use-register';
 import { orderTotals } from '../domain/totals';
+import { getCatalog } from '../data/catalog';
+import { canOpenOrder } from '../domain/foreign-order';
 import { draftOrders, floatingOrders, useOrderStore } from '../state/order-store';
 import { useUiStore } from '../state/ui-store';
 
@@ -32,8 +34,17 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
     // stable (a selector that built this array would re-render the bar on every keystroke).
     // In restaurant mode the tabs are the *floating* orders only — seated-table drafts live on the
     // floor plan, not the tab bar (REG-119); in retail mode every draft is floating.
+    // A trusted peer's bill in another currency is filtered out rather than shown and refused
+    // (REG-373). The tab bar is this till's work in progress; a tab that cannot be opened is a tab
+    // that exists to be tapped and apologised for. It is still visible on the ticket screen, where
+    // the message can say which register to use.
     const tabs = useMemo(
-        () => (orders ? (isRestaurant ? floatingOrders : draftOrders)(useOrderStore.getState()) : []),
+        () =>
+            orders
+                ? (isRestaurant ? floatingOrders : draftOrders)(useOrderStore.getState()).filter((order) =>
+                      canOpenOrder(order, getCatalog().config),
+                  )
+                : [],
         [orders, isRestaurant],
     );
 
@@ -45,6 +56,8 @@ export function OrderTabs({ className }: { className?: string }): JSX.Element {
                     <button
                         key={order.uuid}
                         type="button"
+                        data-testid="order-tab"
+                        data-order={order.uuid}
                         onDoubleClick={() => openDialog('orderName', { orderUuid: order.uuid })}
                         onClick={() => {
                             selectOrder(order.uuid);

@@ -8,6 +8,7 @@ import { useT } from '../i18n';
 import { currentDelta } from '../domain/kitchen-send';
 import { createOrder, setTable } from '../domain/order-actions';
 import { billTableFor, canLink, linkTable, linkedChildren, unlinkTable } from '../domain/table-link';
+import { bookTable, bookedMinutes, isBooked, unbookTable } from '../domain/table-booking';
 import { TableActionError, transferOrder } from '../domain/table-transfer';
 import { orderTotals } from '../domain/totals';
 import { useCatalog, useMoney } from '../hooks/use-register';
@@ -185,6 +186,25 @@ export function FloorScreen({
         }
     };
 
+    /**
+     * Hold or release a table (RST-059).
+     *
+     * One control that toggles, because "held" is a single fact with two states and a waiter reading
+     * the room should not have to work out which of two buttons applies.
+     */
+    const onToggleBooking = async (table: RestaurantTableRow): Promise<void> => {
+        setLinkError(null);
+        try {
+            await (isBooked(table) ? unbookTable(table) : bookTable(table));
+        } catch (error) {
+            setLinkError(
+                error instanceof TableActionError && error.code === 'offline'
+                    ? t('reg.floor.bookOffline')
+                    : t('reg.floor.bookFailed'),
+            );
+        }
+    };
+
     const onUnlink = async (table: RestaurantTableRow): Promise<void> => {
         setLinkError(null);
         try {
@@ -307,6 +327,7 @@ export function FloorScreen({
                             onTap={() => void onTableTap(table)}
                             canUnlink={can('table.unmerge')}
                             onUnlink={() => void onUnlink(table)}
+                            onToggleBooking={() => void onToggleBooking(table)}
                             armed={armedId === table.id}
                             dragging={armedId !== null}
                             // Only tables the server would accept light up, so the gesture never
@@ -339,6 +360,7 @@ function TableTile({
     onTap,
     canUnlink,
     onUnlink,
+    onToggleBooking,
     armed,
     dragging,
     droppable,
@@ -354,6 +376,7 @@ function TableTile({
     onTap: () => void;
     canUnlink: boolean;
     onUnlink: () => void;
+    onToggleBooking: () => void;
     armed: boolean;
     dragging: boolean;
     droppable: boolean;
@@ -393,6 +416,10 @@ function TableTile({
     const occupied = order !== null;
     const stale = minutes !== null && minutes >= 15;
     const isChild = table.parent_id !== null;
+    // A held table can also be occupied — a party finishing at 20:00 on a table booked for 20:30 is
+    // the ordinary case, and hiding one state behind the other is how a booking gets seated over.
+    const held = isBooked(table);
+    const heldFor = bookedMinutes(table);
 
     // The group's covers and its bill both sit on the parent, because that is where the link put
     // them — so the parent tile is the one unit the waiter reads, and the children hang off it.
@@ -442,6 +469,7 @@ function TableTile({
                 data-table-number={table.table_number}
                 data-occupied={occupied ? 'true' : 'false'}
                 data-armed={armed ? 'true' : 'false'}
+                data-booked={held ? 'true' : 'false'}
                 data-droppable={dragging && droppable ? 'true' : 'false'}
                 style={{
                     borderRadius: table.shape === 'round' ? '9999px' : undefined,
@@ -453,6 +481,9 @@ function TableTile({
                 className={cn(
                     'absolute inset-0 flex flex-col items-center justify-center rounded-pos p-1 text-center shadow-pos ring-2',
                     isChild && 'opacity-60',
+                    // Dashed, not a colour: the three colours already mean free/busy/waiting, and a
+                    // fourth would be one more thing to learn across a room at a glance.
+                    held && 'border-2 border-dashed border-brand-600',
                     armed && 'z-10 scale-105 ring-4 ring-brand-600',
                     dragging && droppable && !armed && 'ring-4 ring-brand-400',
                     dragging && hovered && droppable && 'ring-brand-600',
@@ -485,6 +516,26 @@ function TableTile({
                         🔗
                     </span>
                 ) : null}
+                {held ? (
+                    <span className="text-xs font-semibold" data-testid="table-booked">
+                        {heldFor === null
+                            ? t('reg.floor.booked')
+                            : t('reg.floor.bookedSince', { count: heldFor })}
+                    </span>
+                ) : null}
+            </button>
+
+            {/* RST-059 — one control that toggles: "held" is a single fact with two states, and a
+                waiter reading the room should not have to work out which of two buttons applies. */}
+            <button
+                type="button"
+                data-testid="table-book"
+                data-held={held ? 'true' : 'false'}
+                className="absolute start-1 bottom-1 z-20 rounded-pos bg-white/80 px-1 text-xs font-semibold text-slate-700"
+                onClick={onToggleBooking}
+                aria-label={`${held ? t('reg.floor.unbook') : t('reg.floor.book')} ${table.table_number}`}
+            >
+                {held ? t('reg.floor.unbook') : t('reg.floor.book')}
             </button>
 
             {/* Unlink sits on the child, because the child is the table that was pushed over.

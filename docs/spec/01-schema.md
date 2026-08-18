@@ -2106,12 +2106,18 @@ Maps from `restaurant.table` (+ `pos_self_order.identifier`).
 | height | decimal(10,2) default 50 | |
 | seats | unsignedSmallInteger default 2 | default guest count for a new order |
 | color | string(24) nullable | any CSS background value; default `#35d374` |
+| booked_at | timestamp nullable | **held for a booking** (RST-059). Null means free. A timestamp rather than a flag: "held since 19:40" is what decides whether a party is late, and a boolean throws that away. Set server-side so every till reads one clock; re-booking a held table does not move it. |
+| booked_note | string(64) nullable | who the hold is for — a name off the booking sheet, not a customer record |
 | parent_id | FK→restaurant_tables.id nullable, set null, index | **physical link/merge**: child snaps to parent, orders merge; cycle-guarded |
 | active | boolean default true, index | soft delete |
 | timestamps, softDeletes | | |
 
 **Guards:** cannot delete while draft orders exist on it; cannot hard-delete while a config with an
 open session uses its floor; `parent_id` chains must be acyclic.
+
+A hold is **independent of occupancy**: a table can be booked and have a bill on it at the same time,
+because a party finishing at 20:00 on a table booked for 20:30 is the ordinary case. Releasing a hold
+touches no order.
 
 ### `restaurant_order_courses`
 Maps from `restaurant.order.course` (new in Odoo 19, community).

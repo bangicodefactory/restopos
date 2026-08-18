@@ -195,6 +195,41 @@ final class FloorController extends Controller
         return new JsonResponse(['table' => $table->refresh()->attributesToArray()]);
     }
 
+    /**
+     * `POST /api/pos/tables/{table}/book` — hold a table (RST-059).
+     *
+     * Booking a table that already has a bill on it is allowed and deliberate: a party finishing at
+     * 20:00 on a table booked for 20:30 is the normal case, and refusing would make the feature
+     * useless exactly when it matters. The floor screen shows both states at once.
+     */
+    public function book(Request $request, RestaurantTable $table): JsonResponse
+    {
+        $this->assertOwnedTable($request, $table);
+
+        $note = $request->input('note');
+
+        $table->forceFill([
+            // Kept if the table is already held, so re-booking does not silently reset the clock a
+            // waiter is reading to decide whether the party is late.
+            'booked_at' => $table->booked_at ?? now(),
+            'booked_note' => $note === null ? $table->booked_note : (string) $note,
+        ])->save();
+
+        return new JsonResponse(['table' => $table->refresh()->attributesToArray()]);
+    }
+
+    /** `POST /api/pos/tables/{table}/unbook` — release the hold (RST-059). */
+    public function unbook(Request $request, RestaurantTable $table): JsonResponse
+    {
+        $this->assertOwnedTable($request, $table);
+
+        // Only the hold is cleared. Any bill on the table is untouched — releasing a booking says
+        // the reservation is over, not that the sale is.
+        $table->forceFill(['booked_at' => null, 'booked_note' => null])->save();
+
+        return new JsonResponse(['table' => $table->refresh()->attributesToArray()]);
+    }
+
     /** `DELETE /api/pos/tables/{table}` */
     public function destroyTable(Request $request, RestaurantTable $table): JsonResponse
     {

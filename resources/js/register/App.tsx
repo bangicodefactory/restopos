@@ -11,6 +11,7 @@ import { tryRuntime } from './data/runtime';
 import { REGISTER_EVENTS, reverbConfig, sessionChannel } from './realtime';
 import { publishDisplay } from './domain/customer-display-bus';
 import { applySessionClosedBroadcast } from './domain/session-actions';
+import { canOpenOrder, foreignOrder } from './domain/foreign-order';
 import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
 import { splitRemainder } from './domain/split-order';
 import { cleanCourses, createOrder, markPrinted } from './domain/order-actions';
@@ -19,6 +20,7 @@ import { buildBill } from './domain/receipt';
 import { orderTotals } from './domain/totals';
 import { useT } from './i18n';
 import { useCatalog, useSelectedOrderUuid } from './hooks/use-register';
+import type { Screen } from './state/ui-store';
 import { BootScreen } from './screens/BootScreen';
 import { FloorEditorScreen } from './screens/FloorEditorScreen';
 import { FloorScreen } from './screens/FloorScreen';
@@ -85,6 +87,37 @@ export function App(): JSX.Element {
 
     const [locked, setLocked] = useState(false);
     const [sessionPane, setSessionPane] = useState<'open' | 'close' | null>(null);
+    const [foreignBlocked, setForeignBlocked] = useState<string | null>(null);
+
+    /**
+     * The one way into an order (REG-373).
+     *
+     * A trusted peer's bill in another currency must not be opened — the amounts are in a unit this
+     * till does not use, and it would offer local tenders against them. The check sits here rather
+     * than on each screen because there are three ways in: the ticket list, the floor plan and the
+     * tab bar. A guard on one of them is a guard one of them has, which is what the first version of
+     * this was (review of #76).
+     *
+     * Refused out loud. A tap that silently does nothing reads as a broken till.
+     */
+    const openOrder = (uuid: string, screen: Screen): void => {
+        const order = useOrderStore.getState().orders[uuid];
+
+        if (order && !canOpenOrder(order, catalog.config)) {
+            const peer = foreignOrder(order, catalog.config);
+
+            setForeignBlocked(
+                peer?.registerName
+                    ? t('reg.tickets.otherCurrency', { name: peer.registerName })
+                    : t('reg.tickets.unknownRegister'),
+            );
+            return;
+        }
+
+        setForeignBlocked(null);
+        selectOrder(uuid);
+        setScreen(screen);
+    };
 
     // Leaving the product screen drops trailing empty courses so the next screen and the receipt do
     // not show phantom courses (RST-087).
@@ -288,13 +321,22 @@ export function App(): JSX.Element {
                 </span>
             </nav>
 
+            {foreignBlocked !== null ? (
+                <p
+                    className="bg-warn-soft px-3 py-2 font-semibold text-warn-fg"
+                    data-testid="foreign-order-blocked"
+                >
+                    {foreignBlocked} —{' '}
+                    <button type="button" className="underline" onClick={() => setForeignBlocked(null)}>
+                        {t('common.close')}
+                    </button>
+                </p>
+            ) : null}
+
             <main className="flex min-h-0 flex-1 flex-col">
                 {screen === 'floor' ? (
                     <FloorScreen
-                        onOpenOrder={(uuid) => {
-                            selectOrder(uuid);
-                            setScreen('products');
-                        }}
+                        onOpenOrder={(uuid) => openOrder(uuid, 'products')}
                         onEditRoom={() => setScreen('floorEditor')}
                     />
                 ) : null}
@@ -361,12 +403,7 @@ export function App(): JSX.Element {
                 ) : null}
 
                 {screen === 'tickets' ? (
-                    <TicketScreen
-                        onOpenOrder={(uuid) => {
-                            selectOrder(uuid);
-                            setScreen('products');
-                        }}
-                    />
+                    <TicketScreen onOpenOrder={(uuid) => openOrder(uuid, 'products')} />
                 ) : null}
 
                 {screen === 'split' && selectedOrderUuid !== null ? (
