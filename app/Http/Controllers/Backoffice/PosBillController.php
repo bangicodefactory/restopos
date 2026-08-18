@@ -104,14 +104,14 @@ final class PosBillController extends Controller
             // negative denomination silently contributes nothing to a drawer count that looks right.
             'value' => [$required, 'numeric', 'gt:0'],
             'denomination_type' => [$required, Rule::enum(DenominationType::class)],
-            // Scoped to the company, like every other id that arrives in a body (BAN-520). A
-            // denomination filed against another tenant's currency is a row this venue can never see
-            // and its own count sheet is missing.
-            'currency_id' => [
-                $required,
-                'integer',
-                Rule::exists('currencies', 'id'),
-            ],
+            // Existence only, and deliberately **not** company-scoped: `currencies` is global
+            // reference data — ISO codes, no `company_id` to scope by — unlike the ids BAN-520
+            // guards. Saying otherwise here would be a comment describing a rule that cannot exist.
+            //
+            // A denomination in a currency this register does not trade in is harmless rather than
+            // wrong: `PosBill::scopeForPos()` filters on the config's own `currency_id`, so it never
+            // reaches the count sheet. A venue that runs two currencies can hold both lists.
+            'currency_id' => [$required, 'integer', Rule::exists('currencies', 'id')],
             'sequence' => ['sometimes', 'nullable', 'integer'],
             'active' => ['sometimes', 'boolean'],
         ]);

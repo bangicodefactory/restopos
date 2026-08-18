@@ -176,3 +176,28 @@ it('reaches the register, which is the only reason this surface exists', functio
 
     expect(collect($bills)->pluck('name'))->toContain('20');
 });
+
+it('keeps a denomination in another currency off this register count sheet', function (): void {
+    // The claim the controller's comment leans on. `currencies` is global reference data, so the
+    // rule cannot scope by company — what makes a foreign-currency denomination harmless is that the
+    // register filters on its own config's currency, not that it could never be created.
+    $euro = (int) $this->fx->currency->getKey();
+
+    $yen = (int) DB::table('currencies')->insertGetId([
+        'code' => 'JPY', 'name' => 'Yen', 'symbol' => 'Y',
+        'symbol_position' => 'before', 'decimal_places' => 0,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    addBill($this->fx, ['name' => '20', 'value' => '20.00', 'currency_id' => $euro])->assertRedirect();
+    addBill($this->fx, ['name' => '5000', 'value' => '5000', 'currency_id' => $yen])->assertRedirect();
+
+    $fx = $this->fx->withSession();
+
+    $names = collect(
+        test()->withHeaders($fx->headers())->getJson('/api/pos/bootstrap')->assertOk()->json('data.pos_bills')
+    )->pluck('name');
+
+    expect($names)->toContain('20')
+        ->and($names)->not->toContain('5000');
+});
