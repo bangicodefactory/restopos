@@ -1719,7 +1719,13 @@ export function hydrateOrders(payload: {
 }): void {
     mutate((draft) => {
         for (const order of payload.orders) {
-            draft.orders[order.uuid] = order;
+            // `order_name_manual` is local-only — the server neither stores nor returns it — so a
+            // wholesale replace silently drops it. The *name* survives the round trip because it is
+            // synced; the fact that a human chose it does not, and without that flag the next table
+            // move re-derives over "Birthday party" (review of #69).
+            const manual = draft.orders[order.uuid]?.order_name_manual;
+
+            draft.orders[order.uuid] = manual === undefined ? order : { ...order, order_name_manual: manual };
             draft.linesByOrder[order.uuid] ??= [];
             draft.paymentsByOrder[order.uuid] ??= [];
             draft.coursesByOrder[order.uuid] ??= [];
