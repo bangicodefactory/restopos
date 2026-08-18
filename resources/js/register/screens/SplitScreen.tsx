@@ -3,12 +3,14 @@ import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 
 import { useT } from '../i18n';
-import { splitOrder } from '../domain/order-actions';
+import { splitOntoTable } from '../domain/split-destination';
+import { transferTargets } from '../domain/table-transfer';
 import { cycleSplitQuantity, splitPreview } from '../domain/split';
 import { clampSplitAmount, evenSplitAmounts } from '../domain/split-order';
 import { computeTotals } from '../domain/totals';
 import { getCatalog } from '../data/catalog';
 import { useMoney, useOrder, useOrderLines, useOrderPayments } from '../hooks/use-register';
+import { useOrderStore } from '../state/order-store';
 import { useUiStore } from '../state/ui-store';
 
 /**
@@ -54,6 +56,8 @@ export function SplitScreen({
     const resetSplit = useUiStore((state) => state.resetSplit);
     const setSplitTender = useUiStore((state) => state.setSplitTender);
     const [busy, setBusy] = useState(false);
+    const [destination, setDestination] = useState<number | null>(null);
+    const [seatingError, setSeatingError] = useState<string | null>(null);
     const [mode, setMode] = useState<SplitMode>('items');
     const [ways, setWays] = useState(2);
     const [amount, setAmount] = useState('');
@@ -81,7 +85,43 @@ export function SplitScreen({
 
     const shares = useMemo(() => evenSplitAmounts(outstanding, Math.max(1, ways)), [outstanding, ways]);
 
+    // Where the new bill can go (RST-106). The same list the ticket screen's move picker is built
+    // from, so a table that is occupied reads as a merge in both places rather than two vocabularies
+    // for one rule. `orderUuid` stands in for the split that does not exist yet: it excludes the
+    // parent's own table, which is the one seat the new bill cannot take.
+    const orders = useOrderStore((state) => state.orders);
+    const drafts = useMemo(
+        () => Object.values(orders ?? {}).filter((candidate) => candidate.state === 'draft'),
+        [orders],
+    );
+    const targets = useMemo(
+        () => transferTargets(getCatalog().tables, drafts, orderUuid),
+        [drafts, orderUuid],
+    );
+
     if (!order) return <p className="p-6">{t('reg.tickets.none')}</p>;
+
+    const commitSplit = async (): Promise<void> => {
+        setBusy(true);
+        setSeatingError(null);
+
+        const outcome = await splitOntoTable(orderUuid, selection, destination, drafts);
+
+        setBusy(false);
+
+        if (!outcome) return;
+
+        if (outcome.seatingError !== null) {
+            // The split happened; only the seating did not. Kept on screen rather than navigating
+            // away, because the waiter needs to know the bill is floating before they walk off.
+            setSeatingError(outcome.seatingError === 'offline' ? t('reg.split.seatOffline') : t('reg.split.seatFailed'));
+            return;
+        }
+
+        resetSplit();
+        setDestination(null);
+        onDone(outcome.orderUuid);
+    };
 
     /** Hand the payment screen one share and let it collect; the rest is the ordinary payment flow. */
     const takeMoneySplit = (share: string): void => {
@@ -212,6 +252,37 @@ export function SplitScreen({
             ) : null}
 
             <footer className={cn('grid grid-cols-2 gap-3', mode !== 'items' && 'mt-auto')}>
+                {/* RST-106 — four guests moving to the bar, while the rest of the table eats on.
+                    Absent on a counter sale, which has no table to move away from. */}
+                {order.restaurant_table_id !== null ? (
+                    <label className="flex flex-col gap-1">
+                        <span className="text-sm text-slate-600">{t('reg.split.destination')}</span>
+                        <select
+                            className="min-h-touch rounded-pos border border-slate-300 bg-white px-2"
+                            data-testid="split-destination"
+                            value={destination ?? ''}
+                            onChange={(event) =>
+                                setDestination(event.target.value === '' ? null : Number(event.target.value))
+                            }
+                        >
+                            <option value="">{t('reg.split.stayFloating')}</option>
+                            {targets.map((target) => (
+                                <option key={target.tableId} value={target.tableId}>
+                                    {target.occupiedByUuid
+                                        ? t('reg.split.tableOccupied', { number: target.label.replace('T ', '') })
+                                        : target.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                ) : null}
+
+                {seatingError !== null ? (
+                    <p className="rounded-pos bg-warn-soft p-2 text-sm font-semibold text-warn-fg" data-testid="split-seat-error">
+                        {seatingError}
+                    </p>
+                ) : null}
+
                 <div className="rounded-pos bg-slate-100 p-3">
                     <p className="text-sm text-slate-600">{t('reg.split.original')}</p>
                     <p className="text-xl font-bold tabular-nums">{money(remainingTotal)}</p>
@@ -234,13 +305,7 @@ export function SplitScreen({
                     size="xl"
                     loading={busy}
                     disabled={preview.movedCount === 0 || busy}
-                    onClick={async () => {
-                        setBusy(true);
-                        const splitUuid = await splitOrder(orderUuid, selection);
-                        resetSplit();
-                        setBusy(false);
-                        if (splitUuid) onDone(splitUuid);
-                    }}
+                    onClick={() => void commitSplit()}
                 >
                     {t('reg.split.confirm')}
                 </Button>
