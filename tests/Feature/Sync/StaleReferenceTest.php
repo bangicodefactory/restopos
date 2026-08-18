@@ -69,6 +69,14 @@ function makePreset(PosFixtures $fx, string $name): int
  * No attacker is involved. A device holding a stale id after a table is deleted or moved off its
  * floors sends exactly this on its next routine push — and the register re-pushes every draft when
  * it is paid (BAN-506).
+ *
+ * **Every case here asserts `ok` as well as the column**, and that is the part worth explaining. An
+ * id that exists nowhere violates the foreign key, so without the guard the update throws SQLSTATE
+ * 23000, comes back `ingest_failed`, and the client classifies 23xxx as permanent and quarantines
+ * the push. The table then survives only because the whole update was rolled back and lost.
+ *
+ * Asserting the column alone passes in both worlds. That is not hypothetical — the first version of
+ * these tests did exactly that, and a sabotage removing half the guard cleared them.
  */
 it('keeps a seated order on its table when a stale id arrives', function (): void {
     // Probed before the fix: `ok`, and the bill came back sitting on no table at all.
@@ -95,7 +103,9 @@ it('keeps it when the table it names has since been deleted', function (): void 
     send($this->fx, $uuid, ['table_id' => $table, 'guest_count' => 2])->assertOk();
     RestaurantTable::query()->whereKey($table)->delete();
 
-    send($this->fx, $uuid, ['table_id' => $table])->assertOk();
+    send($this->fx, $uuid, ['table_id' => $table])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
 
     expect(tableOf($uuid))->toBe($table);
 });
@@ -108,6 +118,26 @@ it('keeps it when another company table is named', function (): void {
     send($this->fx, $uuid, ['table_id' => $table, 'guest_count' => 2])->assertOk();
 
     send($this->fx, $uuid, ['table_id' => (int) $other->tableOne->getKey()])->assertOk();
+
+    expect(tableOf($uuid))->toBe($table);
+});
+
+it('guards the other spelling too, which reaches the column by a different route', function (): void {
+    // `table_id` is mapped to the column by `updateOrder`'s client-key loop; `restaurant_table_id`
+    // is written straight from its writable list. Two write paths, and the guard has to cover both —
+    // it loops over each spelling for exactly this reason, and only one of them was covered.
+    //
+    // Probed with that spelling removed from the loop: `rejected`, `ingest_failed`, "FOREIGN KEY
+    // constraint failed". So the guard is not only keeping the order on its table, it is keeping the
+    // push out of the outbox's permanent-failure bin — which is why `ok` is asserted here.
+    $table = (int) $this->fx->tableOne->getKey();
+    $uuid = (string) Str::uuid();
+
+    send($this->fx, $uuid, ['table_id' => $table, 'guest_count' => 2])->assertOk();
+
+    send($this->fx, $uuid, ['restaurant_table_id' => 999999])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
 
     expect(tableOf($uuid))->toBe($table);
 });
@@ -158,7 +188,9 @@ it('keeps the service mode when a stale preset id arrives', function (): void {
     send($this->fx, $uuid, ['preset_id' => $preset])->assertOk();
     expect(presetOf($uuid))->toBe($preset);
 
-    send($this->fx, $uuid, ['preset_id' => 999999])->assertOk();
+    send($this->fx, $uuid, ['preset_id' => 999999])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
 
     expect(presetOf($uuid))->toBe($preset);
 });
