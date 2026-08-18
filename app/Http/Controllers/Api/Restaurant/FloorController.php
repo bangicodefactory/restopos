@@ -12,6 +12,7 @@ use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Restaurant\TableService;
 use DomainException;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -25,7 +26,10 @@ final class FloorController extends Controller
 {
     use ResolvesDeviceContext;
 
-    public function __construct(private readonly TableService $tables) {}
+    public function __construct(
+        private readonly TableService $tables,
+        private readonly ConnectionInterface $connection,
+    ) {}
 
     /** `GET /api/pos/floors` — floors + tables + live occupancy. */
     public function index(Request $request): JsonResponse
@@ -123,7 +127,21 @@ final class FloorController extends Controller
             ], 422);
         }
 
-        $floor->delete();
+        // The tables go with the room (BAN-439, review of #78).
+        //
+        // `restaurant_floor_id` is `cascadeOnDelete`, but a floor is **soft**-deleted, so nothing
+        // cascades: probing this left two live tables pointing at a room that no longer exists. They
+        // stay in the catalog the register loads and cannot be drawn anywhere, they keep the unique
+        // QR tokens printed on the cards in that room, and an order can still name one.
+        //
+        // Both doors now answer the same way — the back-office delete removes them explicitly too,
+        // and one action with two behaviours depending on which screen was used is its own defect.
+        $this->connection->transaction(function () use ($floor): void {
+            RestaurantTable::query()->where('restaurant_floor_id', $floor->getKey())->get()
+                ->each(static fn (RestaurantTable $t): ?bool => $t->delete());
+
+            $floor->delete();
+        });
 
         return new JsonResponse(null, 204);
     }

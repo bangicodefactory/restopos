@@ -224,3 +224,39 @@ it('refuses a user who may not configure the venue', function (): void {
     expect(Floor::query()->where('name', 'Sneaky')->exists())->toBeFalse()
         ->and((string) Floor::query()->whereKey($floor->getKey())->value('name'))->toBe('Terrace');
 });
+
+it('takes the tables with it through the register door too', function (): void {
+    // The same action, the same answer, whichever screen it came from.
+    //
+    // `restaurant_floor_id` is `cascadeOnDelete`, but a floor is **soft**-deleted so nothing
+    // cascades. Probed before the fix: the register endpoint left two live tables pointing at a room
+    // that no longer existed — still in the catalog, drawable nowhere, still holding the QR tokens
+    // printed on the cards in that room (review of #78).
+    $floor = $this->fx->floor;
+    $floorId = (int) $floor->getKey();
+
+    // No bills, so the room is free to go.
+    test()->withHeaders($this->fx->headers())->deleteJson('/api/pos/floors/'.$floor->uuid)->assertNoContent();
+
+    expect(RestaurantTable::query()->where('restaurant_floor_id', $floorId)->count())->toBe(0)
+        ->and(Floor::query()->whereKey($floorId)->exists())->toBeFalse();
+});
+
+it('still refuses through the register door while a bill is open', function (): void {
+    $floor = $this->fx->floor;
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $this->fx->variant->getKey(),
+            'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+        ]], ['table_id' => $this->fx->tableOne->getKey(), 'guest_count' => 2])],
+    ])->assertOk();
+
+    test()->withHeaders($this->fx->headers())->deleteJson('/api/pos/floors/'.$floor->uuid)
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'floor_occupied');
+
+    // And nothing was taken on the way out.
+    expect(RestaurantTable::query()->where('restaurant_floor_id', $floor->getKey())->count())->toBeGreaterThan(0);
+});
