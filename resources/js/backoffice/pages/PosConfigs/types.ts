@@ -156,7 +156,7 @@ export type PosConfigOptions = {
     presets: { id: number; name: string; service_at: string }[];
     printers: { id: number; name: string; printer_type: string }[];
     categories: { id: number; name: string; parent_id: number | null }[];
-    /** Products marked `special_kind = tip` — the only ones a tip can be booked against (RST-126). */
+    /** Products marked `special_kind = tip` — the only ones a tip can be booked against (RST-120). */
     tip_products: { id: number; name: string }[];
     employees: { id: number; name: string; default_role: string }[];
 };
