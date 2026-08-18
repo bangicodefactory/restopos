@@ -170,6 +170,41 @@ it('guards the update path too, not only the create', function (): void {
     expect(Order::query()->where('uuid', $uuid)->value('fiscal_position_id'))->toBeNull();
 });
 
+it('never clears a good value the order already had (review of #72)', function (): void {
+    // The first version of this guard set the unusable id to null. On create that is identical to
+    // dropping it — `??` falls through to the register's default either way. On update it is not:
+    // the writable loop writes any key that is *present*, so the null landed on the column and wiped
+    // it.
+    //
+    // In service that reads as: a bill correctly configured for an export exemption, one stale or
+    // tampered push later, silently re-taxed at the standard rate. The guard ignores the field now
+    // rather than answering it.
+    $other = PosFixtures::make()->withSession();
+    $mine = fiscalPositionFor($this->fx, 'Export');
+    $theirs = fiscalPositionFor($other, 'RIVAL');
+
+    $uuid = (string) Str::uuid();
+    push($this->fx, $uuid, ['fiscal_position_id' => $mine])->assertOk();
+
+    push($this->fx, $uuid, ['fiscal_position_id' => $theirs])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'ok');
+
+    expect((int) Order::query()->where('uuid', $uuid)->value('fiscal_position_id'))->toBe($mine);
+});
+
+it('never clears a good pricelist either', function (): void {
+    $other = PosFixtures::make()->withSession();
+    $mine = pricelistFor($this->fx, 'Happy hour');
+    $theirs = pricelistFor($other, 'RIVAL PRICES');
+
+    $uuid = (string) Str::uuid();
+    push($this->fx, $uuid, ['pricelist_id' => $mine])->assertOk();
+    push($this->fx, $uuid, ['pricelist_id' => $theirs])->assertOk();
+
+    expect((int) Order::query()->where('uuid', $uuid)->value('pricelist_id'))->toBe($mine);
+});
+
 it('leaves an order naming neither field on the register defaults', function (): void {
     $uuid = (string) Str::uuid();
     push($this->fx, $uuid, [])->assertOk();

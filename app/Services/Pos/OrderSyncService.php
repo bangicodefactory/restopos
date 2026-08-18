@@ -351,7 +351,18 @@ final readonly class OrderSyncService
                 ->exists();
 
             if (! $exists) {
-                $order[$key] = null;
+                // **Unset**, not set to null. On create the two are the same — `??` falls through to
+                // the register's default either way. On update they are not: the writable loop
+                // writes any key that is *present*, so a null would clear the value the order
+                // already had. An order correctly configured for an export exemption, then touched
+                // by one stale or tampered push, would silently lose its mapping and be re-taxed at
+                // the standard rate (review of #72).
+                //
+                // This is where the money pair differs from `resolveOwnedTable`: a table that is not
+                // ours means the order sits on no table, which is a real fact worth writing. A
+                // pricelist or tax mapping that is not ours means only that this command cannot say
+                // anything about it — the field is ignored, not answered.
+                unset($order[$key]);
             }
         }
 
