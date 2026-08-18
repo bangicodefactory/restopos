@@ -15,8 +15,8 @@
  * `pos_config_id`, and the contract sends no config list to this page, so the field is a numeric
  * id with the reason stated.
  *
- * `printer_type` is not in the PATCH rule set, so the connection kind is shown and locked, and
- * the address fields that matter for that kind are the ones marked required.
+ * The connection kind is editable (BAN-432): changing it re-marks which address fields are
+ * required, because an IoT box and a network printer are reached in different ways.
  */
 
 import { Head, router, useForm } from '@inertiajs/react';
@@ -238,11 +238,10 @@ function PrinterEditor({
                     />
                     <SelectField
                         label={t('printer.connection')}
-                        value={printer.printer_type}
-                        onChange={() => undefined}
+                        value={form.data.printer_type}
+                        error={form.errors.printer_type}
+                        onChange={(value) => form.setData('printer_type', value)}
                         options={Object.entries(PRINTER_TYPE_LABEL).map(([value, label]) => ({ value, label }))}
-                        disabled
-                        lockedReason={t('printer.readOnly')}
                     />
                     <TextField
                         label={t('printer.proxyIp')}
