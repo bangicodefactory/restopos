@@ -33,6 +33,7 @@ import {
     type OrderSlice,
 } from '../state/order-store';
 import { resolveFiscalPosition, type FiscalPositionSource } from './fiscal-position-precedence';
+import { orderName } from './order-naming';
 import { tipDelta, tipTopUp } from './tips';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
@@ -180,6 +181,7 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
     const { reference, counter: sequence } = await context.nextReference();
     const uuid = generateUuid();
     const at = nowIso();
+    const tableForNaming = input.tableId == null ? null : (catalog.tablesById.get(input.tableId) ?? null);
 
     const order: OrderRow = {
         uuid: asUuid(uuid),
@@ -219,7 +221,20 @@ export async function createOrder(input: NewOrderInput = {}): Promise<string> {
         preset_time: (input.presetTime ?? null) as OrderRow['preset_time'],
         currency_id: context.currencyId,
         currency_rate: '1',
-        floating_order_name: input.floatingOrderName ?? null,
+        // Named as it is minted (RST-140), so the ticket screen, the receipt and a second till read
+        // one string instead of each deriving its own from whatever it happens to hold.
+        //
+        // Computed into the row rather than applied afterwards: a post-hoc `updateOrder` would bump
+        // `rev` on an order nothing has happened to yet, which is exactly the counter the sync layer
+        // reads to decide there is something to send.
+        floating_order_name: orderName({
+            table: tableForNaming,
+            linked: tableForNaming === null
+                ? []
+                : catalog.tables.filter((candidate) => candidate.parent_id === tableForNaming.id),
+            manual: input.floatingOrderName ?? null,
+        }),
+        order_name_manual: (input.floatingOrderName ?? '') !== '',
 
         amount_untaxed: '0',
         amount_tax: '0',
@@ -824,6 +839,43 @@ export function setTable(orderUuid: string, tableId: number | null): void {
     updateOrder(orderUuid, (order) => {
         order.restaurant_table_id = tableId;
     });
+
+    refreshOrderName(orderUuid);
+}
+
+/**
+ * Re-derive and store the order's name (RST-140).
+ *
+ * Called wherever the table can change, because the name is a fact about where the order is sitting
+ * and it has to survive the trip to every other surface. Rendering it per screen — which is what
+ * happened before — meant the receipt, the kitchen and a second till each derived their own answer
+ * from whatever they had, and mostly fell back to the raw reference.
+ *
+ * A name the cashier typed is passed through untouched: `orderName` gives it precedence, so moving
+ * a table never overwrites "Birthday party".
+ */
+export function refreshOrderName(orderUuid: string): void {
+    const state = snapshot();
+    const order = state.orders[orderUuid];
+
+    if (!order) return;
+
+    const catalog = getCatalog();
+    const table = order.restaurant_table_id === null
+        ? null
+        : (catalog.tablesById.get(order.restaurant_table_id) ?? null);
+
+    const linked = table === null
+        ? []
+        : catalog.tables.filter((candidate) => candidate.parent_id === table.id);
+
+    const next = orderName({ table, linked, manual: order.order_name_manual ? order.floating_order_name : null });
+
+    if (next === order.floating_order_name) return;
+
+    updateOrder(orderUuid, (draft) => {
+        draft.floating_order_name = next;
+    });
 }
 
 export function setOrderNote(orderUuid: string, note: string | null): void {
@@ -839,9 +891,16 @@ export function setOrderInternalNote(orderUuid: string, note: string | null): vo
 }
 
 export function renameOrder(orderUuid: string, name: string | null): void {
+    const typed = (name ?? '').trim();
+
     updateOrder(orderUuid, (order) => {
-        order.floating_order_name = name === '' ? null : name;
+        // Flagged as the cashier's, so a later table move re-derives around it instead of throwing
+        // it away. Clearing the name clears the flag, and the derived name comes back.
+        order.order_name_manual = typed !== '';
+        order.floating_order_name = typed === '' ? null : typed;
     });
+
+    if (typed === '') refreshOrderName(orderUuid);
 }
 
 export function setEmployee(orderUuid: string, employeeId: number | null): void {
@@ -1660,7 +1719,13 @@ export function hydrateOrders(payload: {
 }): void {
     mutate((draft) => {
         for (const order of payload.orders) {
-            draft.orders[order.uuid] = order;
+            // `order_name_manual` is local-only — the server neither stores nor returns it — so a
+            // wholesale replace silently drops it. The *name* survives the round trip because it is
+            // synced; the fact that a human chose it does not, and without that flag the next table
+            // move re-derives over "Birthday party" (review of #69).
+            const manual = draft.orders[order.uuid]?.order_name_manual;
+
+            draft.orders[order.uuid] = manual === undefined ? order : { ...order, order_name_manual: manual };
             draft.linesByOrder[order.uuid] ??= [];
             draft.paymentsByOrder[order.uuid] ??= [];
             draft.coursesByOrder[order.uuid] ??= [];

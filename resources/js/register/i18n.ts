@@ -148,6 +148,7 @@ export const registerEn = {
     'reg.order.fireCourse': 'Fire course {index}',
     'reg.order.fired': 'Fired',
     'reg.order.guests': 'Guests',
+    'reg.order.nameRequired': 'Name this order so the kitchen can call it.',
     'reg.order.guestsRequired': 'How many guests? The kitchen needs the cover count for this order.',
     'reg.order.guestsTitle': 'Number of guests',
     'reg.order.perGuest': '{amount} / guest',
@@ -253,6 +254,8 @@ export const registerEn = {
     'reg.receipt.backToOrder': 'Back to the order',
 
     // ── tickets / orders list ────────────────────────────────────────────────
+    'reg.tickets.moveTo': 'Move to…',
+    'reg.tickets.mergeInto': 'Merge into {table}',
     'reg.tickets.title': 'Orders',
     'reg.tickets.all': 'All',
     'reg.tickets.draft': 'Open',
@@ -523,6 +526,7 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.order.fireCourse': 'Lancer le service {index}',
     'reg.order.fired': 'Lancé',
     'reg.order.guests': 'Couverts',
+    'reg.order.nameRequired': "Nommez cette commande pour que la cuisine puisse l'appeler.",
     'reg.order.guestsRequired': 'Combien de couverts ? La cuisine en a besoin pour cette commande.',
     'reg.order.guestsTitle': 'Nombre de couverts',
     'reg.order.perGuest': '{amount} / couvert',
@@ -624,6 +628,8 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.receipt.copyCount': 'Copie {n}',
     'reg.receipt.backToOrder': 'Retour à la commande',
 
+    'reg.tickets.moveTo': 'Déplacer vers…',
+    'reg.tickets.mergeInto': 'Fusionner dans {table}',
     'reg.tickets.title': 'Commandes',
     'reg.tickets.all': 'Toutes',
     'reg.tickets.draft': 'En cours',

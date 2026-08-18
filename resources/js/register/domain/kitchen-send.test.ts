@@ -356,3 +356,59 @@ describe('the guest count a preset requires', () => {
         expect((await sendToKitchen(orderUuid)).status).toBe('sent');
     });
 });
+
+/**
+ * RST-141 (BAN-467) — a collection order needs something the pass can call out.
+ *
+ * A preset with no table has no number to be called by. Without a name the pass has nothing to shout
+ * and every collection order taken that hour is "Direct Sale".
+ */
+describe('an order that still needs a name', () => {
+    const TAKEAWAY = 3;
+
+    function installTakeaway(): void {
+        installCatalog({
+            products: [makeProduct({ id: 1, name: 'Pizza', list_price: '10.00' })],
+            variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
+            presets: [makePreset({ id: TAKEAWAY, name: 'Takeaway' })],
+        });
+    }
+
+    it('refuses the send until one is given', async () => {
+        installTakeaway();
+
+        const orderUuid = await createOrder({ presetId: TAKEAWAY });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('needs_name');
+        expect(post).not.toHaveBeenCalled();
+    });
+
+    it('sends once it has one', async () => {
+        installTakeaway();
+
+        const orderUuid = await createOrder({ presetId: TAKEAWAY, floatingOrderName: 'Amina' });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+
+    it('never asks for a table order — the table is the name', async () => {
+        installTakeaway();
+
+        const orderUuid = await createOrder({ presetId: TAKEAWAY, tableId: 1 });
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+
+    it('never asks on a counter sale with no preset', async () => {
+        // A till with no service modes would otherwise prompt on every sale.
+        installTakeaway();
+
+        const orderUuid = await createOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+        expect((await sendToKitchen(orderUuid)).status).toBe('sent');
+    });
+});

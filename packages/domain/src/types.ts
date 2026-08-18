@@ -842,6 +842,14 @@ export type OrderRow = {
     currency_id: number;
     currency_rate: string;
     floating_order_name: string | null;
+    /**
+     * Was `floating_order_name` typed by a cashier rather than derived? (RST-140)
+     *
+     * Local only, never sent. The name is otherwise a fact about where the order is sitting and is
+     * re-derived whenever the table changes — this is what stops that re-derivation overwriting
+     * "Birthday party" the moment somebody moves the table.
+     */
+    order_name_manual?: boolean;
 
     /** Server-authoritative; present once acknowledged (spec 03 §3.7). */
     amount_untaxed: Money;

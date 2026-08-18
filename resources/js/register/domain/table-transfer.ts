@@ -1,6 +1,8 @@
+import type { RestaurantTableRow } from '@domain/types';
 import { ApiError, browserOnline } from '@shared/sync';
 
 import { reloadAllOrders } from '../boot';
+import { refreshOrderName } from './order-actions';
 import { tryRuntime } from '../data/runtime';
 import { useOrderStore } from '../state/order-store';
 
@@ -56,12 +58,21 @@ function requireOnline(): NonNullable<ReturnType<typeof tryRuntime>> {
  * it and let the next sync reconcile, rather than reporting a move that actually happened as a
  * failure.
  */
-async function refreshAfterServerAction(): Promise<void> {
+async function refreshAfterServerAction(orderUuids: readonly string[] = []): Promise<void> {
     try {
         await reloadAllOrders();
     } catch {
         // Already applied server-side; the next delta pull will bring the local replica in line.
     }
+
+    // The name is a fact about where the order is sitting, and the server does not compute it — it
+    // stores whatever was last pushed. So a move that goes through the API comes back with the
+    // *previous* table's name: transfer a bill from table 5 to table 7 and it is still called `T 5`
+    // on the ticket screen, the receipt and every other till (RST-140, review of #69).
+    //
+    // Re-derived here rather than at each call site, because every server table action lands in this
+    // one place and a name refreshed at three of four of them is the bug in a quieter form.
+    for (const uuid of orderUuids) refreshOrderName(uuid);
 }
 
 /** Turn an ApiClient failure into a typed TableActionError carrying the server's `error.code`. */
@@ -112,7 +123,7 @@ export async function transferOrder(
     if (response.merged && response.merge_id !== null) {
         mergeBySurvivor.set(response.order.uuid, response.merge_id);
     }
-    await refreshAfterServerAction();
+    await refreshAfterServerAction([orderUuid, response.order.uuid]);
 
     return { merged: response.merged, orderUuid: response.order.uuid, mergeId: response.merge_id };
 }
@@ -161,6 +172,57 @@ export async function unmergeOrder(mergeId: number): Promise<string> {
 
     if (!restoredUuid) throw new TableActionError('failed', 'The unmerge returned no order.');
 
-    await refreshAfterServerAction();
+    // Both sides: the restored bill gets its own table's name back, and the one it was merged into
+    // loses the `T 3 & 4` form now that the pair is broken.
+    await refreshAfterServerAction([restoredUuid]);
     return restoredUuid;
+}
+
+/** A place a floating order can be sent (RST-057). */
+export type TransferTarget = {
+    tableId: number;
+    label: string;
+    /** The draft already on that table, if any — sending there is a merge, not a move. */
+    occupiedByUuid: string | null;
+};
+
+/**
+ * Where an order can go, from the order list rather than the floor plan (RST-057).
+ *
+ * The only way to move an order was the arm-and-tap gesture on the floor plan, which cannot help
+ * with the case that needs it most: an order that is not on a table yet. A takeaway the customer
+ * decides to eat in, a bill started at the counter — both are floating, and the floor plan has
+ * nothing to arm.
+ *
+ * Free tables and occupied ones come back in one list, because the waiter's question is "where is
+ * this going" and not "am I about to transfer or merge". Which of the two it becomes is a
+ * consequence of the destination, and the caller reads `occupiedByUuid` to decide — the same rule
+ * the floor plan already applies on tap.
+ *
+ * The order's own table is excluded: sending a bill where it already is has no meaning, and offering
+ * it invites a self-transfer the server refuses.
+ */
+export function transferTargets(
+    tables: readonly RestaurantTableRow[],
+    drafts: readonly { uuid: string; restaurant_table_id: number | null }[],
+    sourceUuid: string,
+): TransferTarget[] {
+    const source = drafts.find((order) => order.uuid === sourceUuid) ?? null;
+
+    const occupant = new Map<number, string>();
+
+    for (const order of drafts) {
+        if (order.uuid === sourceUuid || order.restaurant_table_id === null) continue;
+        // First draft wins, matching the server's own "oldest bill survives" rule.
+        if (!occupant.has(order.restaurant_table_id)) occupant.set(order.restaurant_table_id, order.uuid);
+    }
+
+    return tables
+        .filter((table) => table.active && table.id !== source?.restaurant_table_id)
+        .sort((a, b) => Number(a.table_number) - Number(b.table_number))
+        .map((table) => ({
+            tableId: table.id,
+            label: `T ${table.table_number}`,
+            occupiedByUuid: occupant.get(table.id) ?? null,
+        }));
 }

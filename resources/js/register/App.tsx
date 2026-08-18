@@ -181,6 +181,13 @@ export function App(): JSX.Element {
     const onSend = useCallback(async (): Promise<boolean> => {
         if (selectedOrderUuid === null) return false;
         const outcome = await sendToKitchen(selectedOrderUuid);
+        if (outcome.status === 'needs_name') {
+            // RST-141 — a collection order with no table needs something the pass can call out.
+            openDialog('orderName');
+            toast.show({ tone: 'warn', title: t('reg.order.nameRequired') });
+
+            return false;
+        }
         if (outcome.status === 'needs_guests') {
             // RST-072 — this service mode plates to a cover count, and the order has none. Ask for
             // it rather than sending a ticket the kitchen cannot work from; the same dialog the

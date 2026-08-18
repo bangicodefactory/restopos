@@ -7,16 +7,21 @@ import { beforeEach, expect, it, vi } from 'vitest';
  * success triggers the local reload. The server behaviour itself is covered by RestaurantTest.
  */
 
-const { post, drain, orders, reloadAllOrders } = vi.hoisted(() => ({
+const { post, drain, orders, reloadAllOrders, refreshOrderName } = vi.hoisted(() => ({
     post: vi.fn(),
     drain: vi.fn(async () => ({ sent: 0, failed: 0 })),
     orders: {} as Record<string, { restaurant_table_id: number | null }>,
     reloadAllOrders: vi.fn(async () => {}),
+    refreshOrderName: vi.fn(),
 }));
 
 vi.mock('../boot', () => ({ reloadAllOrders }));
 vi.mock('../data/runtime', () => ({ tryRuntime: () => ({ api: { post }, syncer: { drain } }) }));
 vi.mock('../state/order-store', () => ({ useOrderStore: { getState: () => ({ orders }) } }));
+// The name is re-derived after every server table action (RST-140, review of #69). What that
+// derivation *produces* belongs to `order-naming`; what matters here is that the transfer path asks
+// for it at all, and for which orders — so it is a spy rather than the real store.
+vi.mock('./order-actions', () => ({ refreshOrderName }));
 vi.mock('@shared/sync', async (importOriginal) => ({
     ...((await importOriginal()) as Record<string, unknown>),
     browserOnline: vi.fn(() => true),
@@ -44,6 +49,30 @@ it('routes a transfer to the server and returns the survivor', async () => {
     // The outbox is drained before the server call so it acts on the current order.
     expect(drain).toHaveBeenCalledOnce();
     expect(Number(drain.mock.invocationCallOrder[0])).toBeLessThan(Number(post.mock.invocationCallOrder[0]));
+});
+
+it('re-derives the order name, which the reload alone does not do', async () => {
+    // The server does not compute names — it stores whatever was last pushed. So the reload brings
+    // back `T 1` for an order now sitting on table 2, and the picker added in this PR was the fastest
+    // way to produce that stale name (review of #69).
+    orders['o1'] = { restaurant_table_id: 1 };
+    post.mockResolvedValue({ data: { order: { uuid: 'o1', restaurant_table_id: 2 }, merged: false, merge_id: null } });
+
+    await transferOrder('o1', 2);
+
+    expect(refreshOrderName).toHaveBeenCalledWith('o1');
+});
+
+it('re-derives both bills when a transfer merges into an occupied table', async () => {
+    // The survivor gains the source's tables, so its derived name changes too — and the source is
+    // still on screen until the reload lands.
+    orders['o1'] = { restaurant_table_id: 1 };
+    post.mockResolvedValue({ data: { order: { uuid: 'o2', restaurant_table_id: 2 }, merged: true, merge_id: 9 } });
+
+    await transferOrder('o1', 2);
+
+    expect(refreshOrderName).toHaveBeenCalledWith('o1');
+    expect(refreshOrderName).toHaveBeenCalledWith('o2');
 });
 
 it('still reports success when the local refresh fails after the server applied the move', async () => {

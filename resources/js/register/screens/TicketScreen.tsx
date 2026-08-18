@@ -24,7 +24,8 @@ import { print } from '../domain/printing';
 import { buildReceipt } from '../domain/receipt';
 import { orderTotals } from '../domain/totals';
 import { useCatalog, useMoney, useOrderLines } from '../hooks/use-register';
-import { useOrderStore, paymentsOf } from '../state/order-store';
+import { draftOrders, useOrderStore, paymentsOf } from '../state/order-store';
+import { mergeOrders, transferOrder, transferTargets } from '../domain/table-transfer';
 import {
     DEFAULT_PAGE_SIZE,
     PAGE_SIZE_OPTIONS,
@@ -249,6 +250,21 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
         hydrateOrders(graph);
         for (const order of graph.orders) runtime.persistence.persist(order.uuid);
     }, []);
+
+    const moveTargets = useMemo(
+        () =>
+            selected === null
+                ? []
+                : transferTargets(
+                      catalog.tables,
+                      draftOrders(useOrderStore.getState()).map((order) => ({
+                          uuid: order.uuid,
+                          restaurant_table_id: order.restaurant_table_id,
+                      })),
+                      selected,
+                  ),
+        [catalog.tables, selected],
+    );
 
     const detailLines = useOrderLines(selected);
     const detail = selected !== null ? (orders[selected] ?? null) : null;
@@ -501,6 +517,43 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                             >
                                 {t('reg.tickets.refund')}
                             </Button>
+                            {/* RST-057 — move the order from here, not only from the floor plan.
+                                The gesture there needs a table to arm on, which is no help to the
+                                case that needs it most: an order that is not on a table yet. */}
+                            {detail.state === 'draft' && can('table.transfer') ? (
+                                <select
+                                    aria-label={t('reg.tickets.moveTo')}
+                                    data-testid="ticket-transfer-target"
+                                    className="min-h-touch rounded-pos border border-slate-300 px-2"
+                                    value=""
+                                    onChange={async (event) => {
+                                        const tableId = Number(event.target.value);
+                                        if (!Number.isFinite(tableId) || tableId === 0) return;
+
+                                        const target = moveTargets.find((candidate) => candidate.tableId === tableId);
+                                        if (!target) return;
+
+                                        // Whether this is a move or a merge is a consequence of the
+                                        // destination, not a separate choice the waiter makes.
+                                        if (target.occupiedByUuid !== null) {
+                                            await mergeOrders(detail.uuid, target.occupiedByUuid);
+                                        } else {
+                                            await transferOrder(detail.uuid, tableId);
+                                        }
+
+                                        setSelected(null);
+                                    }}
+                                >
+                                    <option value="">{t('reg.tickets.moveTo')}</option>
+                                    {moveTargets.map((target) => (
+                                        <option key={target.tableId} value={target.tableId}>
+                                            {target.occupiedByUuid === null
+                                                ? target.label
+                                                : t('reg.tickets.mergeInto', { table: target.label })}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : null}
                             <Button
                                 variant="danger"
                                 disabled={!deletable || !can('order.delete_draft')}
