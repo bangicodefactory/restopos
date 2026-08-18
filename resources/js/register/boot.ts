@@ -34,7 +34,7 @@ import { applyServerAck, configureOrderActions, hydrateOrders, markSyncState } f
 import { bindingsFromCatalog, createPrinterRouter } from './domain/printing';
 import { fetchCurrentSession, openSessionFromDb } from './domain/session-actions';
 import { useBootStore, useSyncStore } from './state/boot-store';
-import { unsyncedCount, useOrderStore } from './state/order-store';
+import { linesOf, unsyncedCount, useOrderStore } from './state/order-store';
 import { usePosSessionStore } from './state/session-store';
 
 /**
@@ -265,6 +265,23 @@ async function rereadOrder(orderUuid: string): Promise<boolean> {
         if (graph.orders.length === 0) return false;
 
         hydrateOrders(graph);
+
+        // `toClientRows` stamps a fetched order `synced`, on the reasoning that a fetched order is by
+        // definition synced. True of the server's content — and false the moment local work is still
+        // attached to it (review of #68).
+        //
+        // A line the waiter typed while this order was in conflict survives the hydrate, because
+        // nothing deletes rows the server did not mention. Left marked `synced`, it is never pushed:
+        // it sits on the screen looking rung up while the kitchen, the bill and every other till
+        // know nothing about it. Silent divergence, which is the failure mode this codebase treats
+        // as worse than an error.
+        //
+        // So the order goes back to dirty when anything on it has never been acknowledged, and the
+        // outbox takes it from there.
+        const unacked = linesOf(useOrderStore.getState(), orderUuid).some((line) => line.id === null);
+
+        if (unacked) markSyncState(orderUuid, 'local');
+
         for (const order of graph.orders) runtime.persistence.persist(order.uuid);
 
         return true;
@@ -356,9 +373,9 @@ function applySyncResult(result: SyncRecordResult): void {
         // Nothing is wrong with the sale — the till is behind. Marked synced only once the server's
         // copy has landed, so a failed re-read leaves the row visibly unresolved rather than
         // pretending it agreed.
-        void rereadOrder(uuid).then((ok) => {
-            if (ok) markSyncState(uuid, 'synced');
-        });
+        // No explicit `synced` here: the hydrate already stamps the fetched order, and claiming it
+        // over local work that has not been acknowledged is exactly the lie guarded against above.
+        void rereadOrder(uuid);
 
         sync.pushNotice({ orderUuid: uuid, message: result.status === 'superseded' ? 'superseded' : 'conflict_reread' });
 

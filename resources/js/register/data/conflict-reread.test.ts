@@ -51,7 +51,7 @@ describe('an order merged into another table bill', () => {
         // pushed uuid would 404 — the survivor is what to fetch and what to put in front of the
         // waiter.
         expect(
-            conflictAction(result({ status: 'superseded', merged_into_uuid: 'order-b' })),
+            conflictAction(result({ status: 'superseded', merged_into_uuid: 'order-b' as never })),
         ).toEqual({ kind: 'adopt', orderUuid: 'order-a', survivorUuid: 'order-b' });
     });
 
@@ -61,7 +61,7 @@ describe('an order merged into another table bill', () => {
         // sale that had succeeded** — reporting it to the manager as refused at session close.
         //
         // Reported as `superseded` now, with the survivor naming where the waiter should go.
-        const action = conflictAction(result({ status: 'superseded', merged_into_uuid: 'order-b' }));
+        const action = conflictAction(result({ status: 'superseded', merged_into_uuid: 'order-b' as never }));
 
         expect(action.kind).not.toBe('quarantine');
         expect(action.kind).toBe('adopt');
