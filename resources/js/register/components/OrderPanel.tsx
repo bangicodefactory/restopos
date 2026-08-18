@@ -95,6 +95,19 @@ export function OrderPanel({
         return groups;
     }, [courses, lines]);
 
+    /**
+     * The course the waiter is most likely to want next (RST-090): the first unfired one that has
+     * something on it.
+     *
+     * Firing lives on the course header, which is fine while you are looking at the lines and no use
+     * at all once the order is long enough to scroll — the header is off screen exactly when the
+     * kitchen is waiting. Promoted here so the action is where the hands already are.
+     */
+    const nextCourse = useMemo(
+        () => grouped.find((group) => group.course && !group.course.fired && group.lines.length > 0)?.course ?? null,
+        [grouped],
+    );
+
     const table =
         order?.restaurant_table_id != null ? catalog.tablesById.get(order.restaurant_table_id) : undefined;
 
@@ -264,6 +277,17 @@ export function OrderPanel({
                         <dd className="text-2xl font-bold tabular-nums">{money(totals.roundedTotal)}</dd>
                     </div>
                 </dl>
+
+                {restaurant && nextCourse ? (
+                    <Button
+                        size="md"
+                        className="mb-2 w-full"
+                        data-testid="fire-next-course"
+                        onClick={() => onFireCourse(nextCourse.uuid)}
+                    >
+                        {t('reg.order.fireCourse', { index: nextCourse.index })}
+                    </Button>
+                ) : null}
 
                 {restaurant ? (
                     <Button

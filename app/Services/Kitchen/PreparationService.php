@@ -194,6 +194,8 @@ final readonly class PreparationService
                 'last_prep_sent_at' => now(),
             ])->save();
 
+            $this->markDespatchedCoursesFired($order, $delta, $courseIndex);
+
             return [
                 'delta' => $delta,
                 'prep_orders' => $prepOrders,
@@ -201,6 +203,48 @@ final readonly class PreparationService
                 'snapshot_version' => $version + 1,
             ];
         });
+    }
+
+    /**
+     * Stamp the courses a send has just despatched (RST-084, RST-085, BAN-477).
+     *
+     * `fireCourse()` set `fired` because firing a course is what it does. A **whole-order** send
+     * went to the same displays and the same printers and marked nothing — so the food was on the
+     * pass while the order still said every course was waiting, the course tag never appeared on the
+     * ticket, and the next fire found nothing to send and stamped the course anyway.
+     *
+     * The till stamps its own copy at the same moment, which is what makes the offline path work.
+     * Without this the server's answer disagreed, and the first reload put every course back to
+     * unfired — a fix that lasted until the next refresh is not a fix.
+     *
+     * Only courses that had lines in this delta. An empty course further down has been fired by
+     * nobody, and saying otherwise tells the pass food is coming that was never printed.
+     */
+    private function markDespatchedCoursesFired(Order $order, PreparationDelta $delta, ?int $courseIndex): void
+    {
+        // A course-scoped send is `fireCourse()`'s own path; it has already stamped its course, and
+        // the delta is filtered to that course anyway.
+        if ($courseIndex !== null) {
+            return;
+        }
+
+        $indexes = [];
+
+        foreach ($delta->changes as $change) {
+            // `courseIndex` defaults to 1 on a line with no course at all. Harmless: an order
+            // without courses has no rows for the update below to match.
+            $indexes[(int) $change->courseIndex] = true;
+        }
+
+        if ($indexes === []) {
+            return;
+        }
+
+        OrderCourse::query()
+            ->where('pos_order_id', $order->getKey())
+            ->whereIn('course_index', array_keys($indexes))
+            ->where('fired', false)
+            ->update(['fired' => true, 'fired_at' => now()]);
     }
 
     /**

@@ -143,6 +143,11 @@ export function buildReceiptView(
     const totals = orderTotals(orderUuid, state);
     const taxIncluded = catalog.config?.iface_tax_included === 'total';
 
+    // Course names by uuid, so each line can carry its own heading (RST-088).
+    const courseNames = new Map(
+        coursesOf(state, orderUuid).map((course) => [String(course.uuid), course.name ?? `Service ${course.index}`]),
+    );
+
     const lines: ReceiptLineView[] = linesOf(state, orderUuid).map((line) => {
         const computed = totals.perLine[line.uuid];
         const uom = catalog.uoms.get(line.uom_id);
@@ -165,6 +170,7 @@ export function buildReceiptView(
             customerNote: line.customer_note,
             attributes,
             isComboChild: line.combo_parent_uuid !== null,
+            courseName: line.course_uuid ? (courseNames.get(String(line.course_uuid)) ?? null) : null,
         };
     });
 
@@ -277,6 +283,13 @@ export function buildPrepTicket(
         context.courseName ??
         (state ? (coursesOf(state, order.uuid).find((course) => !course.fired)?.name ?? null) : null);
 
+    const prepCourseNames = new Map(
+        (state ? coursesOf(state, order.uuid) : []).map((course) => [
+            String(course.uuid),
+            course.name ?? `Service ${course.index}`,
+        ]),
+    );
+
     const ticket: PrepTicketView = {
         orderUuid: order.uuid,
         orderName: order.floating_order_name ?? order.name ?? order.receipt_number,
@@ -290,6 +303,7 @@ export function buildPrepTicket(
         generalNote: order.general_customer_note,
         lines: changes.map((change) => ({
             name: change.name,
+            courseName: change.courseUuid ? (prepCourseNames.get(String(change.courseUuid)) ?? null) : null,
             quantity: Math.abs(change.quantity),
             note: change.internalNote ?? change.customerNote ?? null,
             change:

@@ -149,6 +149,32 @@ export function needsOrderNameFor(orderUuid: string): boolean {
     });
 }
 
+/**
+ * Stamp the courses a whole-order send just despatched (RST-084, RST-085).
+ *
+ * `sendToKitchen` sends everything unsent, courses included — but it marked no course fired, so the
+ * kitchen was cooking the starters while the till still offered "Fire course 1" and no course tag
+ * ever appeared. Pressing fire afterwards found nothing to send and stamped it anyway, which is the
+ * same state reached by a longer road.
+ *
+ * Only courses that actually had lines in this delta are stamped. An empty course further down the
+ * order has not been fired by anybody, and marking it would tell the pass a course is on its way
+ * when nothing was printed for it.
+ */
+function fireCoursesInDelta(orderUuid: string, delta: PrepDelta): void {
+    const seen = new Set<string>();
+
+    for (const change of delta.changes) {
+        if (change.courseUuid) seen.add(change.courseUuid);
+    }
+
+    for (const courseUuid of seen) {
+        if (useOrderStore.getState().courses[courseUuid]?.fired === false) {
+            fireCourse(orderUuid, courseUuid);
+        }
+    }
+}
+
 export async function sendToKitchen(
     orderUuid: string,
     options: { courseIndex?: number | null; courseName?: string | null } = {},
@@ -178,6 +204,7 @@ export async function sendToKitchen(
     if (!online) {
         const printed = await printTickets(orderUuid, delta, options.courseName ?? null);
         markPrepSent(orderUuid);
+        fireCoursesInDelta(orderUuid, delta);
         void runtime?.syncer.enqueueCommand('prep.sent', {
             order_uuid: orderUuid,
             snapshot_version: knownSnapshotVersion(orderUuid),
@@ -216,6 +243,7 @@ export async function sendToKitchen(
         if (error instanceof ApiError && error.sync.kind === 'offline') {
             const printed = await printTickets(orderUuid, delta, options.courseName ?? null);
             markPrepSent(orderUuid);
+            fireCoursesInDelta(orderUuid, delta);
             return { status: 'sent', delta, printed, online: false };
         }
 
@@ -224,6 +252,7 @@ export async function sendToKitchen(
 
     const printed = await printTickets(orderUuid, delta, options.courseName ?? null);
     markPrepSent(orderUuid);
+    fireCoursesInDelta(orderUuid, delta);
     return { status: 'sent', delta, printed, online: true };
 }
 

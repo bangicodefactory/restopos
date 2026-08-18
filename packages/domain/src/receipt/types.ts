@@ -37,6 +37,15 @@ export type ReceiptLineView = {
     attributes?: string[];
     /** Combo children are indented under their parent. */
     isComboChild?: boolean;
+    /**
+     * The course this line belongs to (RST-088), or null on an order that has none.
+     *
+     * Carried per line rather than as a grouped structure so the renderer stays a single pass and a
+     * caller that does not care can keep ignoring it. A heading is printed only where the value
+     * changes, and never on an order with one course — a bill that says "Service 1" above every
+     * line it already listed is noise.
+     */
+    courseName?: string | null;
     /** Short tax codes ("A", "B") printed after the amount for fiscal receipts. */
     taxCodes?: string[];
 };
@@ -297,6 +306,8 @@ export type PrepTicketView = {
     /** `changed` marks a re-fire: only the delta is printed in bold. */
     lines: Array<{
         name: string;
+        /** Course heading to print above this line when it differs from the previous (RST-088). */
+        courseName?: string | null;
         quantity: number;
         attributes?: string[];
         note?: string | null;
