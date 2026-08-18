@@ -1048,9 +1048,15 @@ it('never prints another company preset on this venue ticket (review of #59)', f
     expect(DB::table('prep_orders')->value('preset_label'))->toBeNull();
 });
 
-it('drops a foreign preset arriving on an update, not just a create', function (): void {
+it('never stores a foreign preset arriving on an update, not just a create', function (): void {
     // Both paths write `pos_preset_id` from the same client key, which is why the guard sits at the
     // batch chokepoint rather than beside either one.
+    //
+    // This asserted `toBeNull()` when it was written, which encoded *how* the guard worked rather
+    // than what it owed: the unusable id was written as null, and that erased the preset the order
+    // legitimately had. The requirement never changed — a foreign preset must not reach this order —
+    // and BAN-524 made the guard ignore the field instead, so the venue's own preset survives. Both
+    // halves are asserted here now, which is stricter than the original.
     $mine = takeawayPreset($this->fx);
 
     $foreign = Company::query()->create([
@@ -1075,7 +1081,10 @@ it('drops a foreign preset arriving on an update, not just a create', function (
         'orders' => [$this->fx->orderCommand($uuid, [], ['preset_id' => $foreignPreset])],
     ])->assertOk();
 
-    expect(Order::query()->where('uuid', $uuid)->value('pos_preset_id'))->toBeNull();
+    $stored = Order::query()->where('uuid', $uuid)->value('pos_preset_id');
+
+    expect((int) $stored)->not->toBe($foreignPreset)
+        ->and((int) $stored)->toBe($mine);
 });
 
 it('keeps a preset the venue does own', function (): void {
