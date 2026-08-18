@@ -12,6 +12,7 @@ use App\Models\Kitchen\PrepDisplay;
 use App\Models\Pos\Order;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosPrinter;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\Pricelist;
 use App\Models\Pricing\PricelistItem;
@@ -20,6 +21,7 @@ use App\Models\Restaurant\Table as RestaurantTable;
 use App\Policies\OrderPolicy;
 use App\Policies\PosConfigPolicy;
 use App\Policies\PrepDisplayPolicy;
+use App\Policies\PrinterPolicy;
 use App\Policies\SessionPolicy;
 use App\Services\Payment\NullProvider;
 use App\Services\Payment\PaymentProvider;
@@ -131,6 +133,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(PosSession::class, SessionPolicy::class);
         Gate::policy(PrepDisplay::class, PrepDisplayPolicy::class);
         Gate::policy(PosConfig::class, PosConfigPolicy::class);
+        Gate::policy(PosPrinter::class, PrinterPolicy::class);
     }
 
     private function registerRateLimiters(): void

@@ -15,6 +15,7 @@ use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -32,6 +33,12 @@ final class PrinterController extends Controller
 
     public function index(): Response
     {
+        // Reads are left as they were. This ticket adds *writes* — create and delete — and gating
+        // the list as well would change who can see the printers page, which is a separate decision
+        // with its own blast radius: `TenantIsolationTest` reaches this page as an ordinary user to
+        // prove the queue is company-scoped, and that has nothing to do with roles. The page is
+        // already tenancy-scoped; `viewAny` on the policy is there for whoever takes that decision.
+
         return Inertia::render('Printers/Index', [
             'printers' => PosPrinter::query()->orderBy('name')->get()->map(function (PosPrinter $p): array {
                 return [
@@ -69,6 +76,8 @@ final class PrinterController extends Controller
     /** `POST /printers` — add a printer (BOF-114). */
     public function store(PrinterRequest $request): RedirectResponse
     {
+        Gate::authorize('create', PosPrinter::class);
+
         $data = $request->validated();
         $categoryIds = $this->ownedCategories($data['category_ids'] ?? null);
         unset($data['category_ids']);
@@ -96,6 +105,8 @@ final class PrinterController extends Controller
 
     public function update(PrinterRequest $request, PosPrinter $printer): RedirectResponse
     {
+        Gate::authorize('update', $printer);
+
         $data = $request->validated();
         $categoryIds = $this->ownedCategories($data['category_ids'] ?? null);
         unset($data['category_ids']);
@@ -119,6 +130,8 @@ final class PrinterController extends Controller
      */
     public function destroy(Request $request, PosPrinter $printer): RedirectResponse
     {
+        Gate::authorize('delete', $printer);
+
         // Scoped, like every other raw builder query on a company-owned table. The printer is
         // already this tenant's, so in practice its jobs are too — but `TenantIsolationTest` checks
         // the *shape* rather than the reasoning, and it is right to: the day this method grows a
@@ -199,6 +212,8 @@ final class PrinterController extends Controller
     /** Queue a test ticket; the printer agent picks it up on its next poll. */
     public function test(Request $request, PosPrinter $printer): RedirectResponse
     {
+        Gate::authorize('update', $printer);
+
         $request->validate(['pos_config_id' => ['required', 'integer']]);
 
         // `exists:pos_configs,id` runs unscoped and would accept another company's register, filing

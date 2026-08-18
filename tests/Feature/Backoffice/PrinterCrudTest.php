@@ -7,6 +7,8 @@ namespace Tests\Feature\Backoffice\PrinterCrud;
 use App\Enums\PrintJobState;
 use App\Enums\PrintJobType;
 use App\Models\Catalog\PosCategory;
+use App\Models\Identity\Permission;
+use App\Models\Identity\Role;
 use App\Models\Pos\PosPrinter;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -18,6 +20,41 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+/**
+ * A back-office user of `$fx`'s company holding `$permissions`.
+ *
+ * Deliberately **not** a super-admin, which every other back-office suite uses. A super-admin
+ * bypasses `PrinterPolicy` entirely, so a suite written on one would pass with no policy at all —
+ * and it has no company of its own, which is the case `store` refuses.
+ *
+ * @param  list<string>  $permissions
+ */
+function actorWith(PosFixtures $fx, array $permissions): User
+{
+    $role = Role::query()->create([
+        'name' => 'Kitchen manager',
+        'slug' => 'kitchen-manager-'.Str::random(6),
+        'is_system' => false,
+    ]);
+
+    foreach ($permissions as $slug) {
+        $permission = Permission::query()->firstOrCreate(['slug' => $slug], ['group' => 'pos']);
+        DB::table('permission_role')->insertOrIgnore([
+            'role_id' => $role->getKey(),
+            'permission_id' => $permission->getKey(),
+        ]);
+    }
+
+    $user = User::factory()->create([
+        'company_id' => $fx->company->getKey(),
+        'is_super_admin' => false,
+    ]);
+
+    DB::table('role_user')->insert(['role_id' => $role->getKey(), 'user_id' => $user->getKey()]);
+
+    return $user;
+}
+
 beforeEach(function (): void {
     // A decoy venue first, so the acting company is **not** id 1. Without it, a controller that
     // hardcoded `company_id => 1` was indistinguishable from one that read the acting user — and a
@@ -25,10 +62,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(User::factory()->create([
-        'company_id' => $this->fx->company->getKey(),
-        'is_super_admin' => false,
-    ]));
+    $this->actingAs(actorWith($this->fx, ['pos.kitchen.view', 'pos.kitchen.manage']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -242,4 +276,21 @@ it('allows the delete once the queue is done', function (): void {
     test()->delete(route('printers.destroy', $printer))->assertRedirect();
 
     expect(PosPrinter::query()->whereKey($printer->getKey())->exists())->toBeFalse();
+});
+
+it('refuses a user who may not configure the kitchen', function (): void {
+    // The policy, not the tenancy scope: this user belongs to the right company and simply is not
+    // allowed to take a station out of service. Before BAN-432 the only write was `update` and it
+    // was ungated; adding create and delete widened that rather than introducing it.
+    createPrinter(['name' => 'Grill'])->assertRedirect();
+    $printer = PosPrinter::query()->where('name', 'Grill')->firstOrFail();
+
+    test()->actingAs(actorWith($this->fx, ['pos.kitchen.view']));
+
+    createPrinter(['name' => 'Sneaky'])->assertForbidden();
+    test()->delete(route('printers.destroy', $printer))->assertForbidden();
+    test()->patch(route('printers.update', $printer), ['name' => 'Renamed'])->assertForbidden();
+
+    expect(PosPrinter::query()->where('name', 'Sneaky')->exists())->toBeFalse()
+        ->and(PosPrinter::query()->whereKey($printer->getKey())->exists())->toBeTrue();
 });
