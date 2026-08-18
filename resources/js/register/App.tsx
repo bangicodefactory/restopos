@@ -29,6 +29,7 @@ import { ProductScreen } from './screens/ProductScreen';
 import { ReceiptScreen } from './screens/ReceiptScreen';
 import { SessionScreen } from './screens/SessionScreen';
 import { SplitScreen } from './screens/SplitScreen';
+import { TipScreen } from './screens/TipScreen';
 import { TicketScreen } from './screens/TicketScreen';
 import { useBootStore, useSyncStore } from './state/boot-store';
 import { linesOf, unsyncedCount, useOrderStore } from './state/order-store';
@@ -338,6 +339,10 @@ export function App(): JSX.Element {
                             setScreen(catalog.config?.is_restaurant ? 'floor' : 'products');
                         }}
                     />
+                ) : null}
+
+                {screen === 'tip' ? (
+                    <TipScreen orderUuid={receiptOrderUuid} onDone={() => setScreen('tickets')} />
                 ) : null}
 
                 {screen === 'tickets' ? (

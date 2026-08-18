@@ -148,6 +148,11 @@ export type ReceiptLabels = {
     bill: string;
     kitchen: string;
     course: string;
+    /** The signature tip slip (RST-124). */
+    tipLine: string;
+    tipTotalLine: string;
+    signature: string;
+    merchantCopy: string;
     note: string;
     cancelled: string;
     quantity: string;
@@ -198,6 +203,10 @@ export const DEFAULT_LABELS: ReceiptLabels = {
     bill: 'BILL',
     kitchen: 'KITCHEN',
     course: 'Course',
+    tipLine: 'Tip',
+    tipTotalLine: 'Total',
+    signature: 'Signature',
+    merchantCopy: 'Merchant copy',
     note: 'Note',
     cancelled: 'CANCELLED',
     quantity: 'Qty',

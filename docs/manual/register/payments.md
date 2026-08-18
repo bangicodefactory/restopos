@@ -24,6 +24,12 @@ features:
   - RST-111
   - REG-337
   - RST-125
+  - RST-120
+  - RST-122
+  - RST-123
+  - RST-124
+  - RST-127
+  - RST-129
 ---
 
 # Taking payment
@@ -244,3 +250,41 @@ entered. Those are the same protections that keep a printed receipt and the draw
 refused attempt is recorded.
 
 Your register must have tipping and after-payment tipping switched on for any of this to be offered.
+A manager sets both, and chooses which product tips are booked against, on the register's settings.
+
+### Entering one tip
+
+Open **Tips** and use **This order**. Tap 15, 20 or 25 %, or type an amount. The screen shows what
+the tip works out to as a share of the bill as you type.
+
+**A tip above a quarter of the bill asks you to confirm it.** That is there for one mistake in
+particular: a tip is entered from a signed slip, often by somebody who did not take the payment, so a
+misplaced decimal point is easy — and it does not look wrong afterwards. `18.00` typed into the field
+of a `12.10` bill balances perfectly, and nobody finds out until the card statement arrives. Confirm
+and it is applied; large tips are unusual, not impossible.
+
+Editing the amount cancels the confirmation, so a "yes" can never land on a number you have since
+changed.
+
+### Settling a whole shift
+
+Use **The shift**. Every settled sale still waiting for a tip is listed with what it came to, and you
+type down the list against the slips in your hand. The running total at the top is what you have
+entered so far, to check against the pile.
+
+Each row is applied as you press it, not saved up for the end — a stack of slips takes as long as it
+takes, and work that is lost when you leave the screen is worse than work never started. A row
+disappears once it is settled, so the list is always what is left to do. The same confirmation
+applies here.
+
+### The signature slip
+
+The till can print a slip for the customer to write on: what was charged, a blank line for the tip, a
+blank line for the new total, and somewhere to sign. It is marked **merchant copy**, because that is
+the one the venue keeps — it is what the tip is later keyed from.
+
+### Who the tips belong to
+
+The session report lists tips per cashier, so whoever shares them out is reading a figure rather than
+counting receipts. Refunded sales are left out rather than subtracted: a refund takes its tip back
+with it, and netting would show a busy cashier as owing money.

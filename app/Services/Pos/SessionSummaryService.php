@@ -267,6 +267,66 @@ final readonly class SessionSummaryService
      * @param  list<int>  $sessionIds
      * @return list<array<string, mixed>>
      */
+    /**
+     * Tips taken in these sessions, per cashier (RST-129).
+     *
+     * Tips are the one figure on a session report that is not the venue's money. They are counted in
+     * the takings — the card was charged for them — and they are owed out again, so a report that
+     * shows only a session total leaves whoever shares them out counting receipts by hand.
+     *
+     * Attributed to `employee_id`, the cashier who took the sale, because that is the only
+     * attribution the order carries. On a venue that pools tips the split is a different question
+     * and this is still the input to it.
+     *
+     * Refunds are excluded rather than netted. A refunded sale returns the tip with it, and a
+     * negative row against a cashier's name reads as money owed *by* them.
+     *
+     * @param  list<int>  $sessionIds
+     * @return list<array<string, mixed>>
+     */
+    public function tipsByCashierRows(array $sessionIds): array
+    {
+        if ($sessionIds === []) {
+            return [];
+        }
+
+        $rows = $this->connection->table('pos_orders')
+            ->leftJoin('employees', 'employees.id', '=', 'pos_orders.employee_id')
+            ->whereIn('pos_orders.pos_session_id', $sessionIds)
+            ->whereIn('pos_orders.state', [OrderState::Paid->value, OrderState::Done->value])
+            ->where('pos_orders.is_refund', false)
+            ->whereNull('pos_orders.deleted_at')
+            ->groupBy('pos_orders.pos_session_id', 'pos_orders.employee_id', 'employees.name')
+            ->selectRaw('pos_orders.pos_session_id as pos_session_id')
+            ->selectRaw('pos_orders.employee_id as employee_id')
+            ->selectRaw('employees.name as employee_name')
+            ->selectRaw('sum(pos_orders.tip_amount) as tip_amount')
+            ->selectRaw('count(*) as order_count')
+            ->get();
+
+        $out = [];
+
+        foreach ($rows as $row) {
+            $amount = $this->scale((string) ($row->tip_amount ?? '0'));
+
+            // A cashier who took no tips is not a line on this report; it is a list of what is owed
+            // out, and a row of zero is noise on a slip read at the end of a shift.
+            if (bccomp($amount, '0', 4) === 0) {
+                continue;
+            }
+
+            $out[] = [
+                'pos_session_id' => (int) $row->pos_session_id,
+                'employee_id' => $row->employee_id === null ? null : (int) $row->employee_id,
+                'employee_name' => $row->employee_name === null ? null : (string) $row->employee_name,
+                'tip_amount' => $amount,
+                'order_count' => (int) $row->order_count,
+            ];
+        }
+
+        return $out;
+    }
+
     public function taxSummaryRows(array $sessionIds): array
     {
         if ($sessionIds === []) {

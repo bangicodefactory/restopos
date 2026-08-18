@@ -14,7 +14,7 @@ import { useOrderStore } from './order-store';
  * tax recomputation.
  */
 
-export type Screen = 'products' | 'payment' | 'receipt' | 'tickets' | 'floor' | 'floorEditor' | 'split';
+export type Screen = 'products' | 'payment' | 'receipt' | 'tickets' | 'floor' | 'floorEditor' | 'split' | 'tip';
 
 /** The numpad's meaning (REG-105). `quantity` is the resting mode after every action. */
 export type NumpadMode = 'quantity' | 'price' | 'discount';

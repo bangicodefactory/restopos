@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 156
+  manual_debt: 155
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -228,7 +228,12 @@ features:
   # Tips (RST-120 … RST-139) — user
   RST-121: { status: shipped, surface: user, manual: todo }
   RST-125: { status: shipped, surface: user, manual: register/payments.md#tips }
-  RST-127: { status: shipped, surface: user, manual: todo }
+  RST-120: { status: shipped, surface: user, manual: register/payments.md#tips }
+  RST-122: { status: shipped, surface: user, manual: register/payments.md#tips }
+  RST-123: { status: shipped, surface: user, manual: register/payments.md#entering-one-tip }
+  RST-124: { status: shipped, surface: user, manual: register/payments.md#the-signature-slip }
+  RST-129: { status: shipped, surface: user, manual: register/payments.md#who-the-tips-belong-to }
+  RST-127: { status: shipped, surface: user, manual: register/payments.md#settling-a-whole-shift }
 
   # Restaurant order lifecycle extras (RST-140 … RST-159) — user
   RST-142: { status: shipped, surface: user, manual: todo }

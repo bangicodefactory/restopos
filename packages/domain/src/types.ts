@@ -526,6 +526,18 @@ export type PosConfigRow = {
     default_fiscal_position_id: number | null;
     available_fiscal_position_ids: number[];
     payment_method_ids: number[];
+    /**
+     * Tips (RST-120 … RST-129).
+     *
+     * Both columns have existed server-side since the config table was written, and the whole config
+     * row reaches the client — they were simply never declared here, so the register had no way to
+     * ask. `enable_tips` is the master switch; `tip_after_payment` decides whether the tip is taken
+     * *after* the sale is settled, which is what turns "Validate" into "Close tab / Keep open".
+     */
+    enable_tips: boolean;
+    tip_after_payment: boolean;
+    /** The product a tip is booked against (RST-120); null until a manager picks one. */
+    tip_product_id: number | null;
     /** Master switch for the one-tap tender buttons on the product screen (REG-209). */
     use_fast_payment: boolean;
     /**

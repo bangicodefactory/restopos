@@ -6,9 +6,11 @@ namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\AuditSeverity;
 use App\Enums\DeviceType;
+use App\Enums\SpecialKind;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
 use App\Models\Catalog\PosCategory;
+use App\Models\Catalog\Product;
 use App\Models\Identity\Employee;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
@@ -22,6 +24,7 @@ use App\Support\Audit\AuditEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -80,6 +83,14 @@ final class PosConfigController extends Controller
                 'presets' => PosPreset::query()->orderBy('sequence')->get(['id', 'name', 'service_at'])->all(),
                 'printers' => PosPrinter::query()->orderBy('name')->get(['id', 'name', 'printer_type'])->all(),
                 'categories' => PosCategory::query()->orderBy('sequence')->get(['id', 'name', 'parent_id'])->all(),
+                // RST-120 — only products marked as tips, which is a handful by definition. A
+                // catalogue-wide picker would be a search box, not a select, and the tip product is
+                // not something a manager browses for.
+                'tip_products' => Product::query()
+                    ->where('special_kind', SpecialKind::Tip->value)
+                    ->orderBy('name')
+                    ->get(['id', 'name'])
+                    ->all(),
                 'employees' => Employee::query()->where('active', true)->orderBy('name')->get(['id', 'name', 'default_role'])->all(),
             ]),
             'devices' => Inertia::defer(fn (): array => $config->devices()->orderBy('device_identifier')->get()
@@ -111,6 +122,21 @@ final class PosConfigController extends Controller
             'use_preparation_printers' => ['sometimes', 'boolean'],
             'use_employee_login' => ['sometimes', 'boolean'],
             'enable_tips' => ['sometimes', 'boolean'],
+            // RST-120, RST-122 (BAN-522). Both columns have existed since the config table was
+            // written and neither was settable: the register could not be put into tip-after-payment
+            // mode from the back office at all, and `tip_product_id` — the product a tip is booked
+            // against — could only be set by editing the database.
+            //
+            // The product is scoped to the company rather than merely required to exist: it names a
+            // row this venue's tips are posted to, and an unscoped `exists` is the hole BAN-520
+            // closed on the ingest side of the same kind of reference.
+            'tip_after_payment' => ['sometimes', 'boolean'],
+            'tip_product_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('products', 'id')->where('company_id', $config->company_id),
+            ],
             'enable_split_bill' => ['sometimes', 'boolean'],
             'enable_global_discount' => ['sometimes', 'boolean'],
             'global_discount_percent' => ['sometimes', 'numeric', 'min:0', 'max:100'],

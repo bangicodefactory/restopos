@@ -1,5 +1,6 @@
 export {
     buildBillDoc,
+    buildTipSlipDoc,
     buildCashMoveDoc,
     buildPrepTicketDoc,
     buildReceiptDoc,
