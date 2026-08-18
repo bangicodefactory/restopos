@@ -51,6 +51,11 @@ export type PrintersIndexProps = {
  */
 export const WRITABLE_PRINTER_KEYS = [
     'name',
+    // BAN-432 — the transport, and the field that identifies the physical device. Both columns have
+    // always existed; neither was in the PATCH rule set, so the one thing about a seeded printer
+    // nobody could change was the thing that decides whether it prints at all.
+    'printer_type',
+    'serial_number',
     'proxy_ip',
     'printer_ip',
     'printer_port',
@@ -91,6 +96,7 @@ export const JOB_STATE_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'
 
 export type PrinterForm = {
     name: string;
+    printer_type: string;
     proxy_ip: string;
     printer_ip: string;
     printer_port: number | null;
@@ -105,6 +111,7 @@ export type PrinterForm = {
 export function toForm(printer: PrinterRow): PrinterForm {
     return {
         name: printer.name,
+        printer_type: printer.printer_type,
         proxy_ip: printer.proxy_ip ?? '',
         printer_ip: printer.printer_ip ?? '',
         printer_port: printer.printer_port,

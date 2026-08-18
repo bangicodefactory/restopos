@@ -101,7 +101,9 @@ Route::middleware(['auth'])->group(function (): void {
     Route::get('reports/order-analytics', [ReportController::class, 'orderAnalytics'])->name('reports.order-analytics');
 
     Route::get('printers', [PrinterController::class, 'index'])->name('printers.index');
+    Route::post('printers', [PrinterController::class, 'store'])->name('printers.store');
     Route::patch('printers/{printer}', [PrinterController::class, 'update'])->name('printers.update');
+    Route::delete('printers/{printer}', [PrinterController::class, 'destroy'])->name('printers.destroy');
     Route::post('printers/{printer}/test', [PrinterController::class, 'test'])->name('printers.test');
 
     Route::get('prep-displays', [PrepDisplayController::class, 'index'])->name('prep-displays.index');

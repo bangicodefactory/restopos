@@ -352,6 +352,7 @@ features:
 
   # Operational configuration (BOF-110 … BOF-129) — user
   BOF-110: { status: shipped, surface: user, manual: todo }
+  BOF-114: { status: shipped, surface: user, manual: back-office/printers.md#kitchen-printers }
   BOF-115: { status: shipped, surface: user, manual: todo }
   BOF-116: { status: shipped, surface: user, manual: todo }
   BOF-119: { status: shipped, surface: user, manual: todo }
