@@ -6,6 +6,8 @@ import { clearRuntime } from '../data/runtime';
 import { installCatalog, makeConfig, makeProduct, makeVariant, resetRegisterState } from '../domain/__fixtures__/catalog';
 import { addLine, configureOrderActions, createOrder } from '../domain/order-actions';
 import { useOrderStore } from '../state/order-store';
+import { getCatalog } from '../data/catalog';
+import { PaymentScreen } from './PaymentScreen';
 import { TipScreen } from './TipScreen';
 
 /**
@@ -208,6 +210,77 @@ describe('when the venue does not take tips', () => {
         resetRegisterState();
         install(false);
         configureOrderActions({ enqueue: vi.fn(), persist: vi.fn(), onChange: vi.fn() });
+
+        render(<TipScreen onDone={vi.fn()} />);
+
+        expect(screen.queryByTestId('tip-screen')).toBeNull();
+    });
+});
+
+describe('getting to the screen at all', () => {
+    /**
+     * RST-122 — the mode's whole point is that settling is not the end of the tab, and the button
+     * has to say so. Probed while reviewing #75: the screen was routed and **nothing navigated to
+     * it**, so none of the above was reachable by anybody.
+     */
+    it('calls the settle button "Close tab" in tip-after-payment mode', async () => {
+        resetRegisterState();
+        installCatalog({
+            config: makeConfig({ is_restaurant: true, enable_tips: true, tip_after_payment: true }),
+            products: [makeProduct({ id: 1, name: 'Pizza', list_price: '20.00' })],
+            variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
+        });
+        configureOrderActions({ enqueue: vi.fn(), persist: vi.fn(), onChange: vi.fn() });
+
+        const orderUuid = await createOrder({});
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1, priceUnit: '20.00' });
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+
+        expect(screen.getByTestId('payment-validate').textContent).toContain('Close tab');
+    });
+
+    it('still says "Validate" where the tab really does end at payment', async () => {
+        // The control: the relabelling must not leak into an ordinary counter register, where
+        // "Close tab" would describe something that is not happening.
+        const orderUuid = await createOrder({});
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1, priceUnit: '20.00' });
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+
+        expect(screen.getByTestId('payment-validate').textContent).toContain('Validate');
+    });
+
+    it('does not relabel when tips are off, whatever the mode flag says', async () => {
+        // The combination that separates the two flags. A venue that does not tip at all can still
+        // carry `tip_after_payment` from a config copied off another register, and "Close tab" there
+        // describes a tab that ends right now — a sabotage dropping `enable_tips` from the check
+        // passed until this case existed (review of #75).
+        resetRegisterState();
+        installCatalog({
+            config: makeConfig({ is_restaurant: true, enable_tips: false, tip_after_payment: true }),
+            products: [makeProduct({ id: 1, name: 'Pizza', list_price: '20.00' })],
+            variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
+        });
+        configureOrderActions({ enqueue: vi.fn(), persist: vi.fn(), onChange: vi.fn() });
+
+        const orderUuid = await createOrder({});
+        addLine({ orderUuid, variantId: PIZZA, quantity: 1, priceUnit: '20.00' });
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+
+        expect(screen.getByTestId('payment-validate').textContent).toContain('Validate');
+    });
+
+    it('reads both flags, so tipping-off means tipping-off', () => {
+        resetRegisterState();
+        installCatalog({
+            config: makeConfig({ is_restaurant: true, enable_tips: false, tip_after_payment: true }),
+            products: [makeProduct({ id: 1, name: 'Pizza', list_price: '20.00' })],
+            variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
+        });
+
+        expect(getCatalog().config?.enable_tips).toBe(false);
 
         render(<TipScreen onDone={vi.fn()} />);
 

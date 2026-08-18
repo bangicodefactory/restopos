@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { tryRuntime } from '../data/runtime';
 import { cancelOnTerminal } from '../domain/terminal';
+import { getCatalog } from '../data/catalog';
 import { useT } from '../i18n';
 import type { RegisterKey } from '../i18n';
 import {
@@ -77,7 +78,22 @@ export type PaymentScreenProps = {
     onBack: () => void;
 };
 
+/**
+ * Is this register in tip-after-payment mode (RST-122)?
+ *
+ * Both flags, not one: `enable_tips` says the venue tips at all, `tip_after_payment` says the tip is
+ * taken *after* settling — which is the mode that changes what the validate button means.
+ */
+function tipAfterPaymentMode(): boolean {
+    const config = getCatalog().config;
+
+    return config?.enable_tips === true && config?.tip_after_payment === true;
+}
+
 export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenProps): JSX.Element {
+    // Both flags, not one: `enable_tips` says the venue tips at all, `tip_after_payment` says the
+    // tip is taken after settling — which is the mode that changes what this button means.
+    const tipAfterPayment = tipAfterPaymentMode();
     const t = useT();
     const money = useMoney();
     const catalog = useCatalog();
@@ -421,6 +437,9 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                     <Button variant="ghost" onClick={onBack}>
                         {t('common.back')}
                     </Button>
+                    {/* RST-122 — in tip-after-payment mode the sale is settled but the tab is
+                        not finished: the slip goes out, comes back signed, and the tip is entered
+                        then. "Validate" is the wrong word for that, because it reads as done. */}
                     <Button
                         size="xl"
                         variant="success"
@@ -429,7 +448,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                         onClick={() => void validate()}
                         data-testid="payment-validate"
                     >
-                        {t('reg.pay.validate')}
+                        {tipAfterPayment ? t('reg.tip.closeTab') : t('reg.pay.validate')}
                     </Button>
                 </div>
             </aside>
