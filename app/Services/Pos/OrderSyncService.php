@@ -1015,9 +1015,15 @@ final readonly class OrderSyncService
         if ($mergedInto !== null) {
             // The pushed uuid resolved, and the answer names the order that survived so the losing
             // till can switch to it rather than keep showing a bill that no longer exists.
+            // `superseded`, not a status of its own. The wire contract already has a word for "the
+            // server holds a better version of this, stop pushing it", and `ConflictCode` already
+            // names this exact case — inventing `merged` meant the client fell through to its
+            // rejected branch and **quarantined a sale that had actually succeeded**, reporting it
+            // to the manager as refused at session close (review of #67, found in BAN-474).
             return [
                 'uuid' => $uuid,
-                'status' => 'merged',
+                'status' => 'superseded',
+                'conflict' => ['code' => 'duplicate_table_order', 'message' => 'Merged into the bill already on this table.'],
                 'merged_into_uuid' => (string) $mergedInto->uuid,
                 'server_rev' => $this->rev($mergedInto),
                 'order' => $this->orderSummary($mergedInto),

@@ -58,7 +58,11 @@ it('reconciles a second order for the same table instead of losing it', function
     $response = pushOrder($this->fx, $second, $table, '2')->assertOk();
 
     // Not `rejected`, and not a SQL error.
-    expect($response->json('results.0.status'))->toBe('merged')
+    // `superseded`, using the wire contract's existing word for "the server holds a better version
+    // of this" — an invented `merged` status is absent from `SyncStatus`, so the client fell through
+    // to its rejected branch and quarantined a sale that had succeeded (review of #67).
+    expect($response->json('results.0.status'))->toBe('superseded')
+        ->and($response->json('results.0.conflict.code'))->toBe('duplicate_table_order')
         // The answer names the survivor, so the losing till can switch to it rather than keep
         // showing a bill that no longer exists.
         ->and($response->json('results.0.merged_into_uuid'))->toBe($first);
