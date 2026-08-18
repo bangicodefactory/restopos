@@ -184,6 +184,7 @@ features:
   RST-055: { status: shipped, surface: user, manual: todo }
   RST-056: { status: shipped, surface: user, manual: todo }
   REG-372: { status: shipped, surface: user, manual: register/orders.md#when-the-server-disagrees-with-your-till }
+  RST-057: { status: shipped, surface: user, manual: register/orders.md#moving-an-order-to-a-table }
   RST-058: { status: shipped, surface: user, manual: register/orders.md#two-people-opening-the-same-table }
   RST-059: { status: shipped, surface: user, manual: todo }
 
@@ -198,6 +199,8 @@ features:
   RST-111: { status: shipped, surface: user, manual: register/payments.md#splitting-a-bill }
   RST-032: { status: shipped, surface: user, manual: register/floor-plan.md#what-you-cannot-delete }
   RST-039: { status: shipped, surface: user, manual: register/floor-plan.md#what-you-cannot-delete }
+  RST-140: { status: shipped, surface: user, manual: register/orders.md#what-an-order-is-called }
+  RST-141: { status: shipped, surface: user, manual: register/orders.md#what-an-order-is-called }
   RST-072: { status: shipped, surface: user, manual: register/orders.md#guests }
   RST-073: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#where-the-food-is-going }
   RST-074: { status: shipped, surface: user, manual: todo }

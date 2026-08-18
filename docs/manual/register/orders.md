@@ -28,6 +28,9 @@ features:
   - RST-144
   - RST-058
   - REG-372
+  - RST-057
+  - RST-140
+  - RST-141
 ---
 
 # Taking orders
@@ -161,3 +164,31 @@ manager can see it happened and undo it if the two really were meant to be separ
 
 You will not usually notice this. It matters most on a busy pass, where the same table gets picked up
 twice within a few seconds.
+
+## What an order is called
+
+Every order carries a name, and it is the same name everywhere — the order list, the receipt, the
+kitchen ticket and any other till.
+
+| The order is | Called |
+| --- | --- |
+| on table 5 | **T 5** |
+| on two tables pushed together | **T 3 & 4** |
+| a counter sale | **Direct Sale** |
+
+Type your own name at any point — a customer's name, "birthday party" — and it sticks. Moving the
+order between tables will not overwrite it. Clear it and the automatic name comes back.
+
+**Collection and takeaway orders must be named.** They have no table number to be called by, so the
+till asks before the order goes to the kitchen — while the customer is still in front of you.
+
+## Moving an order to a table
+
+From the order list, pick **Move to…** on an open order and choose a table.
+
+- Choosing a **free** table moves the order there.
+- Choosing a table that already has a bill **merges** the two.
+
+You do not have to decide which of those you are doing: it follows from the table you pick. This is
+the way to seat an order that is not on a table yet — a counter sale the customer decides to eat in —
+which the floor plan cannot help with, because there is nothing there to drag.

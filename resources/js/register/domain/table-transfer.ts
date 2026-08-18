@@ -1,3 +1,4 @@
+import type { RestaurantTableRow } from '@domain/types';
 import { ApiError, browserOnline } from '@shared/sync';
 
 import { reloadAllOrders } from '../boot';
@@ -163,4 +164,53 @@ export async function unmergeOrder(mergeId: number): Promise<string> {
 
     await refreshAfterServerAction();
     return restoredUuid;
+}
+
+/** A place a floating order can be sent (RST-057). */
+export type TransferTarget = {
+    tableId: number;
+    label: string;
+    /** The draft already on that table, if any — sending there is a merge, not a move. */
+    occupiedByUuid: string | null;
+};
+
+/**
+ * Where an order can go, from the order list rather than the floor plan (RST-057).
+ *
+ * The only way to move an order was the arm-and-tap gesture on the floor plan, which cannot help
+ * with the case that needs it most: an order that is not on a table yet. A takeaway the customer
+ * decides to eat in, a bill started at the counter — both are floating, and the floor plan has
+ * nothing to arm.
+ *
+ * Free tables and occupied ones come back in one list, because the waiter's question is "where is
+ * this going" and not "am I about to transfer or merge". Which of the two it becomes is a
+ * consequence of the destination, and the caller reads `occupiedByUuid` to decide — the same rule
+ * the floor plan already applies on tap.
+ *
+ * The order's own table is excluded: sending a bill where it already is has no meaning, and offering
+ * it invites a self-transfer the server refuses.
+ */
+export function transferTargets(
+    tables: readonly RestaurantTableRow[],
+    drafts: readonly { uuid: string; restaurant_table_id: number | null }[],
+    sourceUuid: string,
+): TransferTarget[] {
+    const source = drafts.find((order) => order.uuid === sourceUuid) ?? null;
+
+    const occupant = new Map<number, string>();
+
+    for (const order of drafts) {
+        if (order.uuid === sourceUuid || order.restaurant_table_id === null) continue;
+        // First draft wins, matching the server's own "oldest bill survives" rule.
+        if (!occupant.has(order.restaurant_table_id)) occupant.set(order.restaurant_table_id, order.uuid);
+    }
+
+    return tables
+        .filter((table) => table.active && table.id !== source?.restaurant_table_id)
+        .sort((a, b) => Number(a.table_number) - Number(b.table_number))
+        .map((table) => ({
+            tableId: table.id,
+            label: `T ${table.table_number}`,
+            occupiedByUuid: occupant.get(table.id) ?? null,
+        }));
 }

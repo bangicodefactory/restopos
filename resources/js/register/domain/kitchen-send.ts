@@ -8,6 +8,7 @@ import {
     filterChangesByCategories,
     type PrepDelta,
 } from './kitchen-delta';
+import { needsOrderName } from './order-naming';
 import { adoptPrepSnapshot, fireCourse, markCoursePrepSent, markPrepSent } from './order-actions';
 import { print } from './printing';
 import { buildPrepTicket } from './receipt';
@@ -33,6 +34,8 @@ export type SendOutcome =
     | { status: 'outdated'; delta: PrepDelta }
     /** The preset wants a cover count and the order has none yet (RST-072). */
     | { status: 'needs_guests'; delta: PrepDelta }
+    /** The service mode has no table, so the order needs a name to be called by (RST-141). */
+    | { status: 'needs_name'; delta: PrepDelta }
     | { status: 'failed'; delta: PrepDelta; reason: string };
 
 type ServerDelta = {
@@ -133,6 +136,19 @@ export function needsGuestCount(orderUuid: string): boolean {
     return getCatalog().presets.find((preset) => preset.id === presetId)?.use_guest === true;
 }
 
+/** Does this order still owe a name? (RST-141) */
+export function needsOrderNameFor(orderUuid: string): boolean {
+    const order = useOrderStore.getState().orders[orderUuid];
+
+    if (!order) return false;
+
+    return needsOrderName({
+        hasTable: order.restaurant_table_id !== null,
+        hasPreset: order.pos_preset_id !== null,
+        name: order.order_name_manual ? order.floating_order_name : null,
+    });
+}
+
 export async function sendToKitchen(
     orderUuid: string,
     options: { courseIndex?: number | null; courseName?: string | null } = {},
@@ -147,6 +163,13 @@ export async function sendToKitchen(
     // complete path and its own copy of this check.
     if (needsGuestCount(orderUuid)) {
         return { status: 'needs_guests', delta };
+    }
+
+    // RST-141 — a preset with no table has no number to be called by. Without a name the pass has
+    // nothing to shout and every collection order that hour is "Direct Sale". Asked before the first
+    // send, which is the last moment the customer is still standing there.
+    if (needsOrderNameFor(orderUuid)) {
+        return { status: 'needs_name', delta };
     }
 
     const runtime = tryRuntime();
