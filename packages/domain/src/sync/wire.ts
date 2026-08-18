@@ -195,6 +195,15 @@ export type SyncWarning =
 /** Per-record result. A poisoned order must never block the rest of the queue. */
 export type SyncRecordResult = {
     uuid: Uuid;
+    /**
+     * The order this one was folded into, when the server reconciled a duplicate (RST-058).
+     *
+     * Present only with `status: 'superseded'` and `conflict.code = 'duplicate_table_order'`. The
+     * pushed uuid no longer exists server-side: two tills opened the same table and the older bill
+     * won, so the till has to move the waiter to the survivor rather than keep showing a bill that
+     * was merged away.
+     */
+    merged_into_uuid?: Uuid;
     status: SyncStatus;
     /** Opaque; echoed back as `base_rev` on the next push. */
     server_rev: string | null;

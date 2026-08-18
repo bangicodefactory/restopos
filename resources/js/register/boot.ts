@@ -28,11 +28,13 @@ import { mediaToWarm, warmMediaCache } from '@shared/media';
 import { createPersistence, loadOrdersFromDb } from './data/persistence';
 import { APP_VERSION, clearRuntime, configIdFromUrl, getRuntime, setRuntime, tryRuntime } from './data/runtime';
 import { remapPlaceholderCustomer } from './domain/customer-remap';
+import { conflictAction } from './data/conflict-reread';
+import { fetchOrderGraphs } from './data/order-lookup';
 import { applyServerAck, configureOrderActions, hydrateOrders, markSyncState } from './domain/order-actions';
 import { bindingsFromCatalog, createPrinterRouter } from './domain/printing';
 import { fetchCurrentSession, openSessionFromDb } from './domain/session-actions';
 import { useBootStore, useSyncStore } from './state/boot-store';
-import { unsyncedCount, useOrderStore } from './state/order-store';
+import { linesOf, unsyncedCount, useOrderStore } from './state/order-store';
 import { usePosSessionStore } from './state/session-store';
 
 /**
@@ -248,6 +250,46 @@ export async function hydrateLocal(): Promise<void> {
 // Sync results
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Pull one order's graph from the server and replace the local copy.
+ *
+ * Returns whether anything landed, so the caller can decide what a failure means — a re-read that
+ * silently did nothing and still marked the order synced would be the same lie as not re-reading.
+ */
+async function rereadOrder(orderUuid: string): Promise<boolean> {
+    const runtime = tryRuntime();
+    if (!runtime) return false;
+
+    try {
+        const graph = await fetchOrderGraphs(runtime.api, [orderUuid]);
+        if (graph.orders.length === 0) return false;
+
+        hydrateOrders(graph);
+
+        // `toClientRows` stamps a fetched order `synced`, on the reasoning that a fetched order is by
+        // definition synced. True of the server's content — and false the moment local work is still
+        // attached to it (review of #68).
+        //
+        // A line the waiter typed while this order was in conflict survives the hydrate, because
+        // nothing deletes rows the server did not mention. Left marked `synced`, it is never pushed:
+        // it sits on the screen looking rung up while the kitchen, the bill and every other till
+        // know nothing about it. Silent divergence, which is the failure mode this codebase treats
+        // as worse than an error.
+        //
+        // So the order goes back to dirty when anything on it has never been acknowledged, and the
+        // outbox takes it from there.
+        const unacked = linesOf(useOrderStore.getState(), orderUuid).some((line) => line.id === null);
+
+        if (unacked) markSyncState(orderUuid, 'local');
+
+        for (const order of graph.orders) runtime.persistence.persist(order.uuid);
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function applySyncResult(result: SyncRecordResult): void {
     const uuid = String(result.uuid);
     const sync = useSyncStore.getState();
@@ -303,9 +345,40 @@ function applySyncResult(result: SyncRecordResult): void {
         return;
     }
 
-    if (result.status === 'superseded') {
+    // REG-372 — act on the answer instead of just colouring the order red.
+    //
+    // The outbox has always told conflict, rejection and supersession apart, and the register did
+    // nothing with that beyond marking the row. The waiter carried on looking at a bill the server
+    // had already refused — worst of all on a table order, where the other till is looking at the
+    // version that won.
+    const action = conflictAction(result);
+
+    if (action.kind === 'adopt') {
+        // Two tills opened the same table and the server merged them (RST-058). The pushed uuid no
+        // longer exists server-side, so re-reading *it* would 404; the survivor is what to fetch.
         markSyncState(uuid, 'synced');
-        sync.pushNotice({ orderUuid: uuid, message: 'superseded' });
+        void rereadOrder(action.survivorUuid);
+
+        if (useOrderStore.getState().selectedOrderUuid === uuid) {
+            useOrderStore.getState().selectOrder(action.survivorUuid);
+        }
+
+        sync.pushNotice({ orderUuid: uuid, message: 'duplicate_table_order' });
+        sync.noteSync();
+
+        return;
+    }
+
+    if (action.kind === 'reread') {
+        // Nothing is wrong with the sale — the till is behind. Marked synced only once the server's
+        // copy has landed, so a failed re-read leaves the row visibly unresolved rather than
+        // pretending it agreed.
+        // No explicit `synced` here: the hydrate already stamps the fetched order, and claiming it
+        // over local work that has not been acknowledged is exactly the lie guarded against above.
+        void rereadOrder(uuid);
+
+        sync.pushNotice({ orderUuid: uuid, message: result.status === 'superseded' ? 'superseded' : 'conflict_reread' });
+
         return;
     }
 

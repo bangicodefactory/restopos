@@ -183,6 +183,7 @@ features:
   RST-054: { status: shipped, surface: user, manual: todo }
   RST-055: { status: shipped, surface: user, manual: todo }
   RST-056: { status: shipped, surface: user, manual: todo }
+  REG-372: { status: shipped, surface: user, manual: register/orders.md#when-the-server-disagrees-with-your-till }
   RST-058: { status: shipped, surface: user, manual: register/orders.md#two-people-opening-the-same-table }
   RST-059: { status: shipped, surface: user, manual: todo }
 

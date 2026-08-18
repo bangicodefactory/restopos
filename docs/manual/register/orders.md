@@ -27,6 +27,7 @@ features:
   - REG-175
   - RST-144
   - RST-058
+  - REG-372
 ---
 
 # Taking orders
@@ -132,6 +133,22 @@ nothing will override it.
 An order placed for a **later time slot** cannot be cancelled from the till. It is a booking the
 kitchen has not started, and cancelling it mid-service is nearly always a mistap on an order you did
 not mean to be looking at. Once the slot has passed it cancels like any other order.
+
+## When the server disagrees with your till
+
+Two tills can drift — one takes an order while the other is offline, or the same table gets picked up
+twice. When the server refuses or replaces something your till sent, the till now **fetches the
+server's version and shows you that**, rather than leaving you looking at a bill that has already
+been overruled.
+
+You may see the order change under you. That is the point: the version on screen is the one the
+kitchen and the other tills are working from.
+
+If an order was merged into another table's bill, the till switches you to the surviving bill so you
+are not editing something that no longer exists.
+
+A sale the server genuinely refuses is different — it stays flagged for a manager rather than being
+quietly replaced.
 
 ## Two people opening the same table
 
