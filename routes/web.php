@@ -10,7 +10,9 @@ use App\Http\Controllers\Backoffice\EmployeeController;
 use App\Http\Controllers\Backoffice\FloorController;
 use App\Http\Controllers\Backoffice\OrderController;
 use App\Http\Controllers\Backoffice\PaymentMethodController;
+use App\Http\Controllers\Backoffice\PosBillController;
 use App\Http\Controllers\Backoffice\PosConfigController;
+use App\Http\Controllers\Backoffice\PosNoteController;
 use App\Http\Controllers\Backoffice\PrepDisplayController;
 use App\Http\Controllers\Backoffice\PricelistController;
 use App\Http\Controllers\Backoffice\PrinterController;
@@ -101,6 +103,18 @@ Route::middleware(['auth'])->group(function (): void {
     Route::get('reports/sales-details', [ReportController::class, 'salesDetails'])->name('reports.sales-details');
     Route::get('reports/session', [ReportController::class, 'sessionReport'])->name('reports.session');
     Route::get('reports/order-analytics', [ReportController::class, 'orderAnalytics'])->name('reports.order-analytics');
+
+    // BOF-111 / BOF-112 — denominations and predefined notes. Both are reference data the register
+    // reads on boot and neither had any way in.
+    Route::get('pos-bills', [PosBillController::class, 'index'])->name('pos-bills.index');
+    Route::post('pos-bills', [PosBillController::class, 'store'])->name('pos-bills.store');
+    Route::patch('pos-bills/{posBill}', [PosBillController::class, 'update'])->name('pos-bills.update');
+    Route::delete('pos-bills/{posBill}', [PosBillController::class, 'destroy'])->name('pos-bills.destroy');
+
+    Route::get('pos-notes', [PosNoteController::class, 'index'])->name('pos-notes.index');
+    Route::post('pos-notes', [PosNoteController::class, 'store'])->name('pos-notes.store');
+    Route::patch('pos-notes/{posNote}', [PosNoteController::class, 'update'])->name('pos-notes.update');
+    Route::delete('pos-notes/{posNote}', [PosNoteController::class, 'destroy'])->name('pos-notes.destroy');
 
     Route::get('printers', [PrinterController::class, 'index'])->name('printers.index');
     Route::post('printers', [PrinterController::class, 'store'])->name('printers.store');
