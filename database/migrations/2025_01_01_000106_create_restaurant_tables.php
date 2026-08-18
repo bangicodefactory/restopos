@@ -57,6 +57,11 @@ return new class extends Migration
             $table->unsignedSmallInteger('seats')->default(2);
             $table->string('color', 24)->nullable();
             // Physical link/merge: the child snaps to its parent and orders merge.
+            // RST-059 — a table held for a booking (BAN-523). A timestamp rather than a flag,
+            // because "held since 19:40" is what a waiter needs to decide whether the party is late,
+            // and a boolean throws that away. Null means free.
+            $table->timestamp('booked_at')->nullable();
+            $table->string('booked_note', 64)->nullable();
             $table->foreignId('parent_id')->nullable()->constrained('restaurant_tables')->nullOnDelete();
             $table->boolean('active')->default(true)->index();
             $table->timestamps();

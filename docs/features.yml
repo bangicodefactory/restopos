@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 155
+  manual_debt: 154
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -186,7 +186,9 @@ features:
   REG-372: { status: shipped, surface: user, manual: register/orders.md#when-the-server-disagrees-with-your-till }
   RST-057: { status: shipped, surface: user, manual: register/orders.md#moving-an-order-to-a-table }
   RST-058: { status: shipped, surface: user, manual: register/orders.md#two-people-opening-the-same-table }
-  RST-059: { status: shipped, surface: user, manual: todo }
+  REG-374: { status: shipped, surface: user, manual: register/orders.md#bills-from-another-till }
+  REG-373: { status: shipped, surface: user, manual: register/orders.md#bills-from-another-till }
+  RST-059: { status: shipped, surface: user, manual: register/floor-plan.md#holding-a-table-for-a-booking }
 
   # Guest count (RST-070 … RST-079) — user
   RST-070: { status: shipped, surface: user, manual: todo }

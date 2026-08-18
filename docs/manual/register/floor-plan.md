@@ -2,6 +2,7 @@
 title: Rearranging the room
 audience: manager
 features:
+  - RST-059
   - RST-030
   - RST-031
   - RST-033
@@ -99,3 +100,21 @@ ticket list, and nothing tells anyone it is still there. Settle or move the bill
 
 A free table on a busy floor deletes normally; the guard is about the table you are removing, not
 about the room being quiet.
+
+## Holding a table for a booking
+
+Press **Hold this table** on the tile. The table is marked as held on every till — a dashed outline,
+and how long it has been held — so nobody seats the 20:30 party's table at 20:00 because they were
+not standing next to the book.
+
+The tile shows how long, not just that it is held, which is what tells you whether a party is late.
+
+**A held table can still have a bill on it.** A party finishing at 20:00 on a table booked for 20:30
+is the ordinary case, so the till shows both at once rather than pretending one cancels the other.
+
+Press **Release the hold** to free it. That ends the reservation and nothing else — any bill on the
+table stays exactly where it is.
+
+Holding a table needs a connection, because it is a claim every other till has to see. A hold that
+cannot be taken right now can be taken in a moment; two tills holding the same table from their own
+copies is the thing this is here to prevent.

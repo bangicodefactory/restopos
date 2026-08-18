@@ -221,6 +221,7 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         note_ids: [],
         bill_ids: [],
         trusted_config_ids: [],
+        trusted_configs: [],
         iface_start_categ_id: null,
         iface_available_categ_ids: [],
         iface_print_auto: false,

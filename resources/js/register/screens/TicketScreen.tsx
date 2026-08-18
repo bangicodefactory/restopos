@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchOrderGraphs, lookupOrders, type OrderIndexRecord } from '../data/order-lookup';
 import { tryRuntime } from '../data/runtime';
+import { canOpenOrder, foreignOrder } from '../domain/foreign-order';
 import { useT } from '../i18n';
 import {
     clampRefundQuantity,
@@ -396,6 +397,21 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                                 )}
                             >
                                 <span className="min-w-0 flex-1">
+                                    {/* REG-374 — whose bill this is. A trusted peer's orders arrive
+                                        looking exactly like local ones, and a waiter editing one
+                                        should know they are on somebody else's till's sale. */}
+                                    {foreignOrder(row.order, catalog.config) !== null ? (
+                                        <span
+                                            className="mb-1 inline-block rounded-pos bg-slate-200 px-1 text-xs font-semibold text-slate-700"
+                                            data-testid="ticket-foreign"
+                                        >
+                                            {foreignOrder(row.order, catalog.config)?.registerName
+                                                ? t('reg.tickets.otherRegister', {
+                                                      name: foreignOrder(row.order, catalog.config)?.registerName ?? '',
+                                                  })
+                                                : t('reg.tickets.unknownRegister')}
+                                        </span>
+                                    ) : null}
                                     <span className="block truncate font-semibold">
                                         {row.order.name ?? row.order.floating_order_name ?? row.order.receipt_number}
                                     </span>
@@ -490,8 +506,31 @@ export function TicketScreen({ onOpenOrder }: { onOpenOrder: (uuid: string) => v
                             </Button>
                         ) : null}
 
+                        {/* REG-373 — a peer on another currency. The amounts on this row are in a
+                            unit this till does not use, so opening it would offer local tenders
+                            against foreign figures and balance to a number that was never the price.
+                            Nothing downstream can catch that: the arithmetic is all internally
+                            consistent. Said out loud rather than a button that does nothing. */}
+                        {!canOpenOrder(detail, catalog.config) ? (
+                            <p
+                                className="mb-2 rounded-pos bg-warn-soft p-2 text-sm font-semibold text-warn-fg"
+                                data-testid="ticket-foreign-blocked"
+                            >
+                                {foreignOrder(detail, catalog.config)?.registerName
+                                    ? t('reg.tickets.otherCurrency', {
+                                          name: foreignOrder(detail, catalog.config)?.registerName ?? '',
+                                      })
+                                    : t('reg.tickets.unknownRegister')}
+                            </p>
+                        ) : null}
+
                         <div className="grid grid-cols-2 gap-2">
-                            <Button variant="secondary" onClick={() => onOpenOrder(detail.uuid)}>
+                            <Button
+                                variant="secondary"
+                                disabled={!canOpenOrder(detail, catalog.config)}
+                                data-testid="ticket-open"
+                                onClick={() => onOpenOrder(detail.uuid)}
+                            >
                                 {t('reg.tickets.openOrder')}
                             </Button>
                             <Button

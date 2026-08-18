@@ -108,6 +108,16 @@ export function toCatalogRow(response: Record<string, unknown>, previous?: Resta
         height: Number(response.height ?? 0),
         color: (response.color as string | null) ?? null,
         active: response.active === undefined ? (previous?.active ?? true) : Boolean(response.active),
+        // RST-059 — the hold. Listed explicitly like everything else here: this function builds a
+        // fresh object, so a field it does not name is a field the catalog loses. Absent from the
+        // response means "unchanged", not "released" — the geometry endpoints answer with the whole
+        // row, but nothing guarantees a future one will.
+        booked_at: response.booked_at === undefined
+            ? (previous?.booked_at ?? null)
+            : ((response.booked_at as string | null) ?? null),
+        booked_note: response.booked_note === undefined
+            ? (previous?.booked_note ?? null)
+            : ((response.booked_note as string | null) ?? null),
     };
 }
 

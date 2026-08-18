@@ -561,6 +561,15 @@ export type PosConfigRow = {
     note_ids: number[];
     bill_ids: number[];
     trusted_config_ids: number[];
+    /**
+     * The trusted peers themselves (REG-373, BAN-523).
+     *
+     * `trusted_config_ids` says which registers this one may see orders from and nothing more. The
+     * delta hands over their drafts, so a peer's order arrives looking exactly like a local one —
+     * and without the peer's currency there is no way to tell that its amounts are in a different
+     * unit. Carries the name too, which is what the ticket screen shows on the badge.
+     */
+    trusted_configs: { id: number; name: string; currency_id: number }[];
 
     iface_start_categ_id: number | null;
     iface_available_categ_ids: number[];
@@ -630,6 +639,15 @@ export type RestaurantFloorRow = {
 };
 
 export type RestaurantTableRow = {
+    /**
+     * Held for a booking (RST-059), or null when the table is free.
+     *
+     * A timestamp rather than a flag: "held since 19:40" is what decides whether a party is late,
+     * and a boolean throws that away.
+     */
+    booked_at?: Iso | null;
+    /** Who it is held for — a name off the book, not a customer record. */
+    booked_note?: string | null;
     id: number;
     floor_id: number;
     /** Merged tables resolve to their parent for ordering purposes. */

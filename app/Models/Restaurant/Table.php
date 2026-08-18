@@ -58,6 +58,8 @@ class Table extends Model implements PosLoadable
         'color',
         'parent_id',
         'active',
+        'booked_at',
+        'booked_note',
     ];
 
     protected function casts(): array
@@ -71,6 +73,7 @@ class Table extends Model implements PosLoadable
             'height' => 'decimal:2',
             'seats' => 'integer',
             'active' => 'boolean',
+            'booked_at' => 'datetime',
         ];
     }
 

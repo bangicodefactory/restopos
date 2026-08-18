@@ -482,6 +482,26 @@ final readonly class BootstrapService
         $row['note_ids'] = $config->notes()->pluck('pos_notes.id')->all();
         $row['bill_ids'] = $config->bills()->pluck('pos_bills.id')->all();
         $row['trusted_config_ids'] = $config->trustedConfigs()->pluck('pos_configs.id')->all();
+
+        // REG-373 — who those peers actually are (BAN-523).
+        //
+        // The ids alone let the register list a trusted peer's orders and told it nothing about
+        // them. `orderDelta()` hands over every draft on a trusted config, so an order taken on a
+        // register in another currency arrives looking exactly like a local one — same columns, same
+        // amounts, no unit anywhere on the row. A cashier can open it and take payment against
+        // figures that mean something else.
+        //
+        // Name and currency, because those are the two questions the till has to answer: "whose is
+        // this?" for the badge, and "are these amounts mine?" for the guard.
+        $row['trusted_configs'] = $config->trustedConfigs()
+            ->get(['pos_configs.id', 'pos_configs.name', 'pos_configs.currency_id'])
+            ->map(static fn ($peer): array => [
+                'id' => (int) $peer->id,
+                'name' => (string) $peer->name,
+                'currency_id' => (int) $peer->currency_id,
+            ])
+            ->values()
+            ->all();
         $row['channel'] = $config->channelName();
 
         // The house discount cap (BAN-518). It lives in `config/pos.php`, not on `pos_configs`, so

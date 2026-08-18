@@ -125,6 +125,11 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::post('tables', [FloorController::class, 'storeTable'])->name('tables.store');
         Route::patch('tables/{table}', [FloorController::class, 'updateTable'])->name('tables.update');
         Route::delete('tables/{table}', [FloorController::class, 'destroyTable'])->name('tables.destroy');
+        // RST-059 — holding a table. Its own endpoint rather than a `parent_id`-style column on the
+        // generic table update, because booking is a service action every till takes, not a change
+        // to the room's layout that only a manager makes.
+        Route::post('tables/{table}/book', [FloorController::class, 'book'])->name('tables.book');
+        Route::post('tables/{table}/unbook', [FloorController::class, 'unbook'])->name('tables.unbook');
 
         Route::post('tables/{table}/resolve-duplicates', [TableOrderController::class, 'resolveTable'])->name('tables.resolve');
         Route::post('orders/{order}/transfer', [TableOrderController::class, 'transfer'])->name('orders.transfer');
