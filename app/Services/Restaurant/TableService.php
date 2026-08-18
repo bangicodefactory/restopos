@@ -286,6 +286,20 @@ final readonly class TableService
      * The actual move. Returns the `pos_order_merges` id so the caller can
      * offer an undo.
      */
+    /**
+     * Fold one draft into another, for a caller that already knows both (RST-058).
+     *
+     * `resolveDuplicateTableOrders()` finds the duplicates itself by looking at a table, which is
+     * the right shape for the repair endpoint. Ingest is the other shape: it is *holding* the second
+     * order and has deliberately kept it off the table so the unique index cannot fire, so there is
+     * nothing on the table to find. Named rather than exposing `mergeInto`, so the invariant stays
+     * "the caller has established these two belong together".
+     */
+    public function mergeDuplicateInto(Order $source, Order $target, ?int $employeeId = null): int
+    {
+        return $this->mergeInto($source, $target, MergeType::OrderMerge, $employeeId);
+    }
+
     private function mergeInto(Order $source, Order $target, MergeType $type, ?int $employeeId): int
     {
         /** @var list<OrderCourse> $sourceCourses */

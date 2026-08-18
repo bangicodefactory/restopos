@@ -27,9 +27,11 @@ use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosSession;
 use App\Models\Restaurant\OrderCourse;
+use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Audit\AuditRecorder;
 use App\Services\Audit\OrderEditRecorder;
 use App\Services\Kitchen\PreparationService;
+use App\Services\Restaurant\TableService;
 use App\Support\Audit\AuditEvent;
 use App\Support\Money\Decimal;
 use App\Support\Pos\SettledOrder;
@@ -84,6 +86,7 @@ final readonly class OrderSyncService
         private LoggerInterface $logger,
         private Config $config,
         private CustomerAccountLedger $accounts,
+        private TableService $tables,
     ) {}
 
     /**
@@ -746,7 +749,30 @@ final readonly class OrderSyncService
         $isNew = $order === null;
         $previousState = $order === null ? null : $this->stateValue($order->state);
 
+        // RST-058 — two waiters opening the same table.
+        //
+        // `pos_orders_draft_table_unique` refuses the second insert, and the whole order was
+        // rejected: `ingest_failed` carrying a raw SQLSTATE 23000 message. That is not a cosmetic
+        // failure — `ErrorEnvelope` classifies 23xxx as *permanent*, so the outbox quarantines the
+        // push and never retries it. The second waiter's order, lines and all, is simply gone, and
+        // the only trace is a SQL string in a log.
+        //
+        // So the collision is anticipated instead of hit: the incoming order is created **detached**
+        // from the table, its children land normally, and it is merged into the sitting draft once
+        // everything has arrived. Merged rather than adopted, because the client is entitled to see
+        // the uuid it pushed resolve — and `mergeInto` writes the `pos_order_merges` row, so the
+        // reconciliation is reversible like any other merge.
+        $mergeIntoId = null;
+
         if ($order === null) {
+            $mergeIntoId = $this->sittingDraftOnTable($attributes);
+
+            if ($mergeIntoId !== null) {
+                // Detached at insert; the table comes back with the merge.
+                $attributes['table_id'] = null;
+                $attributes['restaurant_table_id'] = null;
+            }
+
             $order = $this->createOrder($config, $device, $session, $uuid, $attributes, $employeeId);
         } else {
             // 3 — supersession: the server already settled this order, so a
@@ -937,7 +963,32 @@ final readonly class OrderSyncService
         // on `pos_payment_id`, which matters because this is the retry path.
         $this->accounts->syncOrder($order);
 
-        $this->broadcast($config, $device, $order, $previousState, $isNew);
+        // The reconciliation itself, after every child command has landed so the loser's lines,
+        // courses and prep snapshot all travel with it (RST-058).
+        $mergedInto = null;
+
+        if ($mergeIntoId !== null) {
+            $mergedInto = $this->reconcileDuplicateTableOrder($order, $mergeIntoId, $employeeId);
+        }
+
+        $this->broadcast($config, $device, $mergedInto ?? $order, $previousState, $isNew);
+
+        if ($mergedInto !== null) {
+            // The pushed uuid resolved, and the answer names the order that survived so the losing
+            // till can switch to it rather than keep showing a bill that no longer exists.
+            return [
+                'uuid' => $uuid,
+                'status' => 'merged',
+                'merged_into_uuid' => (string) $mergedInto->uuid,
+                'server_rev' => $this->rev($mergedInto),
+                'order' => $this->orderSummary($mergedInto),
+                'lines' => $lineResults,
+                'payments' => $paymentResults,
+                'courses' => $courseResults,
+                'warnings' => $warnings,
+                'totals' => $this->recompute($config, $mergedInto)->totals->toArray(),
+            ];
+        }
 
         return [
             'uuid' => $uuid,
@@ -950,6 +1001,59 @@ final readonly class OrderSyncService
             'warnings' => $warnings,
             'totals' => $computed->totals->toArray(),
         ];
+    }
+
+    /**
+     * The draft already sitting on the table this order wants, if there is one (RST-058).
+     *
+     * Locked, because the whole point is a race: two tills pushing within the same second must not
+     * both read "no draft here" and both insert. The lock is on the table row, which is what the
+     * resolver already locks, so the two paths queue behind the same thing.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function sittingDraftOnTable(array $attributes): ?int
+    {
+        $tableId = $attributes['table_id'] ?? $attributes['restaurant_table_id'] ?? null;
+
+        if ($tableId === null) {
+            return null;
+        }
+
+        RestaurantTable::query()->whereKey((int) $tableId)->lockForUpdate()->first();
+
+        $existing = Order::query()
+            ->where('restaurant_table_id', (int) $tableId)
+            ->where('state', OrderState::Draft->value)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->first();
+
+        return $existing === null ? null : (int) $existing->getKey();
+    }
+
+    /**
+     * Fold a second draft for one table into the one already there (RST-058).
+     *
+     * The survivor is the **older** order, matching `resolveDuplicateTableOrders`: the bill the
+     * table has been building all evening wins, and the one that arrived second is the addition.
+     * Reversing that would make the earlier waiter's work the thing that gets merged away.
+     */
+    private function reconcileDuplicateTableOrder(Order $incoming, int $existingId, ?int $employeeId): ?Order
+    {
+        $existing = Order::query()->whereKey($existingId)->lockForUpdate()->first();
+
+        // Settled or gone while this push was in flight: the table is free, so the incoming order
+        // simply takes it rather than merging into a bill nobody is adding to any more.
+        if ($existing === null || $this->stateValue($existing->state) !== OrderState::Draft->value) {
+            $incoming->forceFill(['restaurant_table_id' => $existing?->restaurant_table_id])->save();
+
+            return null;
+        }
+
+        $this->tables->mergeDuplicateInto($incoming, $existing, $employeeId);
+
+        return $existing->refresh();
     }
 
     // ------------------------------------------------------------ order rows

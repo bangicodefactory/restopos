@@ -26,6 +26,7 @@ features:
   - RST-072
   - REG-175
   - RST-144
+  - RST-058
 ---
 
 # Taking orders
@@ -131,3 +132,15 @@ nothing will override it.
 An order placed for a **later time slot** cannot be cancelled from the till. It is a booking the
 kitchen has not started, and cancelling it mid-service is nearly always a mistap on an order you did
 not mean to be looking at. Once the slot has passed it cancels like any other order.
+
+## Two people opening the same table
+
+If two waiters start an order for the same table at once, the till does not pick one and discard the
+other. Both sets of items end up on **one bill** — the one that was opened first — and the second
+device switches to it.
+
+Nothing is lost and nothing is duplicated. The reconciliation is recorded like any other merge, so a
+manager can see it happened and undo it if the two really were meant to be separate bills.
+
+You will not usually notice this. It matters most on a busy pass, where the same table gets picked up
+twice within a few seconds.
