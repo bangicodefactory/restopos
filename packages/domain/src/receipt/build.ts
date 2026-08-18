@@ -71,7 +71,19 @@ export function buildReceiptDoc(order: ReceiptOrderView, config: ReceiptConfigVi
     b.rule('=');
 
     // ── lines ────────────────────────────────────────────────────────────────
+    //
+    // RST-088 — course headings. Only when the bill actually spans more than one course: a single
+    // course means the heading carries no information, and printing it above every line on an
+    // ordinary counter sale is how a receipt gets longer without getting clearer.
+    const billCourses = new Set(order.lines.map((line) => line.courseName).filter(Boolean));
+    let printedCourse: string | null | undefined;
+
     for (const line of order.lines) {
+        if (billCourses.size > 1 && line.courseName && line.courseName !== printedCourse) {
+            printedCourse = line.courseName;
+            b.text(`${l.course}: ${line.courseName}`, { bold: true });
+        }
+
         b.row(lineLabel(line.name, line.isComboChild === true), money(line.lineTotal));
 
         const qty = formatQuantity(line.quantity);
@@ -390,8 +402,21 @@ export function buildPrepTicketDoc(ticket: PrepTicketView, config: ReceiptConfig
     if (ticket.courseName) b.text(`${l.course}: ${ticket.courseName}`, { bold: true });
     b.rule('=');
 
+    // The same rule as the bill: a heading per course, and only where the ticket spans several.
+    // On a kitchen ticket this is what tells the pass which lines to hold back (RST-088).
+    const ticketCourses = new Set(
+        ticket.lines.filter((line) => line.change !== 'unchanged').map((line) => line.courseName).filter(Boolean),
+    );
+    let printedTicketCourse: string | null | undefined;
+
     for (const line of ticket.lines) {
         if (line.change === 'unchanged') continue;
+
+        if (ticketCourses.size > 1 && line.courseName && line.courseName !== printedTicketCourse) {
+            printedTicketCourse = line.courseName;
+            b.text(`-- ${line.courseName} --`, { bold: true });
+        }
+
         const marker =
             line.change === 'cancelled'
                 ? '** '

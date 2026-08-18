@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 164
+  manual_debt: 157
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -206,14 +206,16 @@ features:
   RST-074: { status: shipped, surface: user, manual: todo }
 
   # Courses (RST-080 … RST-099) — user
-  RST-080: { status: shipped, surface: user, manual: todo }
-  RST-081: { status: shipped, surface: user, manual: todo }
-  RST-082: { status: shipped, surface: user, manual: todo }
-  RST-083: { status: shipped, surface: user, manual: todo }
-  RST-084: { status: shipped, surface: user, manual: todo }
-  RST-087: { status: shipped, surface: user, manual: todo }
+  RST-080: { status: shipped, surface: user, manual: register/courses.md#courses }
+  RST-081: { status: shipped, surface: user, manual: register/courses.md#start-using-courses-on-a-table }
+  RST-082: { status: shipped, surface: user, manual: register/courses.md#move-a-line-to-a-different-course }
+  RST-083: { status: shipped, surface: user, manual: register/courses.md#courses }
+  RST-084: { status: shipped, surface: user, manual: register/courses.md#fire-a-course }
+  RST-085: { status: shipped, surface: user, manual: register/courses.md#sending-the-whole-order }
+  RST-088: { status: shipped, surface: user, manual: register/courses.md#what-prints }
+  RST-087: { status: shipped, surface: user, manual: register/courses.md#tidying-up }
   RST-089: { status: shipped, surface: user, manual: todo }
-  RST-090: { status: shipped, surface: user, manual: todo }
+  RST-090: { status: shipped, surface: user, manual: register/courses.md#fire-a-course }
 
   # Bill splitting & proforma (RST-100 … RST-119) — user
   RST-100: { status: shipped, surface: user, manual: todo }
