@@ -42,6 +42,11 @@ Three things can stop you, and the till says which:
 
 - **It is still applied to products.** Take it off them first. Otherwise those products would quietly
   become untaxed, which nobody would notice until a return was filed.
+- **A fiscal position maps to or from it.** Removing it would leave that position silently no longer
+  remapping — a customer entitled to an exemption would be charged the full rate on a sale that looks
+  perfectly correct. Take it out of the position first.
+- **It is part of a compound tax.** The parent would carry on computing, quietly short by whatever
+  the removed part contributed.
 - **It is on a closed session's report.** Then it can never be removed, by anyone. The report's tax
   figures are frozen at close, and deleting the tax would leave a report that cannot explain its own
   total.

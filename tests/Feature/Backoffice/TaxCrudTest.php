@@ -227,3 +227,49 @@ it('refuses a user who may not configure the register', function (): void {
     expect(Tax::query()->where('name', 'Sneaky')->exists())->toBeFalse()
         ->and(Tax::query()->whereKey($tax->getKey())->exists())->toBeTrue();
 });
+
+it('refuses to remove a tax a fiscal position maps to or from', function (): void {
+    // The database does **not** stop this one: `fiscal_position_taxes` cascades. Probed before the
+    // guard — the mapping went from one row to none and the delete reported success, so an
+    // "Export 0 %" position quietly stopped remapping and the next exempt customer paid full VAT
+    // on a sale that balanced perfectly (review of #81).
+    addTax((int) $this->group->getKey(), ['name' => 'Export 0%', 'amount' => '0'])->assertRedirect();
+    $exempt = Tax::query()->where('name', 'Export 0%')->firstOrFail();
+
+    $position = DB::table('fiscal_positions')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Export',
+        'auto_apply' => false, 'vat_required' => false, 'sequence' => 10, 'active' => true,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    DB::table('fiscal_position_taxes')->insert([
+        'fiscal_position_id' => $position,
+        'tax_src_id' => $this->fx->tax->getKey(),
+        'tax_dest_id' => $exempt->getKey(),
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    test()->deleteJson(route('taxes.destroy', $exempt->getKey()))->assertStatus(422);
+
+    expect(Tax::query()->whereKey($exempt->getKey())->exists())->toBeTrue()
+        ->and(DB::table('fiscal_position_taxes')->count())->toBe(1);
+});
+
+it('refuses to remove a tax that is part of a compound one', function (): void {
+    // `tax_children` cascades too: the parent would keep computing, quietly short by whatever the
+    // removed component contributed.
+    addTax((int) $this->group->getKey(), ['name' => 'City surcharge'])->assertRedirect();
+    $child = Tax::query()->where('name', 'City surcharge')->firstOrFail();
+
+    DB::table('tax_children')->insert([
+        'parent_tax_id' => $this->fx->tax->getKey(),
+        'child_tax_id' => $child->getKey(),
+        'sequence' => 10,
+    ]);
+
+    test()->deleteJson(route('taxes.destroy', $child->getKey()))->assertStatus(422);
+
+    expect(Tax::query()->whereKey($child->getKey())->exists())->toBeTrue()
+        ->and(DB::table('tax_children')->count())->toBe(1);
+});

@@ -121,6 +121,41 @@ final class TaxController extends Controller
             ]);
         }
 
+        // The two that the database will **not** stop, and so the only two this check exists for
+        // (review of #81).
+        //
+        // `fiscal_position_taxes` and `tax_children` both `cascadeOnDelete`. Deleting a tax used in
+        // a fiscal position quietly deletes the mapping: an "Export 0 %" position stops remapping,
+        // the customer entitled to the exemption is charged standard VAT, the sale balances, and
+        // nothing anywhere says the rule is gone. Probed — the mapping went from 1 row to 0 and the
+        // delete reported success.
+        //
+        // A group tax loses a component the same way, and its total silently drops by that
+        // component's share.
+        $mapped = $this->connection->table('fiscal_position_taxes')
+            ->where('tax_src_id', $tax->getKey())
+            ->orWhere('tax_dest_id', $tax->getKey())
+            ->count();
+
+        if ($mapped > 0) {
+            throw ValidationException::withMessages([
+                'tax' => 'This tax is used by '.$mapped.' fiscal position mapping(s). Removing it would'
+                    .' silently stop those positions remapping. Take it out of them first, or deactivate it.',
+            ]);
+        }
+
+        $composed = $this->connection->table('tax_children')
+            ->where('parent_tax_id', $tax->getKey())
+            ->orWhere('child_tax_id', $tax->getKey())
+            ->count();
+
+        if ($composed > 0) {
+            throw ValidationException::withMessages([
+                'tax' => 'This tax is part of '.$composed.' compound tax(es). Removing it would change what'
+                    .' they compute. Take it out of them first, or deactivate it.',
+            ]);
+        }
+
         $tax->delete();
 
         return back()->with('success', 'Tax removed.');
