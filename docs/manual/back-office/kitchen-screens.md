@@ -21,6 +21,11 @@ minimum a board needs to be usable — one to see work arrive, one to claim it, 
 Change them once the screen exists; the order of the columns is the order work moves through, so it
 is worth setting up the way your kitchen actually runs.
 
+**A new screen receives nothing until you point a register at it.** That link is made on the
+register's own settings page, not here — one venue may want the cold larder fed by the restaurant
+till and not the bar. If you have added a screen and no tickets are arriving, this is almost always
+why.
+
 The screen gets its own address when you create it. That address is what you open on the physical
 display, and it is issued by the system rather than chosen — nobody can guess another screen's.
 

@@ -240,3 +240,28 @@ it('refuses a user who may not configure the kitchen', function (): void {
     expect(PrepDisplay::query()->where('name', 'Sneaky')->exists())->toBeFalse()
         ->and(PrepDisplay::query()->whereKey($display->getKey())->exists())->toBeTrue();
 });
+
+it('starts linked to no register, so a new board receives nothing until it is', function (): void {
+    // `fanOutToDisplays` joins `pos_config_prep_display`: a board with no row there is sent nothing.
+    //
+    // That is the right default and worth pinning, because the tempting "fix" is to link a new board
+    // to every register — which would send every ticket in the venue to a cold-larder screen that
+    // was meant to receive salads. The link is a decision, and it is made on the *register's*
+    // settings page (review of #80).
+    addDisplay()->assertRedirect();
+    $display = PrepDisplay::query()->where('name', 'Cold larder')->firstOrFail();
+
+    expect(DB::table('pos_config_prep_display')->where('prep_display_id', $display->getKey())->count())
+        ->toBe(0);
+});
+
+it('receives tickets once a register is linked to it', function (): void {
+    // The other half of the same rule: the link is all that is missing, not anything about the board.
+    addDisplay()->assertRedirect();
+    $display = PrepDisplay::query()->where('name', 'Cold larder')->firstOrFail();
+
+    $this->fx->config->prepDisplays()->syncWithoutDetaching([$display->getKey()]);
+
+    expect(DB::table('pos_config_prep_display')->where('prep_display_id', $display->getKey())->count())
+        ->toBe(1);
+});
