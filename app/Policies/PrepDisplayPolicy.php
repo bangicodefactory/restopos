@@ -22,9 +22,26 @@ final class PrepDisplayPolicy
         return $this->sameCompany($user, $display->company_id) && $this->userCan($user, 'pos.kitchen.view');
     }
 
+    /** Adding a screen is configuration, the same right as changing one (BAN-435). */
+    public function create(User $user): bool
+    {
+        return $this->userCan($user, 'pos.kitchen.manage');
+    }
+
     public function update(User $user, PrepDisplay $display): bool
     {
         return $this->view($user, $display) && $this->userCan($user, 'pos.kitchen.manage');
+    }
+
+    /**
+     * Removing a screen takes a station out of the kitchen.
+     *
+     * Whether the board is *clear* is the controller's question, not this one: refusing here would
+     * tell a manager they are not allowed to do something they are merely too early to do.
+     */
+    public function delete(User $user, PrepDisplay $display): bool
+    {
+        return $this->update($user, $display);
     }
 
     /** Recall hides a mistake, so it is manager-gated everywhere (KDS-009). */

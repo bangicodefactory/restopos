@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 153
+  manual_debt: 152
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -355,7 +355,7 @@ features:
   BOF-114: { status: shipped, surface: user, manual: back-office/printers.md#kitchen-printers }
   BOF-111: { status: shipped, surface: user, manual: back-office/denominations-and-notes.md#coin-and-note-denominations }
   BOF-112: { status: shipped, surface: user, manual: back-office/denominations-and-notes.md#predefined-kitchen-notes }
-  BOF-115: { status: shipped, surface: user, manual: todo }
+  BOF-115: { status: shipped, surface: user, manual: back-office/kitchen-screens.md#kitchen-screens }
   BOF-116: { status: shipped, surface: user, manual: back-office/floors.md#dining-rooms }
   BOF-119: { status: shipped, surface: user, manual: todo }
   BOF-120: { status: shipped, surface: user, manual: todo }

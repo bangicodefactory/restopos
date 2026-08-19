@@ -124,7 +124,9 @@ Route::middleware(['auth'])->group(function (): void {
 
     Route::get('prep-displays', [PrepDisplayController::class, 'index'])->name('prep-displays.index');
     Route::get('prep-displays/{prepDisplay}/edit', [PrepDisplayController::class, 'edit'])->name('prep-displays.edit');
+    Route::post('prep-displays', [PrepDisplayController::class, 'store'])->name('prep-displays.store');
     Route::patch('prep-displays/{prepDisplay}', [PrepDisplayController::class, 'update'])->name('prep-displays.update');
+    Route::delete('prep-displays/{prepDisplay}', [PrepDisplayController::class, 'destroy'])->name('prep-displays.destroy');
 
     Route::get('self-order/{config}/settings', [SelfOrderSettingsController::class, 'edit'])->name('self-order.settings');
     Route::patch('self-order/{config}/settings', [SelfOrderSettingsController::class, 'update'])->name('self-order.settings.update');
