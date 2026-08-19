@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
+use App\Enums\PrepDisplayLayout;
+use App\Enums\PrepOrderState;
 use App\Enums\PrepStageType;
 use App\Http\Controllers\Controller;
 use App\Models\Catalog\PosCategory;
 use App\Models\Kitchen\PrepDisplay;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -62,6 +67,122 @@ final class PrepDisplayController extends Controller
                 ->pluck('pos_category_id')->map(static fn (mixed $v): int => (int) $v)->all(),
             'categories' => PosCategory::query()->orderBy('sequence')->get(['id', 'name', 'parent_id'])->all(),
         ]);
+    }
+
+    /**
+     * `POST /prep-displays` — add a kitchen screen (BOF-115).
+     *
+     * A venue opening a second station — a cold larder, a dessert pass — could not say so: the
+     * displays were whatever the seeder produced.
+     *
+     * A new display is given the default stage set rather than none. A board with no stages shows
+     * tickets that cannot be advanced: the state machine is the stage list (KDS-008), so an empty
+     * one is a screen the kitchen can read and not use, which looks like a broken screen rather than
+     * an unfinished setup.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        Gate::authorize('create', PrepDisplay::class);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:64'],
+            'layout' => ['sometimes', Rule::enum(PrepDisplayLayout::class)],
+            'average_prep_minutes' => ['sometimes', 'integer', 'min:1', 'max:600'],
+            'late_threshold_minutes' => ['sometimes', 'integer', 'min:1', 'max:600'],
+            'done_retention_minutes' => ['sometimes', 'integer', 'min:1', 'max:1440'],
+            'show_all_categories' => ['sometimes', 'boolean'],
+            'auto_advance_on_all_ready' => ['sometimes', 'boolean'],
+            'sound_on_new_order' => ['sometimes', 'boolean'],
+            'active' => ['sometimes', 'boolean'],
+        ]);
+
+        $companyId = ActingCompany::id();
+
+        if (! is_int($companyId)) {
+            throw ValidationException::withMessages(['name' => 'Choose a company before adding a display.']);
+        }
+
+        $this->connection->transaction(function () use ($data, $companyId): void {
+            /** @var PrepDisplay $display */
+            $display = PrepDisplay::query()->create([
+                ...$data,
+                'company_id' => $companyId,
+                'uuid' => (string) Str::uuid(),
+                // The board's own channel and screen URL. Server-minted, never client-supplied — the
+                // same rule the table QR token follows.
+                'access_token' => Str::lower(Str::random(32)),
+            ]);
+
+            $this->seedDefaultStages($display);
+        });
+
+        return back()->with('success', 'Preparation display added.');
+    }
+
+    /**
+     * `DELETE /prep-displays/{prepDisplay}` — remove a kitchen screen (BOF-115).
+     *
+     * Refused while the board still holds work. `prep_orders.prep_display_id` is `cascadeOnDelete`,
+     * so deleting the display takes every ticket on it with it — and the *order* those tickets came
+     * from still says the kitchen was told. Food that somebody is cooking stops existing on the only
+     * screen that shows it, and nothing anywhere says so.
+     *
+     * Served and cancelled tickets are history and do not block: they are on the board only because
+     * `done_retention_minutes` has not expired yet.
+     */
+    public function destroy(Request $request, PrepDisplay $prepDisplay): RedirectResponse
+    {
+        Gate::authorize('delete', $prepDisplay);
+
+        $live = $this->connection->table('prep_orders')
+            ->where('prep_display_id', $prepDisplay->getKey())
+            ->whereIn('state', [
+                PrepOrderState::Pending->value,
+                PrepOrderState::InProgress->value,
+                PrepOrderState::Ready->value,
+            ])
+            // Not `ActingCompany::scope()`d, and that is not an oversight: `prep_orders` carries no
+            // `company_id` at all — it is owned through `prep_display_id`, which is the very key this
+            // query is already filtered on, and the display itself was resolved through the scoped
+            // model and 404s when it is not ours. Adding the scope would put a `where company_id`
+            // on a table that has no such column: a 500 on every delete of a board with tickets.
+            ->count();
+
+        $count = $live;
+
+        if ($count > 0) {
+            throw ValidationException::withMessages([
+                'display' => 'This screen still has '.$count.' ticket(s) on it. Clear the board first.',
+            ]);
+        }
+
+        $prepDisplay->delete();
+
+        return back()->with('success', 'Preparation display removed.');
+    }
+
+    /**
+     * The stage set a new board starts with (KDS-008).
+     *
+     * Pending → in progress → ready is the minimum a kitchen screen needs to be usable at all: one
+     * column to see work arrive, one to claim it, one to call it away.
+     */
+    private function seedDefaultStages(PrepDisplay $display): void
+    {
+        $defaults = [
+            ['name' => 'To do', 'stage_type' => PrepStageType::Todo->value, 'sequence' => 1, 'is_default' => true],
+            ['name' => 'In progress', 'stage_type' => PrepStageType::InProgress->value, 'sequence' => 2, 'is_default' => false],
+            ['name' => 'Ready', 'stage_type' => PrepStageType::Ready->value, 'sequence' => 3, 'is_default' => false],
+        ];
+
+        foreach ($defaults as $stage) {
+            $this->connection->table('prep_stages')->insert([
+                ...$stage,
+                'prep_display_id' => $display->getKey(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
     }
 
     public function update(Request $request, PrepDisplay $prepDisplay): RedirectResponse
