@@ -29,6 +29,7 @@ use App\Policies\PosNotePolicy;
 use App\Policies\PrepDisplayPolicy;
 use App\Policies\PrinterPolicy;
 use App\Policies\SessionPolicy;
+use App\Policies\TaxPolicy;
 use App\Services\Payment\NullProvider;
 use App\Services\Payment\PaymentProvider;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -143,6 +144,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(Floor::class, FloorPolicy::class);
         Gate::policy(PosBill::class, PosBillPolicy::class);
         Gate::policy(PosNote::class, PosNotePolicy::class);
+        Gate::policy(Tax::class, TaxPolicy::class);
     }
 
     private function registerRateLimiters(): void

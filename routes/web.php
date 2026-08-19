@@ -76,7 +76,9 @@ Route::middleware(['auth'])->group(function (): void {
     Route::patch('pricelists/{pricelist}', [PricelistController::class, 'update'])->name('pricelists.update');
 
     Route::get('taxes', [TaxController::class, 'index'])->name('taxes.index');
+    Route::post('taxes', [TaxController::class, 'store'])->name('taxes.store');
     Route::patch('taxes/{tax}', [TaxController::class, 'update'])->name('taxes.update');
+    Route::delete('taxes/{tax}', [TaxController::class, 'destroy'])->name('taxes.destroy');
 
     Route::get('payment-methods', [PaymentMethodController::class, 'index'])->name('payment-methods.index');
     Route::patch('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'update'])->name('payment-methods.update');
