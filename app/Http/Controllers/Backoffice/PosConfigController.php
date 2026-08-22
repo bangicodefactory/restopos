@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\AuditSeverity;
 use App\Enums\DeviceType;
+use App\Enums\PaymentMethodType;
 use App\Enums\SpecialKind;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
@@ -21,10 +22,13 @@ use App\Models\Pricing\Pricelist;
 use App\Services\Audit\AuditRecorder;
 use App\Services\Device\DevicePairingService;
 use App\Support\Audit\AuditEvent;
+use App\Support\Tenancy\ActingCompany;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -41,6 +45,7 @@ final class PosConfigController extends Controller
     public function __construct(
         private readonly DevicePairingService $pairing,
         private readonly AuditRecorder $audit,
+        private readonly ConnectionInterface $connection,
     ) {}
 
     public function index(): Response
@@ -172,6 +177,17 @@ final class PosConfigController extends Controller
         // method to this register", "who granted this employee access to that till" and "who
         // attached a pricelist" are the config changes with the most reach, and they all live here.
         // A trail that records the checkbox next to them and not them is the wrong half.
+        // BOF-110 — a cash method belongs to exactly one register (BAN-424).
+        //
+        // Two tills sharing one cash method means two sessions reconciling against the same drawer:
+        // each computes its own expected cash from that method, so a float or a cash movement on one
+        // is expected in the other's count. Nobody sees it until a drawer is short, and then the
+        // report blames the cashier. Probed before this guard — the same method sat on two registers
+        // and nothing objected (review of #82).
+        if (array_key_exists('payment_method_ids', $data)) {
+            $this->assertCashMethodsUnshared($config, array_map(intval(...), (array) $data['payment_method_ids']));
+        }
+
         $pivotBefore = [];
 
         foreach ($pivots as $key => $relation) {
@@ -264,5 +280,49 @@ final class PosConfigController extends Controller
             $request->validated('name'),
             $request->user()?->getKey() === null ? null : (int) $request->user()->getKey(),
         ), 201);
+    }
+
+    /**
+     * Refuse any cash method that is already on a different register (BOF-110).
+     *
+     * Checked before the sync rather than after, so a refusal leaves the register exactly as it was
+     * — a half-applied set of payment methods is worse than none.
+     *
+     * @param  list<int>  $methodIds
+     */
+    private function assertCashMethodsUnshared(PosConfig $config, array $methodIds): void
+    {
+        if ($methodIds === []) {
+            return;
+        }
+
+        /** @var list<int> $cashIds */
+        $cashIds = PaymentMethod::query()
+            ->whereIn('id', $methodIds)
+            ->where('method_type', PaymentMethodType::Cash->value)
+            ->pluck('id')
+            ->map(static fn (mixed $v): int => (int) $v)
+            ->all();
+
+        if ($cashIds === []) {
+            return;
+        }
+
+        $clashes = $this->connection->table('pos_config_payment_method')
+            ->join('pos_configs', 'pos_configs.id', '=', 'pos_config_payment_method.pos_config_id')
+            ->whereIn('pos_config_payment_method.payment_method_id', $cashIds)
+            ->where('pos_config_payment_method.pos_config_id', '!=', $config->getKey());
+
+        ActingCompany::scope($clashes, 'pos_configs.company_id');
+
+        $taken = $clashes->pluck('pos_configs.name')->unique()->values()->all();
+
+        if ($taken !== []) {
+            throw ValidationException::withMessages([
+                // Named, so the manager knows which register to take it off rather than hunting.
+                'payment_method_ids' => 'A cash method may belong to one register only. Already in use on: '
+                    .implode(', ', $taken).'.',
+            ]);
+        }
     }
 }

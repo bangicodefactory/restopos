@@ -7,6 +7,7 @@ namespace Tests\Feature\Backoffice\PaymentMethodCrud;
 use App\Models\Identity\Permission;
 use App\Models\Identity\Role;
 use App\Models\Pos\PaymentMethod;
+use App\Models\Pos\PosConfig;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -223,4 +224,63 @@ it('refuses a user who may not configure the register', function (): void {
 
     expect(PaymentMethod::query()->where('name', 'Sneaky')->exists())->toBeFalse()
         ->and(PaymentMethod::query()->whereKey($method->getKey())->exists())->toBeTrue();
+});
+
+it('never lets one cash method sit on two registers', function (): void {
+    // BOF-110's second rule. Two tills sharing a cash method means two sessions reconciling against
+    // the same drawer: each computes its expected cash from that method, so a float or a movement on
+    // one is expected in the other's count. Nobody sees it until a drawer is short — and then the
+    // report blames the cashier. Probed before the guard: the same method sat on both and nothing
+    // objected (review of #82).
+    $second = PosConfig::query()->create([
+        ...$this->fx->config->replicate(['uuid', 'access_token'])->getAttributes(),
+        'uuid' => (string) Str::uuid(),
+        'name' => 'Second till',
+        'access_token' => Str::lower(Str::random(32)),
+    ]);
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$this->fx->cash->getKey()]);
+
+    test()->patch(route('pos-configs.update', $second->uuid), [
+        'payment_method_ids' => [$this->fx->cash->getKey()],
+    ])->assertSessionHasErrors('payment_method_ids');
+
+    expect(DB::table('pos_config_payment_method')
+        ->where('payment_method_id', $this->fx->cash->getKey())->count())->toBe(1);
+});
+
+it('lets two registers share a card method, which has no drawer to double-count', function (): void {
+    // The rule is about cash specifically. Card takings are reconciled against the acquirer, not a
+    // physical drawer, so sharing one is ordinary.
+    $second = PosConfig::query()->create([
+        ...$this->fx->config->replicate(['uuid', 'access_token'])->getAttributes(),
+        'uuid' => (string) Str::uuid(),
+        'name' => 'Second till',
+        'access_token' => Str::lower(Str::random(32)),
+    ]);
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$this->fx->card->getKey()]);
+
+    test()->patch(route('pos-configs.update', $second->uuid), [
+        'payment_method_ids' => [$this->fx->card->getKey()],
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    expect(DB::table('pos_config_payment_method')
+        ->where('payment_method_id', $this->fx->card->getKey())->count())->toBe(2);
+});
+
+it('lets a register keep the cash method it already has', function (): void {
+    // The check excludes the register being saved, or a register could never save its own settings
+    // twice.
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$this->fx->cash->getKey()]);
+
+    // `assertSessionHasNoErrors` alongside the redirect, because a *validation failure* also
+    // redirects — asserting the 302 alone passed with the self-exclusion removed, and the pivot
+    // count held either way because the sync simply never ran (review of #82).
+    test()->patch(route('pos-configs.update', $this->fx->config->uuid), [
+        'payment_method_ids' => [$this->fx->cash->getKey()],
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    expect(DB::table('pos_config_payment_method')
+        ->where('payment_method_id', $this->fx->cash->getKey())->count())->toBe(1);
 });

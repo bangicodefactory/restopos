@@ -34,6 +34,19 @@ as it stood when the session opened. Flip *counts into the drawer* at lunchtime 
 balanced at 11am is short at close — with nothing on the report to explain why. Close the session
 first and the change goes through.
 
+## One cash method, one register
+
+A cash method can belong to **one register only**. Try to add it to a second and the till refuses,
+naming the register that already has it.
+
+Two tills sharing a cash method means two drawers reconciling against the same money: each session
+works out its own expected cash from that method, so a float or a cash movement on one till is
+expected in the other's count. Nobody notices until a drawer comes up short, and by then the report
+points at whoever was on it.
+
+Card and other non-cash methods can be shared freely — they are reconciled against the acquirer, not
+against a drawer.
+
 ## Remove a method
 
 Once money has been taken through a method it cannot be removed, and neither can one that appears on
