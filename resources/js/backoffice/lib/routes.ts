@@ -46,7 +46,15 @@ export const routes = {
 
     taxes: {
         index: (): string => '/taxes',
+        store: (): string => '/taxes',
         update: (id: number): string => `/taxes/${id}`,
+        destroy: (id: number): string => `/taxes/${id}`,
+    },
+
+    taxGroups: {
+        store: (): string => '/tax-groups',
+        update: (id: number): string => `/tax-groups/${id}`,
+        destroy: (id: number): string => `/tax-groups/${id}`,
     },
 
     paymentMethods: {

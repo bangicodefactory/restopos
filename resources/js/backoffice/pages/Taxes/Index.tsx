@@ -22,12 +22,14 @@ import { Button, cn } from '@shared/ui';
 import { useMemo, useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
-import { NumberField, TextField, ToggleField } from '../../components/form';
-import { FormSection, MoneyField } from '../../components/form/fields';
+import { NumberField, SelectField, TextField, ToggleField } from '../../components/form';
+import { FormSection, MoneyField, type Option } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
+import { ConfirmAction } from '../../components/ui/ConfirmAction';
 import { Badge, Card, CardBody, CardHeader, DefinitionList, Notice } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { EUR, money, percent } from '../../lib/money';
+import { useGuardedDelete } from '../../lib/guardedRequest';
 import { routes } from '../../lib/routes';
 
 import type { TaxGroupRow, TaxRow, TaxesIndexProps } from './types';
@@ -173,32 +175,10 @@ export default function TaxesIndex({ taxes, groups }: TaxesIndexProps): JSX.Elem
                     <TaxTester taxes={taxes} selectedIds={testIds} />
                 </div>
 
-                <Card>
-                    <CardHeader title={t('tax.groups')} description="Le libellé de groupe est ce qui s’imprime sur le ticket." />
-                    <CardBody className="p-0">
-                        <table className="w-full border-collapse text-sm">
-                            <caption className="sr-only">{t('tax.groups')}</caption>
-                            <thead className="bg-slate-50">
-                                <tr>
-                                    <th scope="col" className="px-4 py-2 text-start text-xs uppercase text-slate-600">
-                                        Nom
-                                    </th>
-                                    <th scope="col" className="px-4 py-2 text-start text-xs uppercase text-slate-600">
-                                        Libellé ticket
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {groups.map((group) => (
-                                    <tr key={group.id}>
-                                        <td className="px-4 py-2">{group.name}</td>
-                                        <td className="px-4 py-2 text-slate-600">{group.receipt_label ?? '—'}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </CardBody>
-                </Card>
+                <div className="grid gap-6 lg:grid-cols-2">
+                    <AddTax groups={groups} />
+                    <TaxGroups groups={groups} />
+                </div>
 
                 <Notice tone="info">{t('tax.fiscalPositionsMissing')}</Notice>
             </div>
@@ -206,27 +186,233 @@ export default function TaxesIndex({ taxes, groups }: TaxesIndexProps): JSX.Elem
     );
 }
 
+/**
+ * Adding a tax (BOF-091).
+ *
+ * `tax_group_id` is required and `taxes.tax_group_id` is a `restrictOnDelete` foreign key, so this
+ * form is only usable once a group exists — which is why the group panel sits beside it rather than
+ * on a screen of its own.
+ */
+function AddTax({ groups }: { groups: TaxGroupRow[] }): JSX.Element {
+    const t = useT();
+
+    const form = useForm<{
+        name: string;
+        tax_group_id: number | null;
+        amount_type: string;
+        amount: string;
+        price_include: boolean;
+    }>({
+        name: '',
+        tax_group_id: groups[0]?.id ?? null,
+        amount_type: 'percent',
+        amount: '0',
+        price_include: false,
+    });
+
+    return (
+        <Card>
+            <CardHeader title={t('tax.add')} />
+            <CardBody className="space-y-4">
+                {groups.length === 0 ? <Notice tone="warn">{t('tax.addGroup')}</Notice> : null}
+
+                <FormSection>
+                    <TextField
+                        label={t('tax.name')}
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <SelectField
+                        label={t('tax.group')}
+                        value={form.data.tax_group_id === null ? '' : String(form.data.tax_group_id)}
+                        error={form.errors.tax_group_id}
+                        options={groupOptions(groups)}
+                        onChange={(value) => form.setData('tax_group_id', Number(value))}
+                    />
+                    <SelectField
+                        label={t('tax.amountType')}
+                        value={form.data.amount_type}
+                        error={form.errors.amount_type}
+                        options={amountTypeOptions(t)}
+                        onChange={(value) => form.setData('amount_type', value)}
+                    />
+                    {form.data.amount_type === 'percent' ? (
+                        <NumberField
+                            label={t('tax.rate')}
+                            suffix="%"
+                            step={0.1}
+                            value={Number(form.data.amount)}
+                            error={form.errors.amount}
+                            onChange={(value) => form.setData('amount', String(value ?? 0))}
+                        />
+                    ) : (
+                        <MoneyField
+                            label={t('tax.amount')}
+                            value={form.data.amount}
+                            error={form.errors.amount}
+                            onChange={(value) => form.setData('amount', value)}
+                        />
+                    )}
+                </FormSection>
+
+                <ToggleField
+                    label={t('tax.priceInclude')}
+                    checked={form.data.price_include}
+                    onChange={(checked) => form.setData('price_include', checked)}
+                />
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === '' || form.data.tax_group_id === null}
+                    onClick={() =>
+                        form.post(routes.taxes.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('tax.add')}
+                </Button>
+            </CardBody>
+        </Card>
+    );
+}
+
+/**
+ * Tax groups — the heading a tax totals under on a receipt and on the session report.
+ *
+ * Editable in place rather than on their own screen: a group is three fields and only ever exists to
+ * be pointed at from the tax editor. Deleting one is refused while it still holds taxes or appears
+ * on a closed session's summary, and there is no deactivate fallback — a group has no `active`
+ * column, so an unwanted one is left empty.
+ */
+function TaxGroups({ groups }: { groups: TaxGroupRow[] }): JSX.Element {
+    const t = useT();
+    const remove = useGuardedDelete();
+    const form = useForm<{ name: string; receipt_label: string }>({ name: '', receipt_label: '' });
+
+    return (
+        <Card>
+            <CardHeader title={t('tax.groups')} />
+            <CardBody className="space-y-4">
+                <table className="w-full border-collapse text-sm">
+                    <caption className="sr-only">{t('tax.groups')}</caption>
+                    <thead className="bg-slate-50">
+                        <tr>
+                            <th scope="col" className="px-3 py-2 text-start text-xs uppercase text-slate-600">
+                                {t('tax.name')}
+                            </th>
+                            <th scope="col" className="px-3 py-2 text-start text-xs uppercase text-slate-600">
+                                {t('tax.receiptLabel')}
+                            </th>
+                            <th scope="col" className="px-3 py-2 text-end text-xs uppercase text-slate-600">
+                                <span className="sr-only">{t('action.delete')}</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {groups.map((group) => (
+                            <tr key={group.id}>
+                                <td className="px-3 py-2">{group.name}</td>
+                                <td className="px-3 py-2 text-slate-600">{group.receipt_label ?? '—'}</td>
+                                <td className="px-3 py-2 text-end">
+                                    <ConfirmAction
+                                        size="sm"
+                                        label={t('tax.removeGroup')}
+                                        title={t('tax.removeGroup')}
+                                        message={t('tax.removeGroupConfirm', { name: group.name })}
+                                        onConfirm={() => remove(routes.taxGroups.destroy(group.id))}
+                                    />
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+
+                <FormSection>
+                    <TextField
+                        label={t('tax.name')}
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <TextField
+                        label={t('tax.receiptLabel')}
+                        value={form.data.receipt_label}
+                        error={form.errors.receipt_label}
+                        onChange={(value) => form.setData('receipt_label', value)}
+                    />
+                </FormSection>
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.taxGroups.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('tax.addGroup')}
+                </Button>
+            </CardBody>
+        </Card>
+    );
+}
+
+/** The four kinds of tax the engine implements, and the three rounding strategies. */
+function amountTypeOptions(t: ReturnType<typeof useT>): Option[] {
+    return [
+        { value: 'percent', label: t('tax.amountTypePercent') },
+        { value: 'fixed', label: t('tax.amountTypeFixed') },
+        { value: 'division', label: t('tax.amountTypeDivision') },
+        { value: 'group', label: t('tax.amountTypeGroup') },
+    ];
+}
+
+function roundingOptions(t: ReturnType<typeof useT>): Option[] {
+    return [
+        { value: 'inherit', label: t('tax.roundingInherit') },
+        { value: 'round_per_line', label: t('tax.roundingPerLine') },
+        { value: 'round_globally', label: t('tax.roundingGlobal') },
+    ];
+}
+
+function groupOptions(groups: TaxGroupRow[]): Option[] {
+    return groups.map((group) => ({ value: String(group.id), label: group.name }));
+}
+
 function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX.Element {
     const t = useT();
-    const locked = 'Non modifiable : ce champ n’est pas accepté par PATCH /taxes/{id}.';
+    const remove = useGuardedDelete();
 
     const form = useForm<{
         name: string;
         description: string;
+        tax_group_id: number;
+        amount_type: string;
         amount: string;
         price_include: boolean;
         include_base_amount: boolean;
         is_base_affected: boolean;
+        has_negative_factor: boolean;
         sequence: number | null;
+        rounding_strategy: string;
         active: boolean;
     }>({
         name: tax.name,
         description: tax.description ?? '',
+        tax_group_id: tax.tax_group_id,
+        amount_type: tax.amount_type,
         amount: tax.amount,
         price_include: tax.price_include,
         include_base_amount: tax.include_base_amount,
         is_base_affected: tax.is_base_affected,
+        has_negative_factor: tax.has_negative_factor,
         sequence: tax.sequence,
+        rounding_strategy: tax.rounding_strategy,
         active: tax.active,
     });
 
@@ -236,21 +422,39 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
             <CardBody className="space-y-4">
                 <FormSection>
                     <TextField
-                        label="Nom"
+                        label={t('tax.name')}
                         value={form.data.name}
                         error={form.errors.name}
                         onChange={(value) => form.setData('name', value)}
                     />
                     <TextField
-                        label="Libellé court"
+                        label={t('tax.shortLabel')}
                         value={form.data.description}
                         error={form.errors.description}
                         onChange={(value) => form.setData('description', value)}
                     />
-                    <TextField label={t('tax.amountType')} value={tax.amount_type} onChange={() => {}} disabled lockedReason={locked} />
-                    {tax.amount_type === 'percent' ? (
+                    <SelectField
+                        label={t('tax.group')}
+                        value={String(form.data.tax_group_id)}
+                        error={form.errors.tax_group_id}
+                        options={groupOptions(groups)}
+                        onChange={(value) => form.setData('tax_group_id', Number(value))}
+                    />
+                    <SelectField
+                        label={t('tax.amountType')}
+                        value={form.data.amount_type}
+                        error={form.errors.amount_type}
+                        options={amountTypeOptions(t)}
+                        onChange={(value) => form.setData('amount_type', value)}
+                    />
+                    {/*
+                      * The rate field follows the *edited* kind, not the stored one — switching to
+                      * "fixed" before saving must show a money field, or the operator types 20 meaning
+                      * 20 cents into a control still labelled %.
+                      */}
+                    {form.data.amount_type === 'percent' ? (
                         <NumberField
-                            label="Taux"
+                            label={t('tax.rate')}
                             suffix="%"
                             step={0.1}
                             value={Number(form.data.amount)}
@@ -259,7 +463,7 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                         />
                     ) : (
                         <MoneyField
-                            label="Montant"
+                            label={t('tax.amount')}
                             value={form.data.amount}
                             error={form.errors.amount}
                             onChange={(value) => form.setData('amount', value)}
@@ -270,9 +474,15 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                         value={form.data.sequence}
                         error={form.errors.sequence}
                         onChange={(value) => form.setData('sequence', value)}
-                        hint="L’ordre d’évaluation : déterminant pour les taxes composées."
+                        hint={t('tax.sequenceHint')}
                     />
-                    <TextField label={t('tax.rounding')} value={tax.rounding_strategy} onChange={() => {}} disabled lockedReason={locked} />
+                    <SelectField
+                        label={t('tax.rounding')}
+                        value={form.data.rounding_strategy}
+                        error={form.errors.rounding_strategy}
+                        options={roundingOptions(t)}
+                        onChange={(value) => form.setData('rounding_strategy', value)}
+                    />
                 </FormSection>
 
                 <div className="space-y-3">
@@ -285,20 +495,19 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                         label={t('tax.includeBase')}
                         checked={form.data.include_base_amount}
                         onChange={(checked) => form.setData('include_base_amount', checked)}
-                        description="Le montant de cette taxe entre dans la base des taxes de séquence supérieure."
+                        description={t('tax.includeBaseHint')}
                     />
                     <ToggleField
                         label={t('tax.baseAffected')}
                         checked={form.data.is_base_affected}
                         onChange={(checked) => form.setData('is_base_affected', checked)}
-                        description="Sa base inclut les taxes précédentes qui composent vers l’avant."
+                        description={t('tax.baseAffectedHint')}
                     />
                     <ToggleField
                         label={t('tax.negativeFactor')}
-                        checked={tax.has_negative_factor}
-                        onChange={() => {}}
-                        disabled
-                        lockedReason={locked}
+                        checked={form.data.has_negative_factor}
+                        onChange={(checked) => form.setData('has_negative_factor', checked)}
+                        description={t('tax.negativeFactorHint')}
                     />
                     <ToggleField
                         label={t('state.active')}
@@ -307,7 +516,7 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                     />
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <Button
                         loading={form.processing}
                         disabled={!form.isDirty}
@@ -318,6 +527,21 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                     <Button variant="ghost" disabled={!form.isDirty} onClick={() => form.reset()}>
                         {t('action.cancel')}
                     </Button>
+                    <div className="ms-auto">
+                        {/*
+                          * Confirmed by name, because the answer is usually "deactivate". The server
+                          * refuses outright once a product, a fiscal position, a compound chain, an
+                          * open tab or a closed report points at the tax, and says which — so this
+                          * button succeeds only for a tax nothing has used yet.
+                          */}
+                        <ConfirmAction
+                            label={t('tax.remove')}
+                            title={t('tax.remove')}
+                            message={t('tax.removeConfirm', { name: tax.name })}
+                            confirmPhrase={tax.name}
+                            onConfirm={() => remove(routes.taxes.destroy(tax.id))}
+                        />
+                    </div>
                 </div>
             </CardBody>
         </Card>
