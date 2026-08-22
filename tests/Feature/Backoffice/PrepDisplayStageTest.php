@@ -335,6 +335,32 @@ it('keeps one default when the operator ticked several', function (): void {
         ->toBe([0, 1, 0]);
 });
 
+it('cannot pull another screen stage onto this board by claiming its id', function (): void {
+    // `syncStages` upserts by id, so an id is a write target. Probed: an id belonging to another
+    // company's display is treated as a *new* stage — inserted here, untouched there — rather than
+    // moved. Pinned because "upsert by id" is exactly the shape that leaks when nobody checks whose
+    // id it is.
+    $other = PosFixtures::make()->withPrepDisplay();
+    $foreign = (int) DB::table('prep_stages')
+        ->where('prep_display_id', $other->display->getKey())
+        ->orderBy('sequence')->value('id');
+
+    expect($foreign)->toBeGreaterThan(0, 'the other venue must actually own a stage');
+
+    $stages = editable($this->fx->display);
+    $stages[0]['id'] = $foreign;
+    $stages[0]['name'] = 'Hijacked';
+
+    submitBoard($this->fx->display, $stages)->assertRedirect();
+
+    $theirs = (array) DB::table('prep_stages')->where('id', $foreign)->first();
+
+    expect((int) $theirs['prep_display_id'])->toBe((int) $other->display->getKey())
+        ->and($theirs['name'])->not->toBe('Hijacked')
+        // And it landed here as a stage of its own rather than not landing at all.
+        ->and(array_column(board($this->fx->display), 'name'))->toContain('Hijacked');
+});
+
 // ─────────────────────────────────────────────────────── category routing
 
 it('refuses a menu category that does not exist rather than dropping it', function (): void {

@@ -69,26 +69,6 @@ export type PrepDisplayEditProps = {
     categories: PrepCategory[];
 };
 
-/**
- * The keys `PATCH /prep-displays/{prepDisplay}` validates.
- *
- * `stages` is part of the contract: the ordered list *is* the board's state machine, so the editor
- * submits it whole and the server reconciles it by id (BAN-435).
- */
-export const WRITABLE_DISPLAY_KEYS = [
-    'name',
-    'layout',
-    'average_prep_minutes',
-    'late_threshold_minutes',
-    'done_retention_minutes',
-    'show_all_categories',
-    'auto_advance_on_all_ready',
-    'sound_on_new_order',
-    'active',
-    'category_ids',
-    'stages',
-] as const;
-
 export const LAYOUT_LABEL: Record<string, string> = {
     columns: 'Colonnes',
     grid: 'Grille',
