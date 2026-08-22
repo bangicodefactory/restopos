@@ -320,18 +320,31 @@ it('freezes the kind, the compounding and the evaluation order too', function ()
     $fx = $this->fx->withSession();
     openTabCarrying($fx);
 
-    foreach (['amount_type' => 'fixed', 'price_include' => true, 'include_base_amount' => true,
-        'is_base_affected' => true, 'has_negative_factor' => true,
-        'rounding_strategy' => 'round_globally', 'sequence' => 99] as $field => $value) {
+    $tax = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    // Each field is flipped away from what is stored, because the freeze is on what a save would
+    // *change*: submitting a boolean that already holds that value is a no-op and is allowed.
+    $edits = [
+        'amount_type' => $tax->amount_type->value === 'percent' ? 'fixed' : 'percent',
+        'price_include' => ! $tax->price_include,
+        'include_base_amount' => ! $tax->include_base_amount,
+        'is_base_affected' => ! $tax->is_base_affected,
+        'has_negative_factor' => ! $tax->has_negative_factor,
+        'rounding_strategy' => $tax->rounding_strategy->value === 'round_globally'
+            ? 'round_per_line' : 'round_globally',
+        'sequence' => (int) $tax->sequence + 89,
+    ];
+
+    foreach ($edits as $field => $value) {
         test()->patchJson(route('taxes.update', $fx->tax->getKey()), [$field => $value])
             ->assertStatus(422, $field.' should be frozen while a tab carries the tax');
     }
 
     $after = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
 
-    expect($after->amount_type->value)->toBe('percent')
-        ->and((bool) $after->price_include)->toBeFalse()
-        ->and((int) $after->sequence)->not->toBe(99);
+    expect($after->amount_type->value)->toBe($tax->amount_type->value)
+        ->and((bool) $after->price_include)->toBe((bool) $tax->price_include)
+        ->and((int) $after->sequence)->toBe((int) $tax->sequence);
 });
 
 it('still lets the name, the receipt group and the active flag change', function (): void {
@@ -447,4 +460,77 @@ it('matches the tax by id and not by substring, so tax 1 is not frozen by tax 21
     test()->patchJson(route('taxes.update', $short), ['amount' => '9.0000'])->assertRedirect();
 
     expect((string) Tax::query()->whereKey($short)->value('amount'))->toStartWith('9');
+});
+
+/**
+ * The whole form, exactly as `useForm.patch` posts it: all twelve fields on every save, whether or
+ * not the operator touched them.
+ *
+ * @param  array<string, mixed>  $edits
+ * @return array<string, mixed>
+ */
+function fullTaxForm(Tax $tax, array $edits = []): array
+{
+    return [
+        'name' => (string) $tax->name,
+        'description' => (string) ($tax->description ?? ''),
+        'tax_group_id' => (int) $tax->tax_group_id,
+        'amount_type' => $tax->amount_type->value,
+        // The browser sends what a number input produced — `'21'` for a stored `'21.0000'`.
+        'amount' => rtrim(rtrim((string) $tax->amount, '0'), '.'),
+        'price_include' => (bool) $tax->price_include,
+        'include_base_amount' => (bool) $tax->include_base_amount,
+        'is_base_affected' => (bool) $tax->is_base_affected,
+        'has_negative_factor' => (bool) $tax->has_negative_factor,
+        'sequence' => (int) $tax->sequence,
+        'rounding_strategy' => $tax->rounding_strategy->value,
+        'active' => (bool) $tax->active,
+        ...$edits,
+    ];
+}
+
+it('lets the editor rename a tax mid-service even though it posts every field', function (): void {
+    // The freeze is on what a save would *change*, not on which keys arrived. The editor is one
+    // `useForm`, so a rename posts `amount` and `amount_type` too — unchanged. Keying off presence
+    // meant a rename was refused by a message stating the name could still be changed. Probed
+    // before the fix: 422 on a payload whose only edit was `name` (review of #84).
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $tax = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    test()->patchJson(route('taxes.update', $tax->getKey()), fullTaxForm($tax, ['name' => 'VAT (standard)']))
+        ->assertRedirect();
+
+    expect((string) Tax::query()->whereKey($tax->getKey())->value('name'))->toBe('VAT (standard)');
+});
+
+it('still refuses when the same full form really does move the rate', function (): void {
+    // The control: the fix must not have turned the freeze off, only stopped it firing on a
+    // no-op field.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $tax = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    test()->patchJson(route('taxes.update', $tax->getKey()), fullTaxForm($tax, ['amount' => '40']))
+        ->assertStatus(422);
+
+    expect((string) Tax::query()->whereKey($tax->getKey())->value('amount'))->toStartWith('21');
+});
+
+it('sees through the type differences the browser introduces', function (): void {
+    // `'21'` against a stored `'21.0000'`, `true` against a stored `1`, `'percent'` against a cast
+    // enum. Any of these compared with `==` would read as an edit and refuse a save that changes
+    // nothing.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $tax = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    test()->patchJson(route('taxes.update', $tax->getKey()), fullTaxForm($tax, [
+        'amount' => '21.00',
+        'price_include' => $tax->price_include ? 1 : 0,
+        'sequence' => (string) $tax->sequence,
+    ]))->assertRedirect();
 });

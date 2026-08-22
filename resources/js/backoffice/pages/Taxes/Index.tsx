@@ -17,7 +17,7 @@
 
 import { computeOrderTaxes } from '@domain/tax/engine';
 import type { Currency, TaxDefinition } from '@domain/tax/types';
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, useForm } from '@inertiajs/react';
 import { Button, cn } from '@shared/ui';
 import { useMemo, useState, type JSX } from 'react';
 
@@ -29,6 +29,7 @@ import { ConfirmAction } from '../../components/ui/ConfirmAction';
 import { Badge, Card, CardBody, CardHeader, DefinitionList, Notice } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { EUR, money, percent } from '../../lib/money';
+import { useGuardedDelete } from '../../lib/guardedRequest';
 import { routes } from '../../lib/routes';
 
 import type { TaxGroupRow, TaxRow, TaxesIndexProps } from './types';
@@ -288,6 +289,7 @@ function AddTax({ groups }: { groups: TaxGroupRow[] }): JSX.Element {
  */
 function TaxGroups({ groups }: { groups: TaxGroupRow[] }): JSX.Element {
     const t = useT();
+    const remove = useGuardedDelete();
     const form = useForm<{ name: string; receipt_label: string }>({ name: '', receipt_label: '' });
 
     return (
@@ -320,11 +322,7 @@ function TaxGroups({ groups }: { groups: TaxGroupRow[] }): JSX.Element {
                                         label={t('tax.removeGroup')}
                                         title={t('tax.removeGroup')}
                                         message={t('tax.removeGroupConfirm', { name: group.name })}
-                                        onConfirm={() =>
-                                            router.delete(routes.taxGroups.destroy(group.id), {
-                                                preserveScroll: true,
-                                            })
-                                        }
+                                        onConfirm={() => remove(routes.taxGroups.destroy(group.id))}
                                     />
                                 </td>
                             </tr>
@@ -388,6 +386,7 @@ function groupOptions(groups: TaxGroupRow[]): Option[] {
 
 function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX.Element {
     const t = useT();
+    const remove = useGuardedDelete();
 
     const form = useForm<{
         name: string;
@@ -540,9 +539,7 @@ function TaxEditor({ tax, groups }: { tax: TaxRow; groups: TaxGroupRow[] }): JSX
                             title={t('tax.remove')}
                             message={t('tax.removeConfirm', { name: tax.name })}
                             confirmPhrase={tax.name}
-                            onConfirm={() =>
-                                router.delete(routes.taxes.destroy(tax.id), { preserveScroll: true })
-                            }
+                            onConfirm={() => remove(routes.taxes.destroy(tax.id))}
                         />
                     </div>
                 </div>
