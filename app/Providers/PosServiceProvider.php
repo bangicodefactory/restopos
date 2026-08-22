@@ -23,6 +23,7 @@ use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Policies\FloorPolicy;
 use App\Policies\OrderPolicy;
+use App\Policies\PaymentMethodPolicy;
 use App\Policies\PosBillPolicy;
 use App\Policies\PosConfigPolicy;
 use App\Policies\PosNotePolicy;
@@ -145,6 +146,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(PosBill::class, PosBillPolicy::class);
         Gate::policy(PosNote::class, PosNotePolicy::class);
         Gate::policy(Tax::class, TaxPolicy::class);
+        Gate::policy(PaymentMethod::class, PaymentMethodPolicy::class);
     }
 
     private function registerRateLimiters(): void
