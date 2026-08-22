@@ -284,3 +284,108 @@ it('lets a register keep the cash method it already has', function (): void {
     expect(DB::table('pos_config_payment_method')
         ->where('payment_method_id', $this->fx->cash->getKey())->count())->toBe(1);
 });
+
+// ─────────────────────────────── the rest of the columns (BAN-424, second pass)
+
+it('sets the QR standard and its default payload', function (): void {
+    // `qr_code_method` decides which QR spec the till renders — EMVCo, SEPA, Swiss, Pix, UPI. A
+    // method left on `none` produces no QR at all, and neither field was reachable before.
+    addMethod($this->fx, [
+        'name' => 'Scan to pay',
+        'method_type' => 'qr_code',
+        'qr_code_method' => 'emv',
+        'default_qr_payload' => '00020101021126',
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    $method = PaymentMethod::query()->where('name', 'Scan to pay')->firstOrFail();
+
+    expect($method->qr_code_method->value)->toBe('emv')
+        ->and((string) $method->default_qr_payload)->toBe('00020101021126');
+});
+
+it('refuses a QR standard the till cannot render', function (): void {
+    addMethod($this->fx, ['qr_code_method' => 'semaphore'])->assertSessionHasErrors('qr_code_method');
+});
+
+it('stores the terminal configuration and keeps it out of the page', function (): void {
+    // `terminal_config` is `encrypted:array` and in the model's `$hidden`: it holds the terminal's
+    // pairing secret. It has to be settable and must never come back — an Inertia prop is page
+    // source, browser history, and whatever error reporter is watching the props.
+    addMethod($this->fx, [
+        'name' => 'Front terminal',
+        'terminal_provider' => 'stripe',
+        'terminal_config' => ['pairing_id' => 'tmr_9f3', 'endpoint' => 'https://terminal.local'],
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    $method = PaymentMethod::query()->where('name', 'Front terminal')->firstOrFail();
+
+    expect($method->terminal_config)->toBe(['pairing_id' => 'tmr_9f3', 'endpoint' => 'https://terminal.local'])
+        // Encrypted at rest, so the raw column is not the payload either.
+        ->and((string) DB::table('payment_methods')->where('id', $method->getKey())->value('terminal_config'))
+        ->not->toContain('tmr_9f3');
+
+    $props = (string) json_encode(
+        test()->get(route('payment-methods.index'))->assertOk()->viewData('page')['props'],
+    );
+
+    // One needle per call. `toContain` is variadic, so a second argument is read as another needle,
+    // not as a message — and under `->not` the assertion then passes because the "message" is
+    // absent. Caught by sabotage: putting `terminal_config` straight back into the payload left this
+    // test green.
+    expect($props)->not->toContain('tmr_9f3');
+    expect($props)->toContain('has_terminal_config');
+});
+
+it('says whether a terminal configuration exists, which is all the page needs', function (): void {
+    addMethod($this->fx, ['name' => 'Bare method'])->assertRedirect();
+    addMethod($this->fx, [
+        'name' => 'Wired method',
+        'terminal_config' => ['pairing_id' => 'tmr_1'],
+    ])->assertRedirect();
+
+    $props = test()->get(route('payment-methods.index'))->viewData('page')['props'];
+    $byName = collect($props['methods'])->keyBy('name');
+
+    expect($byName['Bare method']['has_terminal_config'])->toBeFalse()
+        ->and($byName['Wired method']['has_terminal_config'])->toBeTrue();
+});
+
+it('refuses a terminal configuration that is not a set of keys', function (): void {
+    addMethod($this->fx, ['terminal_config' => 'pairing_id=tmr_9f3'])
+        ->assertSessionHasErrors('terminal_config');
+});
+
+it('points a method at a payment provider, which is what the self-order intent needs', function (): void {
+    // The ticket's acceptance criterion: `SelfOrderService::createPaymentIntent` throws "The online
+    // payment method has no provider" when `payment_provider_id` is null, and before BAN-424 there
+    // was no door through which to set one.
+    $provider = DB::table('payment_providers')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Stripe', 'code' => 'stripe', 'state' => 'test',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    addMethod($this->fx, [
+        'name' => 'Pay online',
+        'method_type' => 'online',
+        'payment_provider_id' => $provider,
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    expect((int) PaymentMethod::query()->where('name', 'Pay online')->value('payment_provider_id'))
+        ->toBe((int) $provider);
+});
+
+it('refuses an image the venue has no media for', function (): void {
+    // Accepted by the endpoint so the column is not the barrier, but validated: there is no media
+    // upload route in the app, so any id that arrives is one nobody could have chosen.
+    addMethod($this->fx, ['image_media_id' => 999999])->assertSessionHasErrors('image_media_id');
+});
+
+it('carries the currencies the page needs to offer a choice', function (): void {
+    // The currency control was locked because nothing on the page could name a currency — it
+    // rendered the raw id in a disabled number box.
+    $props = test()->get(route('payment-methods.index'))->viewData('page')['props'];
+
+    expect($props['currencies'])->not->toBeEmpty()
+        ->and($props['currencies'][0])->toHaveKeys(['id', 'code', 'name']);
+});
