@@ -273,3 +273,178 @@ it('refuses to remove a tax that is part of a compound one', function (): void {
     expect(Tax::query()->whereKey($child->getKey())->exists())->toBeTrue()
         ->and(DB::table('tax_children')->count())->toBe(1);
 });
+
+// ────────────────────────────────────────── the arithmetic freeze while a tab is open
+
+/**
+ * Ring one line of the fixture product, which carries the fixture tax, onto an open order.
+ *
+ * Through the register's own door so the line is computed by the engine rather than inserted, since
+ * what is under test is exactly what the engine does with the tax table.
+ */
+function openTabCarrying(PosFixtures $fx): string
+{
+    $uuid = (string) Str::uuid();
+
+    test()->withHeaders($fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$fx->orderCommand($uuid, [[
+            'op' => 'create', 'uuid' => (string) Str::uuid(), 'variant_id' => $fx->variant->getKey(),
+            'qty' => '1', 'price_unit' => '10.00', 'discount' => '0',
+        ]])],
+    ])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    expect((string) DB::table('pos_orders')->where('uuid', $uuid)->value('state'))
+        ->toBe('draft', 'the tab must actually be open for this guard to be under test');
+
+    return $uuid;
+}
+
+it('freezes the rate while a tab already carries the tax', function (): void {
+    // BOF-091. The engine reads `taxes` live on every sync — probed: set a rate to 40% before a line
+    // is rung up and the line computes 4.00, with no re-bootstrap needed. But a line is never
+    // recomputed once rung. So changing the rate at 8pm leaves the starters on that tab at 21% and
+    // the mains at the new figure: one bill, one tax, two rates, and nothing on the receipt saying
+    // so.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    test()->patchJson(route('taxes.update', $fx->tax->getKey()), ['amount' => '40.0000'])
+        ->assertStatus(422);
+
+    expect((string) Tax::query()->whereKey($fx->tax->getKey())->value('amount'))->toStartWith('21');
+});
+
+it('freezes the kind, the compounding and the evaluation order too', function (): void {
+    // Every field that changes what the tax *computes*, not just the rate. `sequence` is in the list
+    // because for a compound chain it is the evaluation order.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    foreach (['amount_type' => 'fixed', 'price_include' => true, 'include_base_amount' => true,
+        'is_base_affected' => true, 'has_negative_factor' => true,
+        'rounding_strategy' => 'round_globally', 'sequence' => 99] as $field => $value) {
+        test()->patchJson(route('taxes.update', $fx->tax->getKey()), [$field => $value])
+            ->assertStatus(422, $field.' should be frozen while a tab carries the tax');
+    }
+
+    $after = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    expect($after->amount_type->value)->toBe('percent')
+        ->and((bool) $after->price_include)->toBeFalse()
+        ->and((int) $after->sequence)->not->toBe(99);
+});
+
+it('still lets the name, the receipt group and the active flag change', function (): void {
+    // The control, and the reason the freeze is a list rather than a blanket. These change what is
+    // printed or offered, never what an already-rung line computed — and a manager fixing a typo
+    // mid-service should not have to close every table first.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $second = TaxGroup::query()->create([
+        'company_id' => $fx->company->getKey(),
+        'name' => 'Second group',
+        'sequence' => 50,
+    ]);
+
+    test()->patchJson(route('taxes.update', $fx->tax->getKey()), [
+        'name' => 'VAT (standard)',
+        'tax_group_id' => $second->getKey(),
+        'active' => false,
+    ])->assertRedirect();
+
+    $after = Tax::query()->whereKey($fx->tax->getKey())->firstOrFail();
+
+    expect((string) $after->name)->toBe('VAT (standard)')
+        ->and((int) $after->tax_group_id)->toBe((int) $second->getKey());
+});
+
+it('lets the rate change once the tab is paid', function (): void {
+    // The control on the freeze: it is the *open* order that holds the rate, not the history. A paid
+    // line's figures are already final.
+    $fx = $this->fx->withSession();
+    $uuid = openTabCarrying($fx);
+
+    DB::table('pos_orders')->where('uuid', $uuid)->update(['state' => 'paid']);
+
+    test()->patchJson(route('taxes.update', $fx->tax->getKey()), ['amount' => '12.0000'])
+        ->assertRedirect();
+
+    expect((string) Tax::query()->whereKey($fx->tax->getKey())->value('amount'))->toStartWith('12');
+});
+
+it('does not freeze a tax the open tab does not carry', function (): void {
+    // The other control. One open table must not lock every tax in the venue — only the ones its
+    // lines were actually computed with.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    addTax((int) $this->group->getKey(), ['name' => 'Untouched levy'])->assertRedirect();
+    $other = Tax::query()->where('name', 'Untouched levy')->firstOrFail();
+
+    test()->patchJson(route('taxes.update', $other->getKey()), ['amount' => '5.0000'])->assertRedirect();
+
+    expect((string) Tax::query()->whereKey($other->getKey())->value('amount'))->toStartWith('5');
+});
+
+it('refuses to delete a tax an open tab carries', function (): void {
+    // Reached before the product/report checks, because it is the one an operator can act on now:
+    // the others say "detach it from a product", this says "close the table first".
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $response = test()->deleteJson(route('taxes.destroy', $fx->tax->getKey()))->assertStatus(422);
+
+    expect((string) json_encode($response->json()))->toContain('open order')
+        ->and(Tax::query()->whereKey($fx->tax->getKey())->exists())->toBeTrue();
+});
+
+it('matches the tax by id and not by substring, so tax 1 is not frozen by tax 21', function (): void {
+    // `tax_signature` is the sorted, dash-joined list of applied tax ids ('1', '1-21', 'none'), so
+    // a `LIKE '%1%'` or a `str_contains` would report tax 1 as carried by any tab holding tax 21 —
+    // and freeze the venue's standard VAT because somebody rang up an eco levy. Caught by sabotage:
+    // swapping the explode for `str_contains` passed every other test in this file, because the
+    // fixture never has two ids where one is a substring of the other.
+    $fx = $this->fx->withSession();
+    $short = (int) $fx->tax->getKey();
+
+    // Mint taxes until one exists whose id *contains* the fixture tax's id as a substring.
+    $long = null;
+    for ($i = 0; $i < 40 && $long === null; $i++) {
+        $candidate = Tax::query()->create([
+            'company_id' => $fx->company->getKey(),
+            'tax_group_id' => $this->group->getKey(),
+            'name' => 'Filler '.$i,
+            'amount_type' => 'percent',
+            'amount' => '1.0000',
+            'sequence' => 500 + $i,
+        ]);
+
+        if (str_contains((string) $candidate->getKey(), (string) $short)
+            && (int) $candidate->getKey() !== $short) {
+            $long = (int) $candidate->getKey();
+        }
+    }
+
+    expect($long)->not->toBeNull('the collision this test is about must actually be constructible');
+
+    // Put the long-id tax — and only it — on the product the tab will carry.
+    DB::table('product_tax')->where('product_id', $fx->product->getKey())->delete();
+    DB::table('product_variant_tax')->where('product_variant_id', $fx->variant->getKey())->delete();
+    DB::table('product_tax')->insert(['product_id' => $fx->product->getKey(), 'tax_id' => $long]);
+
+    $uuid = openTabCarrying($fx);
+    $signature = (string) DB::table('pos_order_lines')
+        ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+        ->where('pos_orders.uuid', $uuid)->value('pos_order_lines.tax_signature');
+
+    expect($signature)->toBe((string) $long, 'the tab must carry only the long-id tax');
+
+    // The long-id tax is frozen...
+    test()->patchJson(route('taxes.update', $long), ['amount' => '9.0000'])->assertStatus(422);
+
+    // ...and the short-id one, which nothing on that tab carries, is not.
+    test()->patchJson(route('taxes.update', $short), ['amount' => '9.0000'])->assertRedirect();
+
+    expect((string) Tax::query()->whereKey($short)->value('amount'))->toStartWith('9');
+});

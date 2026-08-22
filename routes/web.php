@@ -21,6 +21,7 @@ use App\Http\Controllers\Backoffice\ReportController;
 use App\Http\Controllers\Backoffice\SelfOrderSettingsController;
 use App\Http\Controllers\Backoffice\SessionController;
 use App\Http\Controllers\Backoffice\TaxController;
+use App\Http\Controllers\Backoffice\TaxGroupController;
 use App\Http\Controllers\ShellController;
 use Illuminate\Support\Facades\Route;
 
@@ -79,6 +80,10 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('taxes', [TaxController::class, 'store'])->name('taxes.store');
     Route::patch('taxes/{tax}', [TaxController::class, 'update'])->name('taxes.update');
     Route::delete('taxes/{tax}', [TaxController::class, 'destroy'])->name('taxes.destroy');
+
+    Route::post('tax-groups', [TaxGroupController::class, 'store'])->name('tax-groups.store');
+    Route::patch('tax-groups/{taxGroup}', [TaxGroupController::class, 'update'])->name('tax-groups.update');
+    Route::delete('tax-groups/{taxGroup}', [TaxGroupController::class, 'destroy'])->name('tax-groups.destroy');
 
     Route::get('payment-methods', [PaymentMethodController::class, 'index'])->name('payment-methods.index');
     Route::post('payment-methods', [PaymentMethodController::class, 'store'])->name('payment-methods.store');

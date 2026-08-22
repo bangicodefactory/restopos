@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
+use App\Enums\OrderState;
 use App\Enums\TaxAmountType;
 use App\Enums\TaxRoundingStrategy;
 use App\Http\Controllers\Controller;
@@ -50,7 +51,7 @@ final class TaxController extends Controller
                 'rounding_strategy' => (string) ($t->rounding_strategy?->value ?? $t->rounding_strategy),
                 'active' => (bool) $t->active,
             ])->values()->all(),
-            'groups' => TaxGroup::query()->orderBy('sequence')->get(['id', 'name', 'receipt_label'])->all(),
+            'groups' => TaxGroup::query()->orderBy('sequence')->get(['id', 'name', 'receipt_label', 'sequence'])->all(),
         ]);
     }
 
@@ -74,13 +75,91 @@ final class TaxController extends Controller
         return back()->with('success', 'Tax added.');
     }
 
+    /**
+     * `PATCH /taxes/{tax}` — with the arithmetic frozen while an order is still open on it
+     * (BOF-091).
+     *
+     * The engine reads `taxes` live on every sync — there is no snapshot. Probed: set a rate to 40 %
+     * before a line is rung up and the line computes 4.00; the register does not have to reconnect
+     * or re-bootstrap for it to take hold.
+     *
+     * That is fine between services and wrong during one. A table's tab is a `draft` order whose
+     * lines were each computed when they were rung up and are never recomputed afterwards. Change
+     * the rate at 8pm and the starters on that tab carry 21 % while the mains carry the new figure:
+     * one bill, one tax, two rates, and a total that reconciles against neither. Nothing on the
+     * receipt or the report says why.
+     *
+     * So the fields that change the arithmetic are frozen while any open order carries the tax.
+     * `name`, `description`, the receipt group and `active` are not: they change what is *printed*
+     * or *offered*, never what an already-rung line computed.
+     */
     public function update(Request $request, Tax $tax): RedirectResponse
     {
         Gate::authorize('update', $tax);
 
-        $tax->forceFill($this->validated($request, creating: false))->save();
+        $data = $this->validated($request, creating: false);
+        $changed = array_intersect_key($data, array_flip(self::ARITHMETIC_KEYS));
+
+        if ($changed !== []) {
+            $open = $this->openOrdersUsing($tax);
+
+            if ($open > 0) {
+                throw ValidationException::withMessages([
+                    'amount' => $open.' open order(s) already carry this tax. Changing how it is'
+                        .' computed now would leave a single bill taxed at two different rates.'
+                        .' Its name, receipt group and whether it is active can still be changed.',
+                ]);
+            }
+        }
+
+        $tax->forceFill($data)->save();
 
         return back()->with('success', 'Tax saved.');
+    }
+
+    /**
+     * The fields that change what a tax *computes*, as opposed to what it is called.
+     *
+     * `sequence` is in the list and belongs there: for a compound chain it is the evaluation order,
+     * so moving a tax up or down changes every total the chain produces.
+     *
+     * @var list<string>
+     */
+    private const ARITHMETIC_KEYS = [
+        'amount',
+        'amount_type',
+        'price_include',
+        'include_base_amount',
+        'is_base_affected',
+        'has_negative_factor',
+        'rounding_strategy',
+        'sequence',
+    ];
+
+    /** How many unpaid orders have a line carrying this tax. */
+    private function openOrdersUsing(Tax $tax): int
+    {
+        $query = $this->connection->table('pos_order_lines')
+            ->join('pos_orders', 'pos_orders.id', '=', 'pos_order_lines.pos_order_id')
+            ->where('pos_orders.state', OrderState::Draft->value);
+
+        ActingCompany::scope($query, 'pos_orders.company_id');
+
+        // `tax_signature` is the sorted, dash-joined list of the tax ids applied to the line
+        // (`'none'` when there are none), so it is matched by exploding rather than by a `LIKE` —
+        // `LIKE '%1%'` would match tax 21 and tax 31 too. Open lines are the ones on tables right
+        // now, so this reads a handful of rows, not the history.
+        $orderIds = [];
+
+        foreach ($query->get(['pos_orders.id as order_id', 'pos_order_lines.tax_signature']) as $row) {
+            $ids = array_map(intval(...), explode('-', (string) $row->tax_signature));
+
+            if (in_array((int) $tax->getKey(), $ids, true)) {
+                $orderIds[(int) $row->order_id] = true;
+            }
+        }
+
+        return count($orderIds);
     }
 
     /**
@@ -102,6 +181,18 @@ final class TaxController extends Controller
     public function destroy(Request $request, Tax $tax): RedirectResponse
     {
         Gate::authorize('delete', $tax);
+
+        // Checked before the referent counts because it is the one an operator can act on *now*:
+        // the others say "detach it from a product", this one says "close the table first". A tax
+        // can be off every product and still be on a tab that was rung up an hour ago.
+        $open = $this->openOrdersUsing($tax);
+
+        if ($open > 0) {
+            throw ValidationException::withMessages([
+                'tax' => $open.' open order(s) still carry this tax. Close or cancel them first —'
+                    .' deleting it now would leave those bills with a tax line nothing explains.',
+            ]);
+        }
 
         $products = $this->connection->table('product_tax')->where('tax_id', $tax->getKey())->count();
         $variants = $this->connection->table('product_variant_tax')->where('tax_id', $tax->getKey())->count();
