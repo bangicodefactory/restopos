@@ -81,7 +81,9 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('taxes/{tax}', [TaxController::class, 'destroy'])->name('taxes.destroy');
 
     Route::get('payment-methods', [PaymentMethodController::class, 'index'])->name('payment-methods.index');
+    Route::post('payment-methods', [PaymentMethodController::class, 'store'])->name('payment-methods.store');
     Route::patch('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'update'])->name('payment-methods.update');
+    Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy'])->name('payment-methods.destroy');
 
     Route::get('employees', [EmployeeController::class, 'index'])->name('employees.index');
     Route::patch('employees/{employee}', [EmployeeController::class, 'update'])->name('employees.update');
