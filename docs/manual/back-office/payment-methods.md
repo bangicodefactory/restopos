@@ -24,6 +24,34 @@ and refunds are allowed, and whether it is the one cash rounding lands on.
 
 A new method is not on any till until you add it to that register's settings.
 
+## Card terminals and QR payment
+
+A method that talks to a card machine needs two things set, and they are different questions:
+
+- **Terminal** — which *driver* the payment screen speaks. Adyen, Stripe, Viva and the rest.
+- **Provider** — which configured account the money settles into. An online or QR method with no
+  provider cannot take a payment at all: the till reports that the method has no provider and the
+  customer's payment never starts.
+
+**Terminal configuration** is the driver's own settings — a pairing id, a point-of-sale id, an
+endpoint — as a set of keys, because every driver wants different ones.
+
+**It is stored encrypted and never shown back to you.** The page will tell you a configuration
+exists; it will not tell you what is in it, and neither will anything else. That is deliberate: it is
+the credential that lets a terminal take money in your name, and a screen that can display it is a
+screen that can leak it. Entering a new one replaces the old one completely — there is no editing
+half of it.
+
+For QR payment, choose the **QR standard** your country uses (EMVCo, SEPA, Swiss QR, Pix, UPI,
+PromptPay) and, if your acquirer gave you one, the default payload the till builds its codes from.
+
+## Logos
+
+A payment method can carry an image, and there is currently **no way to give it one** — the system
+can serve an image it already has, but nothing anywhere uploads one. The field is not shown rather
+than shown greyed out, because a locked control suggests a permission you might be granted, and this
+is a feature that does not exist yet.
+
 ## Changing a method mid-service
 
 **While a session is open on a register that uses the method, only its position in the list can be
@@ -60,3 +88,7 @@ A method nothing has been paid through is removed outright, and comes off the re
 ## Who can change this
 
 Payment methods are register configuration and need the same permission as the rest of the setup.
+
+Changing a method's kind, its currency, its terminal or its provider is the same permission as
+renaming it. The protections on this page are about **timing and consequence** — an open session, a
+method money has gone through — not about who is allowed to look.

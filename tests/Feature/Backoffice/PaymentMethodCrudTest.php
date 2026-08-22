@@ -46,6 +46,12 @@ function methodActor(PosFixtures $fx, array $permissions): User
 }
 
 beforeEach(function (): void {
+    // The tests that assert on the index page's props render the Inertia root view, and the PHP CI
+    // job builds no front-end assets — so without this the manifest is missing and the GET is a 500
+    // there while passing locally off a stale build. Route binding and the controller still run for
+    // real; only the asset tags are stubbed. Same reason as `RouteBindingTest`.
+    $this->withoutVite();
+
     // A decoy venue first, so the acting company is not id 1.
     PosFixtures::make();
 
@@ -283,4 +289,199 @@ it('lets a register keep the cash method it already has', function (): void {
 
     expect(DB::table('pos_config_payment_method')
         ->where('payment_method_id', $this->fx->cash->getKey())->count())->toBe(1);
+});
+
+// ─────────────────────────────── the rest of the columns (BAN-424, second pass)
+
+it('sets the QR standard and its default payload', function (): void {
+    // `qr_code_method` decides which QR spec the till renders — EMVCo, SEPA, Swiss, Pix, UPI. A
+    // method left on `none` produces no QR at all, and neither field was reachable before.
+    addMethod($this->fx, [
+        'name' => 'Scan to pay',
+        'method_type' => 'qr_code',
+        'qr_code_method' => 'emv',
+        'default_qr_payload' => '00020101021126',
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    $method = PaymentMethod::query()->where('name', 'Scan to pay')->firstOrFail();
+
+    expect($method->qr_code_method->value)->toBe('emv')
+        ->and((string) $method->default_qr_payload)->toBe('00020101021126');
+});
+
+it('refuses a QR standard the till cannot render', function (): void {
+    addMethod($this->fx, ['qr_code_method' => 'semaphore'])->assertSessionHasErrors('qr_code_method');
+});
+
+it('stores the terminal configuration and keeps it out of the page', function (): void {
+    // `terminal_config` is `encrypted:array` and in the model's `$hidden`: it holds the terminal's
+    // pairing secret. It has to be settable and must never come back — an Inertia prop is page
+    // source, browser history, and whatever error reporter is watching the props.
+    addMethod($this->fx, [
+        'name' => 'Front terminal',
+        'terminal_provider' => 'stripe',
+        'terminal_config' => ['pairing_id' => 'tmr_9f3', 'endpoint' => 'https://terminal.local'],
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    $method = PaymentMethod::query()->where('name', 'Front terminal')->firstOrFail();
+
+    expect($method->terminal_config)->toBe(['pairing_id' => 'tmr_9f3', 'endpoint' => 'https://terminal.local'])
+        // Encrypted at rest, so the raw column is not the payload either.
+        ->and((string) DB::table('payment_methods')->where('id', $method->getKey())->value('terminal_config'))
+        ->not->toContain('tmr_9f3');
+
+    $props = (string) json_encode(
+        test()->get(route('payment-methods.index'))->assertOk()->viewData('page')['props'],
+    );
+
+    // One needle per call. `toContain` is variadic, so a second argument is read as another needle,
+    // not as a message — and under `->not` the assertion then passes because the "message" is
+    // absent. Caught by sabotage: putting `terminal_config` straight back into the payload left this
+    // test green.
+    expect($props)->not->toContain('tmr_9f3');
+    expect($props)->toContain('has_terminal_config');
+});
+
+it('says whether a terminal configuration exists, which is all the page needs', function (): void {
+    addMethod($this->fx, ['name' => 'Bare method'])->assertRedirect();
+    addMethod($this->fx, [
+        'name' => 'Wired method',
+        'terminal_config' => ['pairing_id' => 'tmr_1'],
+    ])->assertRedirect();
+
+    $props = test()->get(route('payment-methods.index'))->viewData('page')['props'];
+    $byName = collect($props['methods'])->keyBy('name');
+
+    expect($byName['Bare method']['has_terminal_config'])->toBeFalse()
+        ->and($byName['Wired method']['has_terminal_config'])->toBeTrue();
+});
+
+it('refuses a terminal configuration that is not a set of keys', function (): void {
+    addMethod($this->fx, ['terminal_config' => 'pairing_id=tmr_9f3'])
+        ->assertSessionHasErrors('terminal_config');
+});
+
+it('points a method at a payment provider, which is what the self-order intent needs', function (): void {
+    // The ticket's acceptance criterion: `SelfOrderService::createPaymentIntent` throws "The online
+    // payment method has no provider" when `payment_provider_id` is null, and before BAN-424 there
+    // was no door through which to set one.
+    $provider = DB::table('payment_providers')->insertGetId([
+        'company_id' => $this->fx->company->getKey(),
+        'name' => 'Stripe', 'code' => 'stripe', 'state' => 'test',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    addMethod($this->fx, [
+        'name' => 'Pay online',
+        'method_type' => 'online',
+        'payment_provider_id' => $provider,
+    ])->assertSessionHasNoErrors()->assertRedirect();
+
+    expect((int) PaymentMethod::query()->where('name', 'Pay online')->value('payment_provider_id'))
+        ->toBe((int) $provider);
+});
+
+it('refuses an image the venue has no media for', function (): void {
+    // Accepted by the endpoint so the column is not the barrier, but validated: there is no media
+    // upload route in the app, so any id that arrives is one nobody could have chosen.
+    addMethod($this->fx, ['image_media_id' => 999999])->assertSessionHasErrors('image_media_id');
+});
+
+it('carries the currencies the page needs to offer a choice', function (): void {
+    // The currency control was locked because nothing on the page could name a currency — it
+    // rendered the raw id in a disabled number box.
+    $props = test()->get(route('payment-methods.index'))->viewData('page')['props'];
+
+    expect($props['currencies'])->not->toBeEmpty()
+        ->and($props['currencies'][0])->toHaveKeys(['id', 'code', 'name']);
+});
+
+/**
+ * The whole form, exactly as the editor posts it: every field on every save, touched or not.
+ *
+ * @param  array<string, mixed>  $edits
+ * @return array<string, mixed>
+ */
+function fullMethodForm(PaymentMethod $m, array $edits = []): array
+{
+    return [
+        'name' => (string) $m->name,
+        'method_type' => $m->method_type->value,
+        'currency_id' => (int) $m->currency_id,
+        'terminal_provider' => $m->terminal_provider->value,
+        // A select's value is a string, and `''` is "no provider".
+        'payment_provider_id' => $m->payment_provider_id === null ? '' : (string) $m->payment_provider_id,
+        'qr_code_method' => $m->qr_code_method->value,
+        'default_qr_payload' => (string) ($m->default_qr_payload ?? ''),
+        'is_cash_count' => (bool) $m->is_cash_count,
+        'identify_customer' => (bool) $m->identify_customer,
+        'allow_change' => (bool) $m->allow_change,
+        'allow_refund' => (bool) $m->allow_refund,
+        'is_rounding_target' => (bool) $m->is_rounding_target,
+        'ledger_code' => (string) ($m->ledger_code ?? ''),
+        'sequence' => (int) $m->sequence,
+        'active' => (bool) $m->active,
+        ...$edits,
+    ];
+}
+
+it('lets the editor reorder a method mid-session even though it posts every field', function (): void {
+    // The `sequence` exemption exists so a manager can move a button during service. Keyed off which
+    // keys *arrived* it was dead through the real UI, because the editor posts all sixteen: the save
+    // was refused by a message saying only the order could be changed. Probed: 422 on a full-form
+    // payload whose only edit was `sequence` (review of #85).
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['sequence' => 99]))->assertRedirect();
+
+    expect((int) PaymentMethod::query()->whereKey($method->getKey())->value('sequence'))->toBe(99);
+});
+
+it('still freezes the same full form when it really does change the method', function (): void {
+    // The control: the fix must not have turned the freeze off, only stopped it firing on a no-op.
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['is_cash_count' => true]))->assertStatus(422);
+
+    expect((bool) PaymentMethod::query()->whereKey($method->getKey())->value('is_cash_count'))->toBeFalse();
+});
+
+it('sees through the shapes a form gives a null, a bool and an enum', function (): void {
+    // `''` for a stored null ledger code, `false` for a stored `0`, `'bank'` for a cast enum. Any of
+    // these read as an edit would refuse a save that changes nothing at all.
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    expect($method->ledger_code)->toBeNull('the fixture must leave a null to compare against');
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()), fullMethodForm($method))
+        ->assertRedirect();
+});
+
+it('does not mistake an emptied ledger code for no change', function (): void {
+    // The other side of that comparison: `''` against a stored `'7001'` is a real edit and must be
+    // frozen, or "null and empty are the same" quietly becomes "empty is always the same".
+    addMethod($this->fx, ['ledger_code' => '7001'])->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['ledger_code' => '']))->assertStatus(422);
+
+    expect((string) PaymentMethod::query()->whereKey($method->getKey())->value('ledger_code'))->toBe('7001');
 });

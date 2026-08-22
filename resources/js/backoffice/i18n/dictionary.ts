@@ -274,6 +274,21 @@ export const boFr = {
 
     // ── payment methods
     'payment.title': 'Modes de paiement',
+    'payment.add': 'Ajouter un mode de paiement',
+    'payment.addHint': 'Un nouveau mode nâapparaÃ®t sur aucune caisse tant quâune caisse nây est pas reliÃ©e.',
+    'payment.name': 'Nom',
+    'payment.currency': 'Devise',
+    'payment.qrMethod': 'Norme QR',
+    'payment.qrPayload': 'Charge utile QR par dÃ©faut',
+    'payment.qrPayloadHint': 'Le modÃ¨le utilisÃ© quand la caisse gÃ©nÃ¨re le QR de paiement.',
+    'payment.terminalConfig': 'Configuration du terminal (JSON)',
+    'payment.terminalConfigHint': 'ClÃ©s propres au pilote : identifiant de couplage, point de vente, adresse. Aucune nâest enregistrÃ©e pour lâinstant.',
+    'payment.terminalConfigSet': 'Une configuration existe. Elle ne peut pas Ãªtre affichÃ©e ; saisir un JSON la remplace entiÃ¨rement.',
+    'payment.terminalConfigInvalid': 'JSON invalide : attendu un objet.',
+    'payment.remove': 'Supprimer ce mode',
+    'payment.removeConfirm':
+        'Supprimer {name} ? RefusÃ© si de lâargent est dÃ©jÃ  passÃ© par ce mode : dÃ©sactivez-le.',
+
     'payment.cashCount': 'Compté en caisse',
     'payment.cashCountHint':
         'Décide si le mode entre dans le comptage du tiroir à la clôture. Une erreur ici casse silencieusement toute réconciliation.',
@@ -956,6 +971,21 @@ export const boEn: BoDictionary = {
         'No back-office route exposes fiscal positions; they are assigned from the register settings.',
 
     'payment.title': 'Payment methods',
+    'payment.add': 'Add a payment method',
+    'payment.addHint': 'A new method is on no till until a register is pointed at it.',
+    'payment.name': 'Name',
+    'payment.currency': 'Currency',
+    'payment.qrMethod': 'QR standard',
+    'payment.qrPayload': 'Default QR payload',
+    'payment.qrPayloadHint': 'The template used when the till generates the payment QR.',
+    'payment.terminalConfig': 'Terminal configuration (JSON)',
+    'payment.terminalConfigHint': 'Driver-specific keys: pairing id, point of sale, endpoint. None is stored yet.',
+    'payment.terminalConfigSet': 'A configuration exists. It cannot be shown â entering JSON replaces it wholesale.',
+    'payment.terminalConfigInvalid': 'Invalid JSON: an object is expected.',
+    'payment.remove': 'Remove this method',
+    'payment.removeConfirm':
+        'Remove {name}? Refused if money has already gone through it â deactivate it instead.',
+
     'payment.cashCount': 'Counted in drawer',
     'payment.cashCountHint':
         'Decides whether the method lands in the drawer count at close. Getting it wrong silently breaks every reconciliation.',

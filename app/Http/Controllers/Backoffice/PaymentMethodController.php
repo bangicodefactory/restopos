@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\PaymentMethodType;
+use App\Enums\QrCodeMethod;
 use App\Enums\SessionState;
 use App\Enums\TerminalProvider;
+use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PaymentProvider;
+use App\Models\Pricing\Currency;
 use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +32,8 @@ use Inertia\Response;
  */
 final class PaymentMethodController extends Controller
 {
+    use DetectsRealChanges;
+
     public function __construct(private readonly ConnectionInterface $connection) {}
 
     public function index(): Response
@@ -48,11 +53,23 @@ final class PaymentMethodController extends Controller
                 'is_rounding_target' => (bool) $m->is_rounding_target,
                 'terminal_provider' => (string) ($m->terminal_provider?->value ?? $m->terminal_provider),
                 'payment_provider_id' => $m->payment_provider_id,
+                // Whether one is set, never what it is. `terminal_config` is `encrypted:array` and
+                // listed in the model's `$hidden` for a reason: it holds the terminal's pairing
+                // secret and endpoint credentials. Putting it in an Inertia payload would decrypt it
+                // straight into the page source of every manager who opens this screen — and into
+                // the browser history, and any error reporter watching the props.
+                'has_terminal_config' => $m->terminal_config !== null && $m->terminal_config !== [],
+                'qr_code_method' => (string) ($m->qr_code_method?->value ?? $m->qr_code_method),
+                'default_qr_payload' => $m->default_qr_payload,
                 'ledger_code' => $m->ledger_code,
                 'sequence' => (int) $m->sequence,
                 'active' => (bool) $m->active,
             ])->values()->all(),
             'providers' => PaymentProvider::query()->get(['id', 'name', 'code', 'state'])->all(),
+            // Currencies are global ISO reference data with no `company_id`, so there is no scope to
+            // apply here — `scopeForPos` is the filter that matters and it is about which are offered
+            // at a till, not who owns them.
+            'currencies' => Currency::query()->orderBy('code')->get(['id', 'code', 'name'])->all(),
         ]);
     }
 
@@ -89,7 +106,12 @@ final class PaymentMethodController extends Controller
         // when the session opened. Flip `is_cash_count` at lunchtime and the drawer that balanced at
         // 11am is short at close, with nothing on the report explaining why. `sequence` is exempt
         // because it only decides button order.
-        $changed = array_diff_key($data, ['sequence' => true]);
+        // What the save would actually *move*, not which keys arrived. The editor is one
+        // `useForm` and posts all sixteen fields on every save, so keying off presence made the
+        // `sequence` exemption dead through the real UI: a reorder mid-service was refused by a
+        // message saying only the order could be changed. Probed: 422 on a full-form payload whose
+        // only edit was `sequence` (review of #85).
+        $changed = $this->realChanges($paymentMethod, $data, self::FROZEN_KEYS);
 
         if ($changed !== [] && $this->usedByOpenSession($paymentMethod)) {
             throw ValidationException::withMessages([
@@ -150,6 +172,33 @@ final class PaymentMethodController extends Controller
         return back()->with('success', 'Payment method removed.');
     }
 
+    /**
+     * Everything an open session freezes — that is, every column except `sequence`.
+     *
+     * `sequence` is exempt because it only decides the order buttons appear in on the payment
+     * screen. Everything else feeds the session's arithmetic or its reconciliation.
+     *
+     * @var list<string>
+     */
+    private const FROZEN_KEYS = [
+        'name',
+        'method_type',
+        'currency_id',
+        'is_cash_count',
+        'identify_customer',
+        'allow_change',
+        'allow_refund',
+        'is_rounding_target',
+        'terminal_provider',
+        'payment_provider_id',
+        'terminal_config',
+        'qr_code_method',
+        'default_qr_payload',
+        'ledger_code',
+        'image_media_id',
+        'active',
+    ];
+
     /** Is any register using this method currently mid-session? */
     private function usedByOpenSession(PaymentMethod $method): bool
     {
@@ -189,6 +238,17 @@ final class PaymentMethodController extends Controller
             'currency_id' => [$required, 'integer', Rule::exists('currencies', 'id')],
             'terminal_provider' => ['sometimes', Rule::enum(TerminalProvider::class)],
             'payment_provider_id' => ['sometimes', 'nullable', 'integer'],
+            // Provider-specific and schema-less by nature: a terminal's pairing id, its poi id, its
+            // endpoint. Validated as *shape* only, because the keys differ per driver and inventing
+            // a schema here would mean a second one to keep in sync with every integration.
+            'terminal_config' => ['sometimes', 'nullable', 'array'],
+            'qr_code_method' => ['sometimes', Rule::enum(QrCodeMethod::class)],
+            'default_qr_payload' => ['sometimes', 'nullable', 'string', 'max:4096'],
+            // Accepted so the column is not the barrier, but no control is rendered for it: there is
+            // no media *upload* route anywhere in the app — only `GET /api/media/{id}` to serve one —
+            // so a picker would offer a choice of nothing. Stated rather than dressed up as a locked
+            // field pretending the endpoint is the problem.
+            'image_media_id' => ['sometimes', 'nullable', 'integer', Rule::exists('media_files', 'id')],
 
             'is_cash_count' => ['sometimes', 'boolean'],
             'identify_customer' => ['sometimes', 'boolean'],

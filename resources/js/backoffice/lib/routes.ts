@@ -59,7 +59,9 @@ export const routes = {
 
     paymentMethods: {
         index: (): string => '/payment-methods',
+        store: (): string => '/payment-methods',
         update: (id: number): string => `/payment-methods/${id}`,
+        destroy: (id: number): string => `/payment-methods/${id}`,
     },
 
     employees: {
