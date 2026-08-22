@@ -331,3 +331,51 @@ it('refuses a user who may not configure the register', function (): void {
     expect(PosCategory::query()->where('name', 'Sneaky')->exists())->toBeFalse()
         ->and((string) categoryNamed('Drinks')->name)->toBe('Drinks');
 });
+
+it('refuses a nesting deeper than the pricing engine can walk', function (): void {
+    // Not an arbitrary number. `PricingService::ancestryFor` walks `parent_id` upward under a
+    // hard `$guard++ < 10`, so a category nested deeper than that has ancestors the pricing engine
+    // never reaches — and a pricelist rule attached to one of those roots silently stops applying to
+    // products in the deep branch. The tree refuses to build what the engine cannot read.
+    $parentId = null;
+
+    for ($depth = 0; $depth < 10; $depth++) {
+        $response = addCategory(['name' => 'Level '.$depth, 'parent_id' => $parentId]);
+
+        if ($depth < 10) {
+            $response->assertSessionHasNoErrors()->assertRedirect();
+            $parentId = categoryNamed('Level '.$depth)->getKey();
+        }
+    }
+
+    // The deepest node the tree allows sits at a depth the 10-step walk still covers.
+    expect((int) categoryNamed('Level 9')->depth)->toBe(9);
+
+    addCategory(['name' => 'Too deep', 'parent_id' => $parentId])->assertStatus(422);
+
+    expect(PosCategory::query()->where('name', 'Too deep')->exists())->toBeFalse();
+});
+
+it('keeps every stored path derivable from its parent', function (): void {
+    // The invariant the three `LIKE` scopes depend on: a row's path is its parent's path plus its
+    // own id, terminated. Asserted over the whole table after a move, because a path that is merely
+    // *plausible* still resolves the wrong branch.
+    addCategory(['name' => 'Drinks'])->assertRedirect();
+    addCategory(['name' => 'Wine'])->assertRedirect();
+    addCategory(['name' => 'Red', 'parent_id' => categoryNamed('Wine')->getKey()])->assertRedirect();
+
+    test()->patchJson(route('categories.update', categoryNamed('Wine')->getKey()), [
+        'parent_id' => categoryNamed('Drinks')->getKey(),
+    ])->assertRedirect();
+
+    $byId = PosCategory::query()->withoutGlobalScopes()->get()->keyBy('id');
+
+    foreach ($byId as $category) {
+        $parentPath = $category->parent_id === null
+            ? '/'
+            : (string) $byId[$category->parent_id]->path;
+
+        expect((string) $category->path)->toBe($parentPath.$category->getKey().'/',
+            'category '.$category->getKey().' ('.$category->name.') has a path its parent does not explain');
+    }
+});

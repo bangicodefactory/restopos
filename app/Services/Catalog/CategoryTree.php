@@ -51,6 +51,11 @@ final class CategoryTree
      */
     public function place(PosCategory $node, ?PosCategory $parent): void
     {
+        // Checked here rather than only on a move, because both doors reach this. Guarding
+        // `reparent` alone left the bound trivially defeatable: create one level at a time and the
+        // tree goes as deep as you like, which is the shape the pricing walk cannot read.
+        $this->assertDepthIsReadable($parent);
+
         $node->forceFill([
             'depth' => $parent === null ? 0 : (int) $parent->depth + 1,
             'path' => $this->pathFor($parent, (int) $node->getKey()),
@@ -131,9 +136,24 @@ final class CategoryTree
             ]);
         }
 
-        if ((int) $parent->depth + 1 >= self::MAX_DEPTH) {
+    }
+
+    /**
+     * Refuse a nesting deeper than the pricing engine can walk.
+     *
+     * `self::MAX_DEPTH` is not an arbitrary tidiness limit: `PricingService::ancestryFor` climbs
+     * `parent_id` under a hard `$guard++ < 10` and stops. A category nested past that has ancestors
+     * the engine never reaches, so a pricelist rule attached to one of those roots silently stops
+     * applying to everything in the deep branch — the sale is simply priced differently, and nothing
+     * says why. The tree refuses to build what the engine cannot read.
+     */
+    private function assertDepthIsReadable(?PosCategory $parent): void
+    {
+        if ($parent !== null && (int) $parent->depth + 1 >= self::MAX_DEPTH) {
             throw ValidationException::withMessages([
-                'parent_id' => 'Categories cannot be nested more than '.self::MAX_DEPTH.' levels deep.',
+                'parent_id' => 'Categories cannot be nested more than '.self::MAX_DEPTH.' levels deep,'
+                    .' because the pricing rules are resolved by walking up from the product and stop'
+                    .' at that depth.',
             ]);
         }
     }
