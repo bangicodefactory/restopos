@@ -57,3 +57,29 @@ export function flattenTree(nodes: readonly CategoryNode[], depth = 0): { node: 
     }
     return out;
 }
+
+/**
+ * Every category that may be a parent of `subject`.
+ *
+ * Excludes the node itself and its own descendants — the server refuses both, and offering them in
+ * the picker means the only way to learn that is to be told off. Walks `parent_id` rather than
+ * reading `path`, because `path` is not in the page payload and does not need to be.
+ */
+export function parentOptions(categories: CategoryRow[], subject: CategoryRow | null): CategoryRow[] {
+    if (subject === null) return categories;
+
+    const banned = new Set<number>([subject.id]);
+    let grew = true;
+
+    while (grew) {
+        grew = false;
+        for (const candidate of categories) {
+            if (candidate.parent_id !== null && banned.has(candidate.parent_id) && !banned.has(candidate.id)) {
+                banned.add(candidate.id);
+                grew = true;
+            }
+        }
+    }
+
+    return categories.filter((candidate) => !banned.has(candidate.id));
+}

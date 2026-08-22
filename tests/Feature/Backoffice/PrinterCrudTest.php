@@ -11,6 +11,7 @@ use App\Models\Identity\Permission;
 use App\Models\Identity\Role;
 use App\Models\Pos\PosPrinter;
 use App\Models\User;
+use App\Services\Catalog\CategoryTree;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -87,9 +88,20 @@ function createPrinter(array $payload = []): TestResponse
  */
 function categoryId(string $name): int
 {
-    test()->post(route('categories.store'), ['name' => $name, 'sequence' => 10])->assertRedirect();
+    // Through `CategoryTree` rather than the endpoint: this is a fixture, and since BAN-422 the
+    // category routes need `config.manage`, which a kitchen manager does not have. The service is
+    // what computes `path`, so the row is still built the way the application builds it.
+    $category = PosCategory::query()->create([
+        'company_id' => test()->fx->company->getKey(),
+        'name' => $name,
+        'sequence' => 10,
+        'depth' => 0,
+        'path' => '/',
+    ]);
 
-    return (int) PosCategory::query()->where('name', $name)->value('id');
+    app(CategoryTree::class)->place($category, null);
+
+    return (int) $category->getKey();
 }
 
 function routedCategories(int $printerId): array

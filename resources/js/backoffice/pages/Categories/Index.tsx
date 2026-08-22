@@ -30,9 +30,16 @@ import { ConfirmAction } from '../../components/ui/ConfirmAction';
 import { Badge, Card, CardBody, CardHeader, EmptyState, Notice } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { decimalHour, toDecimalHour } from '../../lib/format';
+import { useGuardedDelete } from '../../lib/guardedRequest';
 import { routes } from '../../lib/routes';
 
-import { buildTree, flattenTree, type CategoriesIndexProps, type CategoryRow } from './types';
+import {
+    buildTree,
+    flattenTree,
+    parentOptions,
+    type CategoriesIndexProps,
+    type CategoryRow,
+} from './types';
 
 export default function CategoriesIndex({ categories }: CategoriesIndexProps): JSX.Element {
     const t = useT();
@@ -177,52 +184,136 @@ export default function CategoriesIndex({ categories }: CategoriesIndexProps): J
     );
 }
 
+/** Everything a category has, on both doors (BAN-422). */
+type CategoryFormData = {
+    name: string;
+    parent_id: number | null;
+    sequence: number | null;
+    color: number;
+    hour_after: string;
+    hour_until: string;
+    self_order_visible: boolean;
+};
+
+const BLANK_CATEGORY: CategoryFormData = {
+    name: '',
+    parent_id: null,
+    sequence: 10,
+    color: 0,
+    hour_after: '',
+    hour_until: '',
+    self_order_visible: true,
+};
+
+/** The decimal hours the endpoint wants, from the `<input type="time">` the operator sees. */
+function withDecimalHours(data: Record<string, unknown>): Record<string, unknown> {
+    return {
+        ...data,
+        hour_after: data.hour_after === '' ? null : toDecimalHour(String(data.hour_after)),
+        hour_until: data.hour_until === '' ? null : toDecimalHour(String(data.hour_until)),
+    };
+}
+
+/**
+ * The one field set both forms render.
+ *
+ * They used to render different ones, and it was not a simplification: creation had no availability
+ * window and editing had no parent, so each door was missing a capability the other had. Sharing the
+ * component is what stops them drifting apart again.
+ */
+function CategoryFields({
+    data,
+    errors,
+    onChange,
+    categories,
+    subject,
+}: {
+    data: CategoryFormData;
+    errors: Partial<Record<keyof CategoryFormData, string>>;
+    onChange: <K extends keyof CategoryFormData>(key: K, value: CategoryFormData[K]) => void;
+    categories: CategoryRow[];
+    subject: CategoryRow | null;
+}): JSX.Element {
+    const t = useT();
+
+    return (
+        <>
+            <TextField
+                label="Nom"
+                required
+                value={data.name}
+                error={errors.name}
+                onChange={(value) => onChange('name', value)}
+            />
+            <RelationPicker
+                label={t('category.parent')}
+                value={data.parent_id}
+                options={parentOptions(categories, subject).map((category) => ({
+                    value: String(category.id),
+                    label: category.name,
+                }))}
+                onChange={(value) => onChange('parent_id', value)}
+            />
+            <NumberField
+                label={t('category.sequence')}
+                value={data.sequence}
+                error={errors.sequence}
+                onChange={(value) => onChange('sequence', value)}
+            />
+            <ColorIndexField
+                label={t('employee.colour')}
+                value={data.color}
+                onChange={(value) => onChange('color', value)}
+            />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+                <TimeField
+                    label="Disponible à partir de"
+                    value={data.hour_after}
+                    onChange={(value) => onChange('hour_after', value)}
+                />
+                <TimeField
+                    label="Disponible jusqu’à"
+                    value={data.hour_until}
+                    onChange={(value) => onChange('hour_until', value)}
+                />
+            </div>
+
+            <ToggleField
+                label="Visible en commande client"
+                checked={data.self_order_visible}
+                onChange={(checked) => onChange('self_order_visible', checked)}
+                hint={t('category.windowHint')}
+            />
+        </>
+    );
+}
+
 function CreateCategory({ categories }: { categories: CategoryRow[] }): JSX.Element {
     const t = useT();
-    const form = useForm<{
-        name: string;
-        parent_id: number | null;
-        sequence: number | null;
-        color: number;
-        self_order_visible: boolean;
-    }>({ name: '', parent_id: null, sequence: 10, color: 0, self_order_visible: true });
+    const form = useForm<CategoryFormData>({ ...BLANK_CATEGORY });
 
     return (
         <Card>
             <CardHeader title={t('category.new')} />
             <CardBody className="space-y-4">
-                <TextField
-                    label="Nom"
-                    required
-                    value={form.data.name}
-                    error={form.errors.name}
-                    onChange={(value) => form.setData('name', value)}
-                />
-                <RelationPicker
-                    label={t('category.parent')}
-                    value={form.data.parent_id}
-                    options={categories.map((category) => ({ value: String(category.id), label: category.name }))}
-                    onChange={(value) => form.setData('parent_id', value)}
-                />
-                <NumberField
-                    label={t('category.sequence')}
-                    value={form.data.sequence}
-                    onChange={(value) => form.setData('sequence', value)}
-                />
-                <ToggleField
-                    label="Visible en commande client"
-                    checked={form.data.self_order_visible}
-                    onChange={(checked) => form.setData('self_order_visible', checked)}
+                <CategoryFields
+                    data={form.data}
+                    errors={form.errors}
+                    onChange={form.setData}
+                    categories={categories}
+                    subject={null}
                 />
                 <Button
                     loading={form.processing}
                     disabled={form.data.name.trim() === ''}
-                    onClick={() =>
+                    onClick={() => {
+                        form.transform(withDecimalHours);
                         form.post(routes.categories.store(), {
                             preserveScroll: true,
                             onSuccess: () => form.reset(),
-                        })
-                    }
+                        });
+                    }}
                 >
                     {t('action.create')}
                 </Button>
@@ -239,16 +330,10 @@ function EditCategory({
     categories: CategoryRow[];
 }): JSX.Element {
     const t = useT();
-    const form = useForm<{
-        name: string;
-        sequence: number | null;
-        color: number;
-        hour_after: string;
-        hour_until: string;
-        self_order_visible: boolean;
-        active: boolean;
-    }>({
+    const remove = useGuardedDelete();
+    const form = useForm<CategoryFormData & { active: boolean }>({
         name: category.name,
+        parent_id: category.parent_id,
         sequence: category.sequence,
         color: category.color,
         hour_after: category.hour_after === null ? '' : toClock(category.hour_after),
@@ -259,11 +344,7 @@ function EditCategory({
 
     const save = (): void => {
         // `transform` mutates the form and returns void in Inertia v2 — it is not chainable.
-        form.transform((data) => ({
-            ...data,
-            hour_after: data.hour_after === '' ? null : toDecimalHour(data.hour_after),
-            hour_until: data.hour_until === '' ? null : toDecimalHour(data.hour_until),
-        }));
+        form.transform(withDecimalHours);
         form.patch(routes.categories.update(category.id), { preserveScroll: true });
     };
 
@@ -274,14 +355,19 @@ function EditCategory({
             <CardHeader
                 title={category.name}
                 actions={
+                    /*
+                     * The server refuses far more than sub-categories — products still filed here,
+                     * kitchen routing, registers showing it, pricelist rules — and every one of those
+                     * referents cascades, so an unguarded delete would take them silently.
+                     * `useGuardedDelete` is what puts the server's reason in front of the operator
+                     * instead of reloading in silence.
+                     */
                     <ConfirmAction
                         label={t('action.delete')}
                         title={t('confirm.title')}
                         message={t('category.deleteConfirm', { name: category.name })}
                         disabled={hasChildren}
-                        onConfirm={() =>
-                            router.delete(routes.categories.destroy(category.id), { preserveScroll: true })
-                        }
+                        onConfirm={() => remove(routes.categories.destroy(category.id))}
                     />
                 }
             />
@@ -292,43 +378,14 @@ function EditCategory({
                     </Notice>
                 ) : null}
 
-                <TextField
-                    label="Nom"
-                    value={form.data.name}
-                    error={form.errors.name}
-                    onChange={(value) => form.setData('name', value)}
-                />
-                <NumberField
-                    label={t('category.sequence')}
-                    value={form.data.sequence}
-                    error={form.errors.sequence}
-                    onChange={(value) => form.setData('sequence', value)}
-                />
-                <ColorIndexField
-                    label={t('employee.colour')}
-                    value={form.data.color}
-                    onChange={(value) => form.setData('color', value)}
+                <CategoryFields
+                    data={form.data}
+                    errors={form.errors}
+                    onChange={form.setData}
+                    categories={categories}
+                    subject={category}
                 />
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                    <TimeField
-                        label="Disponible à partir de"
-                        value={form.data.hour_after}
-                        onChange={(value) => form.setData('hour_after', value)}
-                    />
-                    <TimeField
-                        label="Disponible jusqu’à"
-                        value={form.data.hour_until}
-                        onChange={(value) => form.setData('hour_until', value)}
-                    />
-                </div>
-
-                <ToggleField
-                    label="Visible en commande client"
-                    checked={form.data.self_order_visible}
-                    onChange={(checked) => form.setData('self_order_visible', checked)}
-                    hint={t('category.windowHint')}
-                />
                 <ToggleField
                     label={t('state.active')}
                     checked={form.data.active}
