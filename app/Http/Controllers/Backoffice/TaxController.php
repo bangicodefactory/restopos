@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Backoffice;
 use App\Enums\OrderState;
 use App\Enums\TaxAmountType;
 use App\Enums\TaxRoundingStrategy;
+use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
 use App\Models\Pricing\Tax;
 use App\Models\Pricing\TaxGroup;
@@ -29,6 +30,8 @@ use Inertia\Response;
  */
 final class TaxController extends Controller
 {
+    use DetectsRealChanges;
+
     public function __construct(private readonly ConnectionInterface $connection) {}
 
     public function index(): Response
@@ -98,7 +101,7 @@ final class TaxController extends Controller
         Gate::authorize('update', $tax);
 
         $data = $this->validated($request, creating: false);
-        $changed = $this->arithmeticChanges($tax, $data);
+        $changed = $this->realChanges($tax, $data, self::ARITHMETIC_KEYS);
 
         if ($changed !== []) {
             $open = $this->openOrdersUsing($tax);
@@ -135,49 +138,6 @@ final class TaxController extends Controller
         'rounding_strategy',
         'sequence',
     ];
-
-    /**
-     * Which arithmetic fields the payload would actually *change*.
-     *
-     * Presence is not change, and the difference is the whole usability of this guard: the editor is
-     * one `useForm`, so every save posts all twelve fields whether or not the operator touched them.
-     * Keying the freeze off which keys arrived meant that with a table open, renaming a tax was
-     * refused — by a message that says the name can still be changed. Probed before the fix: 422 on
-     * a payload whose only edit was `name`.
-     *
-     * Compared per type rather than with `==`, because the browser sends `'21'` for a stored
-     * `'21.0000'` and `true` for a stored `1`.
-     *
-     * @param  array<string, mixed>  $data
-     * @return list<string>
-     */
-    private function arithmeticChanges(Tax $tax, array $data): array
-    {
-        $changed = [];
-
-        foreach (self::ARITHMETIC_KEYS as $key) {
-            if (! array_key_exists($key, $data)) {
-                continue;
-            }
-
-            $current = $tax->getAttribute($key);
-            $current = $current instanceof \BackedEnum ? $current->value : $current;
-            $submitted = $data[$key];
-
-            $same = match ($key) {
-                'amount' => bccomp((string) $submitted, (string) $current, 4) === 0,
-                'sequence' => (int) $submitted === (int) $current,
-                'price_include', 'include_base_amount', 'is_base_affected', 'has_negative_factor' => (bool) $submitted === (bool) $current,
-                default => (string) $submitted === (string) $current,
-            };
-
-            if (! $same) {
-                $changed[] = $key;
-            }
-        }
-
-        return $changed;
-    }
 
     /** How many unpaid orders have a line carrying this tax. */
     private function openOrdersUsing(Tax $tax): int

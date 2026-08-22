@@ -8,6 +8,7 @@ use App\Enums\PaymentMethodType;
 use App\Enums\QrCodeMethod;
 use App\Enums\SessionState;
 use App\Enums\TerminalProvider;
+use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PaymentProvider;
@@ -31,6 +32,8 @@ use Inertia\Response;
  */
 final class PaymentMethodController extends Controller
 {
+    use DetectsRealChanges;
+
     public function __construct(private readonly ConnectionInterface $connection) {}
 
     public function index(): Response
@@ -103,7 +106,12 @@ final class PaymentMethodController extends Controller
         // when the session opened. Flip `is_cash_count` at lunchtime and the drawer that balanced at
         // 11am is short at close, with nothing on the report explaining why. `sequence` is exempt
         // because it only decides button order.
-        $changed = array_diff_key($data, ['sequence' => true]);
+        // What the save would actually *move*, not which keys arrived. The editor is one
+        // `useForm` and posts all sixteen fields on every save, so keying off presence made the
+        // `sequence` exemption dead through the real UI: a reorder mid-service was refused by a
+        // message saying only the order could be changed. Probed: 422 on a full-form payload whose
+        // only edit was `sequence` (review of #85).
+        $changed = $this->realChanges($paymentMethod, $data, self::FROZEN_KEYS);
 
         if ($changed !== [] && $this->usedByOpenSession($paymentMethod)) {
             throw ValidationException::withMessages([
@@ -163,6 +171,33 @@ final class PaymentMethodController extends Controller
 
         return back()->with('success', 'Payment method removed.');
     }
+
+    /**
+     * Everything an open session freezes — that is, every column except `sequence`.
+     *
+     * `sequence` is exempt because it only decides the order buttons appear in on the payment
+     * screen. Everything else feeds the session's arithmetic or its reconciliation.
+     *
+     * @var list<string>
+     */
+    private const FROZEN_KEYS = [
+        'name',
+        'method_type',
+        'currency_id',
+        'is_cash_count',
+        'identify_customer',
+        'allow_change',
+        'allow_refund',
+        'is_rounding_target',
+        'terminal_provider',
+        'payment_provider_id',
+        'terminal_config',
+        'qr_code_method',
+        'default_qr_payload',
+        'ledger_code',
+        'image_media_id',
+        'active',
+    ];
 
     /** Is any register using this method currently mid-session? */
     private function usedByOpenSession(PaymentMethod $method): bool

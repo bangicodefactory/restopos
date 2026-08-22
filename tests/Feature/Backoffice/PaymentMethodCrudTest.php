@@ -389,3 +389,93 @@ it('carries the currencies the page needs to offer a choice', function (): void 
     expect($props['currencies'])->not->toBeEmpty()
         ->and($props['currencies'][0])->toHaveKeys(['id', 'code', 'name']);
 });
+
+/**
+ * The whole form, exactly as the editor posts it: every field on every save, touched or not.
+ *
+ * @param  array<string, mixed>  $edits
+ * @return array<string, mixed>
+ */
+function fullMethodForm(PaymentMethod $m, array $edits = []): array
+{
+    return [
+        'name' => (string) $m->name,
+        'method_type' => $m->method_type->value,
+        'currency_id' => (int) $m->currency_id,
+        'terminal_provider' => $m->terminal_provider->value,
+        // A select's value is a string, and `''` is "no provider".
+        'payment_provider_id' => $m->payment_provider_id === null ? '' : (string) $m->payment_provider_id,
+        'qr_code_method' => $m->qr_code_method->value,
+        'default_qr_payload' => (string) ($m->default_qr_payload ?? ''),
+        'is_cash_count' => (bool) $m->is_cash_count,
+        'identify_customer' => (bool) $m->identify_customer,
+        'allow_change' => (bool) $m->allow_change,
+        'allow_refund' => (bool) $m->allow_refund,
+        'is_rounding_target' => (bool) $m->is_rounding_target,
+        'ledger_code' => (string) ($m->ledger_code ?? ''),
+        'sequence' => (int) $m->sequence,
+        'active' => (bool) $m->active,
+        ...$edits,
+    ];
+}
+
+it('lets the editor reorder a method mid-session even though it posts every field', function (): void {
+    // The `sequence` exemption exists so a manager can move a button during service. Keyed off which
+    // keys *arrived* it was dead through the real UI, because the editor posts all sixteen: the save
+    // was refused by a message saying only the order could be changed. Probed: 422 on a full-form
+    // payload whose only edit was `sequence` (review of #85).
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['sequence' => 99]))->assertRedirect();
+
+    expect((int) PaymentMethod::query()->whereKey($method->getKey())->value('sequence'))->toBe(99);
+});
+
+it('still freezes the same full form when it really does change the method', function (): void {
+    // The control: the fix must not have turned the freeze off, only stopped it firing on a no-op.
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['is_cash_count' => true]))->assertStatus(422);
+
+    expect((bool) PaymentMethod::query()->whereKey($method->getKey())->value('is_cash_count'))->toBeFalse();
+});
+
+it('sees through the shapes a form gives a null, a bool and an enum', function (): void {
+    // `''` for a stored null ledger code, `false` for a stored `0`, `'bank'` for a cast enum. Any of
+    // these read as an edit would refuse a save that changes nothing at all.
+    addMethod($this->fx)->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    expect($method->ledger_code)->toBeNull('the fixture must leave a null to compare against');
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()), fullMethodForm($method))
+        ->assertRedirect();
+});
+
+it('does not mistake an emptied ledger code for no change', function (): void {
+    // The other side of that comparison: `''` against a stored `'7001'` is a real edit and must be
+    // frozen, or "null and empty are the same" quietly becomes "empty is always the same".
+    addMethod($this->fx, ['ledger_code' => '7001'])->assertRedirect();
+    $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
+
+    $this->fx->config->paymentMethods()->syncWithoutDetaching([$method->getKey()]);
+    $this->fx->withSession();
+
+    test()->patchJson(route('payment-methods.update', $method->getKey()),
+        fullMethodForm($method, ['ledger_code' => '']))->assertStatus(422);
+
+    expect((string) PaymentMethod::query()->whereKey($method->getKey())->value('ledger_code'))->toBe('7001');
+});
