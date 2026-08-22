@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Identity\Permission;
+use App\Models\Identity\Role;
 use App\Models\Pos\PosConfig;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -17,6 +19,36 @@ use Tests\Feature\PosFixtures;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
+
+/**
+ * A user of `$company` who may configure the register.
+ *
+ * These tests are about *tenancy*, not authorization — but since BAN-422 the category endpoints are
+ * policy-gated, so a user with a company and no abilities is refused before the scope is ever
+ * consulted, and a 403 would read as "isolation works".
+ */
+function tenantUser(int $companyId): User
+{
+    $role = Role::query()->create([
+        'name' => 'Config manager',
+        'slug' => 'config-manager-'.Str::random(6),
+        'is_system' => false,
+    ]);
+
+    foreach (['config.view', 'config.manage'] as $slug) {
+        $permission = Permission::query()
+            ->firstOrCreate(['slug' => $slug], ['group' => 'config']);
+        DB::table('permission_role')->insertOrIgnore([
+            'role_id' => $role->getKey(),
+            'permission_id' => $permission->getKey(),
+        ]);
+    }
+
+    $user = User::factory()->create(['company_id' => $companyId, 'is_super_admin' => false]);
+    DB::table('role_user')->insert(['role_id' => $role->getKey(), 'user_id' => $user->getKey()]);
+
+    return $user;
+}
 
 /**
  * XCT-101 — tenant isolation.
@@ -98,7 +130,7 @@ it('leaves the device and console paths alone', function (): void {
  * cannot even see what they made.
  */
 it('stamps a new category with the creating user company, not a default', function (): void {
-    $betaUser = User::factory()->create(['company_id' => $this->beta->company->getKey()]);
+    $betaUser = tenantUser((int) $this->beta->company->getKey());
 
     $this->actingAs($betaUser)
         ->post('/categories', ['name' => 'Desserts'])
@@ -118,13 +150,15 @@ it('refuses to root a category under another company parent', function (): void 
         'path' => '/Alpha only',
     ]);
 
-    $betaUser = User::factory()->create(['company_id' => $this->beta->company->getKey()]);
+    $betaUser = tenantUser((int) $this->beta->company->getKey());
 
     // `exists:` validation passes — it does not know about tenants — so without the check the child
     // would be created as a root of company beta, quietly detached from the parent it named.
+    // Refused on the `parent_id` field rather than as a page-level flash since BAN-422, so the
+    // message lands next to the control that caused it.
     $this->actingAs($betaUser)
         ->post('/categories', ['name' => 'Stolen', 'parent_id' => $parent->getKey()])
-        ->assertSessionHas('error');
+        ->assertSessionHasErrors('parent_id');
 
     $this->actingAs(User::factory()->create(['is_super_admin' => true]));
     expect(PosCategory::query()->where('name', 'Stolen')->exists())->toBeFalse();

@@ -21,8 +21,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * The register's browsing tree, distinct from the accounting/product category
- * tree (spec §2.B). `path` is a materialised path (`/1/7/22/`) replacing Odoo's
- * `parent_path`, so descendant queries are a single LIKE.
+ * tree (spec §2.B). `path` is a materialised path of **ids, terminated** (`/1/7/22/`) replacing
+ * Odoo's `parent_path`, so descendant queries are a single LIKE.
+ *
+ * Both halves of that shape are load-bearing, and neither used to hold (BAN-422). Ids, so a rename
+ * does not have to rewrite the subtree. Terminated, so a prefix cannot collide: `/Drink` matched
+ * `/Drinks special` and swept an unrelated sibling into the subtree, while `/1/` cannot prefix
+ * `/11/`. `CategoryTree` is the only thing that writes it.
  */
 class PosCategory extends Model implements PosLoadable
 {

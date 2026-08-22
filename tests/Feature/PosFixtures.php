@@ -153,13 +153,15 @@ final class PosFixtures
         $this->category = PosCategory::query()->create([
             'company_id' => $this->company->getKey(),
             'name' => 'Food'.$this->suffix,
-            // The marker leads the path rather than trailing it. `pos_categories.path` is matched
-            // with `LIKE path%` in three places, so `/Food` is a prefix of `/Food #2` and a subtree
-            // query rooted at the first venue would reach into the second — asymmetrically, which is
-            // a worse kind of wrong than the identical paths this replaced (BAN-508).
-            'path' => $this->suffix === '' ? '/Food' : '/'.trim($this->suffix).' Food',
-            'depth' => 0, 'sequence' => 10,
+            'path' => '/', 'depth' => 0, 'sequence' => 10,
         ]);
+
+        // `pos_categories.path` is a materialised path of **ids**, terminated (BAN-422), which is
+        // what makes `LIKE path%` mean "this branch" rather than "anything whose name starts the
+        // same". The leading-marker workaround this replaces existed because `/Food` prefixed
+        // `/Food #2` and a subtree query rooted at one venue reached into the next (BAN-508); an id
+        // path cannot do that, since `/1/` is not a prefix of `/11/`.
+        $this->category->forceFill(['path' => '/'.$this->category->getKey().'/'])->save();
 
         [$this->product, $this->variant] = $this->product('Margherita'.$this->suffix, '10.00', $uom->getKey());
         [$this->drink, $this->drinkVariant] = $this->product('Sparkling water'.$this->suffix, '2.50', $uom->getKey());

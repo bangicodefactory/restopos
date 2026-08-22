@@ -197,26 +197,33 @@ class CatalogSeeder extends Seeder
                 'company_id' => $this->companyId,
                 'parent_id' => null,
                 'name' => $root,
-                'path' => '/'.Demo::slug($root),
+                // Placeholder; the real path is the row's own id and does not exist yet.
+                'path' => '/',
                 'sequence' => $sequence,
                 'ledger_code' => $branch['code'],
                 'created_at' => $this->now,
                 'updated_at' => $this->now,
             ]);
             $this->productCategories[$root] = $rootId;
+            DB::table('product_categories')->where('id', $rootId)->update(['path' => '/'.$rootId.'/']);
 
             $childIndex = 0;
             foreach ($branch['children'] as $child => $ledgerCode) {
-                $this->productCategories[$child] = (int) DB::table('product_categories')->insertGetId([
+                $childId = (int) DB::table('product_categories')->insertGetId([
                     'company_id' => $this->companyId,
                     'parent_id' => $rootId,
                     'name' => $child,
-                    'path' => '/'.Demo::slug($root).'/'.Demo::slug($child),
+                    'path' => '/',
                     'sequence' => (++$childIndex) * 10,
                     'ledger_code' => $ledgerCode,
                     'created_at' => $this->now,
                     'updated_at' => $this->now,
                 ]);
+
+                DB::table('product_categories')->where('id', $childId)
+                    ->update(['path' => '/'.$rootId.'/'.$childId.'/']);
+
+                $this->productCategories[$child] = $childId;
             }
             $sequence += 10;
         }
@@ -262,7 +269,7 @@ class CatalogSeeder extends Seeder
                 'company_id' => $this->companyId,
                 'parent_id' => null,
                 'name' => $root,
-                'path' => '/'.Demo::slug($root),
+                'path' => '/',
                 'depth' => 0,
                 'sequence' => $rootSequence,
                 'color' => $definition['color'],
@@ -272,14 +279,15 @@ class CatalogSeeder extends Seeder
                 'updated_at' => $this->now,
             ]);
             $this->posCategories[$root] = $rootId;
+            DB::table('pos_categories')->where('id', $rootId)->update(['path' => '/'.$rootId.'/']);
 
             $childSequence = 10;
             foreach ($definition['children'] as $name => $child) {
-                $this->posCategories[$name] = (int) DB::table('pos_categories')->insertGetId([
+                $childId = (int) DB::table('pos_categories')->insertGetId([
                     'company_id' => $this->companyId,
                     'parent_id' => $rootId,
                     'name' => $name,
-                    'path' => '/'.Demo::slug($root).'/'.Demo::slug($name),
+                    'path' => '/',
                     'depth' => 1,
                     'sequence' => $childSequence,
                     'color' => $child['color'],
@@ -290,6 +298,11 @@ class CatalogSeeder extends Seeder
                     'created_at' => $this->now,
                     'updated_at' => $this->now,
                 ]);
+
+                DB::table('pos_categories')->where('id', $childId)
+                    ->update(['path' => '/'.$rootId.'/'.$childId.'/']);
+
+                $this->posCategories[$name] = $childId;
                 $childSequence += 10;
             }
             $rootSequence += 10;

@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 150
+  manual_debt: 148
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -342,8 +342,8 @@ features:
   BOF-081: { status: shipped, surface: user, manual: todo }
   BOF-082: { status: shipped, surface: user, manual: todo }
   BOF-083: { status: shipped, surface: user, manual: todo }
-  BOF-084: { status: shipped, surface: user, manual: todo }
-  BOF-085: { status: shipped, surface: user, manual: todo }
+  BOF-084: { status: shipped, surface: user, manual: back-office/menu-categories.md#menu-categories }
+  BOF-085: { status: shipped, surface: user, manual: back-office/menu-categories.md#add-a-category }
   BOF-087: { status: shipped, surface: user, manual: todo }
   BOF-090: { status: shipped, surface: user, manual: todo }
   BOF-091: { status: shipped, surface: user, manual: back-office/taxes.md#taxes }

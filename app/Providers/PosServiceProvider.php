@@ -26,6 +26,7 @@ use App\Policies\FloorPolicy;
 use App\Policies\OrderPolicy;
 use App\Policies\PaymentMethodPolicy;
 use App\Policies\PosBillPolicy;
+use App\Policies\PosCategoryPolicy;
 use App\Policies\PosConfigPolicy;
 use App\Policies\PosNotePolicy;
 use App\Policies\PrepDisplayPolicy;
@@ -147,6 +148,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(Floor::class, FloorPolicy::class);
         Gate::policy(PosBill::class, PosBillPolicy::class);
         Gate::policy(PosNote::class, PosNotePolicy::class);
+        Gate::policy(PosCategory::class, PosCategoryPolicy::class);
         Gate::policy(Tax::class, TaxPolicy::class);
         Gate::policy(TaxGroup::class, TaxGroupPolicy::class);
         Gate::policy(PaymentMethod::class, PaymentMethodPolicy::class);
