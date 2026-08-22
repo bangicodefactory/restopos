@@ -69,26 +69,6 @@ export type PrepDisplayEditProps = {
     categories: PrepCategory[];
 };
 
-/**
- * The keys `PATCH /prep-displays/{prepDisplay}` validates.
- *
- * `stages` is deliberately absent: the contract accepts the display's options and its category
- * routing, nothing else. The stage editor on `Edit` therefore states that in place — see
- * `display.stagesReadOnly`.
- */
-export const WRITABLE_DISPLAY_KEYS = [
-    'name',
-    'layout',
-    'average_prep_minutes',
-    'late_threshold_minutes',
-    'done_retention_minutes',
-    'show_all_categories',
-    'auto_advance_on_all_ready',
-    'sound_on_new_order',
-    'active',
-    'category_ids',
-] as const;
-
 export const LAYOUT_LABEL: Record<string, string> = {
     columns: 'Colonnes',
     grid: 'Grille',

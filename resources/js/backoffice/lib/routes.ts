@@ -94,6 +94,7 @@ export const routes = {
         index: (): string => '/prep-displays',
         edit: (uuid: string): string => `/prep-displays/${uuid}/edit`,
         update: (uuid: string): string => `/prep-displays/${uuid}`,
+        rotateToken: (uuid: string): string => `/prep-displays/${uuid}/rotate-token`,
     },
 
     selfOrder: {

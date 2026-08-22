@@ -19,7 +19,7 @@
  * out rather than left to be inferred.
  */
 
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn } from '@shared/ui';
 import { useCallback, useMemo, useState, type JSX } from 'react';
 
@@ -180,8 +180,26 @@ export default function PrepDisplayEdit({
                                         onChange={(checked) => form.setData('auto_advance_on_all_ready', checked)}
                                         description={t('display.autoAdvanceHint')}
                                     />
-                                    <div className="md:col-span-2">
+                                    <div className="md:col-span-2 space-y-2">
                                         <TokenField label={t('config.accessToken')} value={display.access_token} />
+                                        {/*
+                                          * Its own action, never a side effect of saving: this token
+                                          * is the whole of the screen's authentication, and rotating
+                                          * it blanks every device showing the board.
+                                          */}
+                                        <ConfirmAction
+                                            label={t('display.rotateToken')}
+                                            title={t('display.rotateToken')}
+                                            message={t('display.rotateTokenConfirm', { name: display.name })}
+                                            confirmPhrase={display.name}
+                                            onConfirm={() =>
+                                                router.post(
+                                                    routes.prepDisplays.rotateToken(display.uuid),
+                                                    {},
+                                                    { preserveScroll: true },
+                                                )
+                                            }
+                                        />
                                     </div>
                                 </FormSection>
 

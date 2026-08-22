@@ -131,6 +131,7 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('prep-displays', [PrepDisplayController::class, 'store'])->name('prep-displays.store');
     Route::patch('prep-displays/{prepDisplay}', [PrepDisplayController::class, 'update'])->name('prep-displays.update');
     Route::delete('prep-displays/{prepDisplay}', [PrepDisplayController::class, 'destroy'])->name('prep-displays.destroy');
+    Route::post('prep-displays/{prepDisplay}/rotate-token', [PrepDisplayController::class, 'rotateToken'])->name('prep-displays.rotate-token');
 
     Route::get('self-order/{config}/settings', [SelfOrderSettingsController::class, 'edit'])->name('self-order.settings');
     Route::patch('self-order/{config}/settings', [SelfOrderSettingsController::class, 'update'])->name('self-order.settings.update');
