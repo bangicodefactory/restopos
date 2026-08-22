@@ -46,6 +46,12 @@ function methodActor(PosFixtures $fx, array $permissions): User
 }
 
 beforeEach(function (): void {
+    // The tests that assert on the index page's props render the Inertia root view, and the PHP CI
+    // job builds no front-end assets — so without this the manifest is missing and the GET is a 500
+    // there while passing locally off a stale build. Route binding and the controller still run for
+    // real; only the asset tags are stubbed. Same reason as `RouteBindingTest`.
+    $this->withoutVite();
+
     // A decoy venue first, so the acting company is not id 1.
     PosFixtures::make();
 
