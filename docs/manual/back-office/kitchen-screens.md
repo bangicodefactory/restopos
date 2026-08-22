@@ -29,6 +29,43 @@ why.
 The screen gets its own address when you create it. That address is what you open on the physical
 display, and it is issued by the system rather than chosen — nobody can guess another screen's.
 
+## Columns
+
+The columns are the screen's own, and they are not decoration: **the order they sit in is the order
+a ticket moves through**, and each one has a *kind* underneath its name.
+
+The name is yours. Call the columns *Fired*, *On the grill* and *Away* if that is what your kitchen
+says — renaming changes nothing but what is printed at the top.
+
+The kind is what the screen works by. A ticket arriving from a till lands in the first column of
+kind **to do**; bumping it moves it to the first **in progress**; calling it away, to the first
+**ready**. So a board must keep one column of each of those three kinds, and the screen refuses a
+layout that drops one — otherwise food would be fired at a board with nowhere to put it, and nothing
+would say so. A fourth **served** column is optional: without one, a finished ticket simply clears.
+
+You can also give a column its own late alert, separate from the screen-wide one. A pass that should
+never hold a plate for more than three minutes can say so without making every other column shout.
+
+### Removing a column
+
+A column that still holds food being prepared cannot be removed, and the screen says how many items
+are on it. Move them on first, or wait for service to clear.
+
+Otherwise those items would lose their column mid-service and the board would place them somewhere
+else on its own — the chef who put a ticket in *on the grill* would find it back in *fired*, with
+nothing on screen explaining why. Items already **served or cancelled** hold nothing open.
+
+## Rotate the screen's address
+
+**The screen's address is not a password, but it does spread.** A tablet bookmarked on a shared
+bench, a link pasted into a staff group chat, an agency chef who worked one weekend — all of them
+keep working.
+
+**Rotate the screen link** issues a new address and retires the old one immediately. Every screen
+showing this board goes blank until it is reopened on the new address, so do it between services if
+you can. The screen itself, its columns and its category routing are all untouched — this is the way
+to retire an address without dismantling the station.
+
 ## Remove a screen
 
 **Remove**. The till refuses while tickets are still on the board and says how many.

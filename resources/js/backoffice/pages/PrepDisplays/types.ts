@@ -72,9 +72,8 @@ export type PrepDisplayEditProps = {
 /**
  * The keys `PATCH /prep-displays/{prepDisplay}` validates.
  *
- * `stages` is deliberately absent: the contract accepts the display's options and its category
- * routing, nothing else. The stage editor on `Edit` therefore states that in place — see
- * `display.stagesReadOnly`.
+ * `stages` is part of the contract: the ordered list *is* the board's state machine, so the editor
+ * submits it whole and the server reconciles it by id (BAN-435).
  */
 export const WRITABLE_DISPLAY_KEYS = [
     'name',
@@ -87,6 +86,7 @@ export const WRITABLE_DISPLAY_KEYS = [
     'sound_on_new_order',
     'active',
     'category_ids',
+    'stages',
 ] as const;
 
 export const LAYOUT_LABEL: Record<string, string> = {

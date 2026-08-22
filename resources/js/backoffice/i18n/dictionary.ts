@@ -285,6 +285,9 @@ export const boFr = {
 
     'display.title': 'Écrans cuisine',
     'display.stages': 'Étapes',
+    'display.rotateToken': 'Régénérer le lien de l’écran',
+    'display.rotateTokenConfirm':
+        'Régénérer le lien de {name} ? L’ancienne adresse cesse de fonctionner immédiatement : chaque écran de la cuisine devra être rouvert.',
     'display.stagesReadOnly':
         'Le contrat n’accepte pas l’écriture des étapes : PATCH /prep-displays/{id} ne valide que les options de l’écran et les catégories.',
     'display.layout': 'Disposition',
@@ -938,6 +941,9 @@ export const boEn: BoDictionary = {
 
     'display.title': 'Kitchen displays',
     'display.stages': 'Stages',
+    'display.rotateToken': 'Rotate the screen link',
+    'display.rotateTokenConfirm':
+        'Rotate the link for {name}? The old address stops working immediately — every screen in the kitchen has to be reopened.',
     'display.stagesReadOnly':
         'The contract accepts no stage writes: PATCH /prep-displays/{id} only validates display options and categories.',
     'display.layout': 'Layout',

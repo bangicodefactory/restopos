@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Backoffice;
 
 use App\Enums\PrepDisplayLayout;
+use App\Enums\PrepLineState;
 use App\Enums\PrepOrderState;
 use App\Enums\PrepStageType;
 use App\Http\Controllers\Controller;
@@ -162,6 +163,28 @@ final class PrepDisplayController extends Controller
     }
 
     /**
+     * `POST /prep-displays/{prepDisplay}/rotate-token` — mint a new screen URL (BOF-115).
+     *
+     * `access_token` is two things at once: the screen's URL (`/kitchen/{token}`) and its broadcast
+     * channel name (`private-kitchen.display.{token}`). The channel is device-authorised, so knowing
+     * the token alone does not hand anyone the board — but it is still the address that spreads: a
+     * tablet bookmarked on a shared bench, a link pasted into a staff group chat, an agency chef who
+     * worked one weekend. Rotating is how a venue retires that address and drops every screen
+     * currently subscribed, without deleting the display and its stage setup.
+     *
+     * Before this the only way to do it was editing the database by hand. Tables and self-order
+     * configs both already had the door; the kitchen did not.
+     */
+    public function rotateToken(PrepDisplay $prepDisplay): RedirectResponse
+    {
+        Gate::authorize('update', $prepDisplay);
+
+        $prepDisplay->forceFill(['access_token' => Str::lower(Str::random(32))])->save();
+
+        return back()->with('success', 'Kitchen screen link rotated. Reopen the screen on every device that uses it.');
+    }
+
+    /**
      * The stage set a new board starts with (KDS-008).
      *
      * Pending → in progress → ready is the minimum a kitchen screen needs to be usable at all: one
@@ -191,7 +214,9 @@ final class PrepDisplayController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:64'],
-            'layout' => ['sometimes', 'string', 'max:16'],
+            // The enum, matching `store`. As a bare `string|max:16` this accepted any word at all
+            // and stored it: the board then rendered no known layout.
+            'layout' => ['sometimes', Rule::enum(PrepDisplayLayout::class)],
             'average_prep_minutes' => ['sometimes', 'integer', 'min:1', 'max:600'],
             'late_threshold_minutes' => ['sometimes', 'integer', 'min:1', 'max:600'],
             'done_retention_minutes' => ['sometimes', 'integer', 'min:1', 'max:1440'],
@@ -200,6 +225,7 @@ final class PrepDisplayController extends Controller
             'sound_on_new_order' => ['sometimes', 'boolean'],
             'active' => ['sometimes', 'boolean'],
             'category_ids' => ['sometimes', 'array'],
+            'category_ids.*' => ['integer'],
 
             // The KDS state machine is derived from this ordered list (KDS-008): the board's
             // next-stage behaviour follows the sequence, and `stage_type` is what its automatic
@@ -216,21 +242,23 @@ final class PrepDisplayController extends Controller
         $stages = $data['stages'] ?? null;
         unset($data['stages']);
 
+        // Both guards run before the transaction opens: a save that is going to be refused should
+        // not take out row locks on the stage table on its way to refusing.
+        if ($stages !== null) {
+            $this->assertStateMachineIntact($stages);
+            $this->assertRemovalsHoldNoWork($prepDisplay, $stages);
+        }
+
         $this->connection->transaction(function () use ($prepDisplay, &$data, $stages): void {
             if (array_key_exists('category_ids', $data)) {
-                // Filtered through the scoped model, not trusted: the pivot has no company of its
-                // own, so an id from the browser is the only thing standing between this display
-                // and another tenant's categories (XCT-101).
-                $categoryIds = PosCategory::query()
-                    ->whereIn('id', array_map(intval(...), (array) $data['category_ids']))
-                    ->pluck('id');
+                $categoryIds = $this->ownedCategories((array) $data['category_ids']);
 
                 $this->connection->table('pos_category_prep_display')->where('prep_display_id', $prepDisplay->getKey())->delete();
 
                 foreach ($categoryIds as $categoryId) {
                     $this->connection->table('pos_category_prep_display')->insert([
                         'prep_display_id' => $prepDisplay->getKey(),
-                        'pos_category_id' => (int) $categoryId,
+                        'pos_category_id' => $categoryId,
                     ]);
                 }
 
@@ -245,6 +273,130 @@ final class PrepDisplayController extends Controller
         });
 
         return back()->with('success', 'Preparation display saved.');
+    }
+
+    /**
+     * Resolve submitted category ids through the scoped model, refusing rather than dropping.
+     *
+     * The pivot carries no company of its own, so an id straight from the browser is the only thing
+     * between this display and another tenant's menu (XCT-101). Filtering the strangers away
+     * silently was the earlier shape, and it is worse than it sounds: a manager routes desserts to
+     * the pass, the save succeeds, and the routing is simply not there — the desserts print nowhere
+     * and the page says everything was saved. The same defect was fixed on printers (BAN-432).
+     *
+     * @param  list<mixed>  $ids
+     * @return list<int>
+     */
+    private function ownedCategories(array $ids): array
+    {
+        $wanted = array_values(array_unique(array_map(intval(...), $ids)));
+
+        $found = PosCategory::query()->whereIn('id', $wanted)->pluck('id')
+            ->map(static fn (mixed $v): int => (int) $v)->all();
+
+        $missing = array_values(array_diff($wanted, $found));
+
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'category_ids' => 'No such menu category: '.implode(', ', $missing).'.',
+            ]);
+        }
+
+        return $found;
+    }
+
+    /**
+     * The stage list *is* the state machine, so it has to keep the kinds the server resolves against
+     * (KDS-008).
+     *
+     * `KitchenDisplayService::stageIdForState()` and `PreparationService` both find a line's stage by
+     * `stage_type` — never by `is_default`, despite the name. A fired line lands on the first `todo`
+     * stage, a bump moves it to the first `in_progress`, calling away to the first `ready`. Remove
+     * the `todo` stage and every newly fired line arrives with no stage at all; remove `in_progress`
+     * and bumping a card leaves it sitting where it was while its state has moved on. Neither fails
+     * loudly. The board simply stops agreeing with the kitchen, and the first anyone knows is a
+     * plate that nobody called away.
+     *
+     * `done` is not required: a board that clears a served card rather than showing it is an ordinary
+     * setup, and a served line keeps whatever stage it was on.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function assertStateMachineIntact(array $rows): void
+    {
+        $types = array_map(static fn (array $row): string => (string) $row['stage_type'], $rows);
+
+        $missing = [];
+
+        foreach ([PrepStageType::Todo, PrepStageType::InProgress, PrepStageType::Ready] as $type) {
+            if (! in_array($type->value, $types, true)) {
+                $missing[] = $type->value;
+            }
+        }
+
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'stages' => 'A board needs a stage of each kind, and these are missing: '
+                    .implode(', ', $missing).'. Rename a stage rather than removing it — the kind is'
+                    .' what the screen moves tickets by, the name is only what the kitchen reads.',
+            ]);
+        }
+    }
+
+    /**
+     * Refuse to remove a stage that still holds live work (KDS-008).
+     *
+     * `prep_order_lines.prep_stage_id` is `nullOnDelete`, so the delete never fails — the lines just
+     * lose their column. The board then recovers by falling back to the line's own state, which means
+     * a card silently moves somewhere else on the pass mid-service: the chef who put it in "sauce"
+     * finds it back in "to do", with nothing on screen saying why.
+     *
+     * Served and cancelled lines are history and hold nothing open.
+     *
+     * The removals are worked out here rather than read back out of `syncStages`, so the refusal
+     * happens before a transaction is opened — see the note at the call site.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function assertRemovalsHoldNoWork(PrepDisplay $prepDisplay, array $rows): void
+    {
+        $submitted = [];
+
+        foreach ($rows as $row) {
+            if (($row['id'] ?? null) !== null) {
+                $submitted[] = (int) $row['id'];
+            }
+        }
+
+        $removed = $this->connection->table('prep_stages')
+            ->where('prep_display_id', $prepDisplay->getKey())
+            ->whereNotIn('id', $submitted === [] ? [0] : $submitted)
+            ->pluck('id')
+            ->map(static fn (mixed $v): int => (int) $v)
+            ->all();
+
+        if ($removed === []) {
+            return;
+        }
+
+        $live = $this->connection->table('prep_order_lines')
+            ->whereIn('prep_stage_id', $removed)
+            ->whereIn('state', [
+                PrepLineState::Todo->value,
+                PrepLineState::InProgress->value,
+                PrepLineState::Ready->value,
+            ])
+            // Not `ActingCompany::scope()`d, for the same reason as `destroy()`: `prep_order_lines`
+            // has no `company_id` column at all. Ownership runs through `prep_stage_id`, and these
+            // ids were read off a display the scoped model already resolved.
+            ->count();
+
+        if ($live > 0) {
+            throw ValidationException::withMessages([
+                'stages' => 'A stage you removed still holds '.$live.' item(s) being prepared. Move'
+                    .' them on first, or clear the board.',
+            ]);
+        }
     }
 
     /**
@@ -285,12 +437,24 @@ final class PrepDisplayController extends Controller
             ->where('prep_display_id', $displayId)
             ->update(['sequence' => DB::raw('sequence + 100000')]);
 
-        // The board resolves a single default stage, so keep only the first one the payload marks.
-        $defaultTaken = false;
+        // Exactly one default, not at most one. `PrepStage::scopeDefault()` resolves a single row,
+        // and a payload where the operator unticked every box would leave it answering nothing. The
+        // first stage is the honest fallback: it is where the sequence starts. Extra ticks past the
+        // first are dropped rather than refused — the editor is a set of checkboxes and ticking a
+        // second one plainly means "this one instead".
+        $defaultIndex = null;
 
         foreach (array_values($rows) as $index => $row) {
-            $isDefault = (bool) ($row['is_default'] ?? false) && ! $defaultTaken;
-            $defaultTaken = $defaultTaken || $isDefault;
+            if ((bool) ($row['is_default'] ?? false)) {
+                $defaultIndex = $index;
+                break;
+            }
+        }
+
+        $defaultIndex ??= 0;
+
+        foreach (array_values($rows) as $index => $row) {
+            $isDefault = $index === $defaultIndex;
 
             $payload = [
                 'name' => (string) $row['name'],

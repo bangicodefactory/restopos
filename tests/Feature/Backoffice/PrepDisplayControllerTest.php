@@ -70,21 +70,37 @@ it('persists reordering, renaming and adding stages, and the order becomes the s
 });
 
 it('deletes a stage the payload drops', function (): void {
+    // The dropped stage is a fourth, `done`-kind lane rather than one of the three the board runs
+    // on: since BAN-435 a payload missing a `todo`, `in_progress` or `ready` stage is refused,
+    // because the server resolves a line's stage by kind and a board without one fires food at a
+    // column that does not exist. `done` is genuinely optional — a served ticket just clears.
     $displayId = $this->fx->display->getKey();
     $before = collect(stagesInOrder($displayId))->keyBy('name');
 
-    // Send only two of the three stages.
+    $keep = [
+        stagePayload($before['To do']['id'], 'To do', 'todo', true),
+        stagePayload($before['Cooking']['id'], 'Cooking', 'in_progress'),
+        stagePayload($before['Ready']['id'], 'Ready', 'ready'),
+    ];
+
     $this->patch(route('prep-displays.update', $this->fx->display->uuid), [
-        'stages' => [
-            stagePayload($before['To do']['id'], 'To do', 'todo', true),
-            stagePayload($before['Cooking']['id'], 'Cooking', 'in_progress'),
-        ],
+        'stages' => [...$keep, stagePayload(null, 'Plating', 'done')],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $plating = (int) DB::table('prep_stages')->where('prep_display_id', $displayId)
+        ->where('name', 'Plating')->value('id');
+
+    expect($plating)->toBeGreaterThan(0, 'the stage this test deletes must exist first');
+
+    // Send the list back without it.
+    $this->patch(route('prep-displays.update', $this->fx->display->uuid), [
+        'stages' => $keep,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $after = stagesInOrder($displayId);
-    expect($after)->toHaveCount(2)
-        ->and(array_map(static fn ($s): string => $s['name'], $after))->toBe(['To do', 'Cooking']);
-    $this->assertDatabaseMissing('prep_stages', ['id' => $before['Ready']['id']]);
+    expect($after)->toHaveCount(3)
+        ->and(array_map(static fn ($s): string => $s['name'], $after))->toBe(['To do', 'Cooking', 'Ready']);
+    $this->assertDatabaseMissing('prep_stages', ['id' => $plating]);
 });
 
 it('reorders without tripping the unique (display, sequence) constraint', function (): void {
