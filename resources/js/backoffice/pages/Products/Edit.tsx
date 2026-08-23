@@ -15,10 +15,10 @@ import { Head, useForm } from '@inertiajs/react';
 import { useCallback, useMemo, useState, type JSX } from 'react';
 
 import {
-    ImageField,
     MoneyField,
     MultiSelectField,
     SaveBar,
+    SelectField,
     TextField,
     TextareaField,
     ToggleField,
@@ -26,6 +26,7 @@ import {
 } from '../../components/form';
 import { FormRow, FormSection } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
+import { DeleteAction } from '../../components/ui/DeleteAction';
 import { Tabs, type TabItem } from '../../components/ui/Tabs';
 import {
     Badge,
@@ -40,6 +41,8 @@ import { dateTime, integer } from '../../lib/format';
 import { EUR, money, percent, quantity, subtractMoney, toDecimal } from '../../lib/money';
 import { routes } from '../../lib/routes';
 
+import { PRODUCT_TYPE_OPTIONS } from './types';
+
 import type { ProductEditProps } from './types';
 
 type ProductForm = {
@@ -48,9 +51,22 @@ type ProductForm = {
     barcode: string;
     list_price: string;
     standard_price: string;
+    product_type: string;
+    product_category_id: number | null;
+    uom_id: number;
     available_in_pos: boolean;
     self_order_available: boolean;
+    sale_ok: boolean;
     active: boolean;
+    to_weight: boolean;
+    track_stock: boolean;
+    allow_negative_stock: boolean;
+    description_sale: string;
+    public_description: string;
+    internal_note: string;
+    color: number;
+    pos_sequence: number;
+    is_favorite: boolean;
     pos_category_ids: number[];
     tax_ids: number[];
 };
@@ -58,7 +74,6 @@ type ProductForm = {
 export default function ProductEdit({ product, options }: ProductEditProps): JSX.Element {
     const t = useT();
     const [tab, setTab] = useState('general');
-    const locked = 'Non modifiable : ce champ n’est pas accepté par PATCH /products/{id}.';
 
     const initial: ProductForm = useMemo(
         () => ({
@@ -67,6 +82,19 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
             barcode: product.barcode ?? '',
             list_price: product.list_price,
             standard_price: product.standard_price,
+            product_type: product.product_type,
+            product_category_id: product.product_category_id,
+            uom_id: product.uom_id,
+            to_weight: product.to_weight,
+            track_stock: product.track_stock,
+            allow_negative_stock: product.allow_negative_stock,
+            sale_ok: product.sale_ok,
+            description_sale: product.description_sale ?? '',
+            public_description: product.public_description ?? '',
+            internal_note: product.internal_note ?? '',
+            color: product.color,
+            pos_sequence: product.pos_sequence,
+            is_favorite: product.is_favorite,
             available_in_pos: product.available_in_pos,
             self_order_available: product.self_order_available,
             active: product.active,
@@ -101,10 +129,22 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
             title={product.name}
             breadcrumbs={[{ label: t('product.title'), href: routes.products.index() }]}
             actions={
-                <>
+                <span className="flex items-center gap-2">
                     <Badge tone={product.available_in_pos ? 'ok' : 'neutral'}>{t('product.availableInPos')}</Badge>
                     {product.is_special ? <Badge tone="warn">{product.special_kind}</Badge> : null}
-                </>
+                    {/*
+                      * Archive, never erase: every sold line holds `product_id` under
+                      * `restrictOnDelete`. The server also refuses while a session is open, and
+                      * `DeleteAction` is what puts that reason on screen rather than reloading.
+                      */}
+                    <DeleteAction
+                        size="md"
+                        label={t('product.archive')}
+                        message={t('product.archiveConfirm', { name: product.name })}
+                        url={routes.products.destroy(product.uuid)}
+                        name={product.name}
+                    />
+                </span>
             }
         >
             <Head title={`${t('product.edit')} — ${product.name}`} />
@@ -134,12 +174,26 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
                                     onChange={(value) => form.setData('barcode', value)}
                                     hint="Unique par société ; le contrôle est côté serveur."
                                 />
-                                <TextField
-                                    label="Unité de mesure (id)"
-                                    value={String(product.uom_id)}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                <DeferredRegion value={options} label={t('product.uom')}>
+                                    {(value) => (
+                                        <SelectField
+                                            label={t('product.uom')}
+                                            value={String(form.data.uom_id)}
+                                            error={form.errors.uom_id}
+                                            options={value.uoms.map((uom) => ({
+                                                value: String(uom.id),
+                                                label: uom.name,
+                                            }))}
+                                            onChange={(next) => form.setData('uom_id', Number(next))}
+                                        />
+                                    )}
+                                </DeferredRegion>
+                                <SelectField
+                                    label={t('product.type')}
+                                    value={form.data.product_type}
+                                    error={form.errors.product_type}
+                                    options={PRODUCT_TYPE_OPTIONS}
+                                    onChange={(value) => form.setData('product_type', value)}
                                 />
 
                                 <ToggleField
@@ -160,11 +214,26 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
                                     hint="Archiver un produit est refusé pendant une session ouverte (BOF-083)."
                                 />
                                 <ToggleField
-                                    label="Vendu au poids"
-                                    checked={product.to_weight}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    label={t('product.toWeight')}
+                                    checked={form.data.to_weight}
+                                    onChange={(checked) => form.setData('to_weight', checked)}
+                                    hint={t('product.toWeightHint')}
+                                />
+                                <ToggleField
+                                    label={t('product.trackStock')}
+                                    checked={form.data.track_stock}
+                                    onChange={(checked) => form.setData('track_stock', checked)}
+                                />
+                                <ToggleField
+                                    label={t('product.allowNegativeStock')}
+                                    checked={form.data.allow_negative_stock}
+                                    onChange={(checked) => form.setData('allow_negative_stock', checked)}
+                                    disabled={!form.data.track_stock}
+                                />
+                                <ToggleField
+                                    label={t('product.saleOk')}
+                                    checked={form.data.sale_ok}
+                                    onChange={(checked) => form.setData('sale_ok', checked)}
                                 />
 
                                 <FormRow>
@@ -196,25 +265,45 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
                                     </DeferredRegion>
                                 </FormRow>
 
+                                {/*
+                                  * No image control at all, rather than a locked one. The app has no
+                                  * media *upload* route - only `GET /api/media/{id}` to serve one -
+                                  * so a picker would offer a choice of nothing, and a greyed field
+                                  * suggests a permission you might be granted rather than a feature
+                                  * that does not exist. BAN-393 owns that pipeline.
+                                  */}
                                 <FormRow>
-                                    <ImageField
-                                        label={t('product.image')}
-                                        previewUrl={null}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
-                                        hint="Le contrat n’expose pas d’upload d’image produit ; `image_media_id` est en lecture seule."
+                                    <Notice tone="info">{t('product.imageMissing')}</Notice>
+                                </FormRow>
+
+                                <FormRow>
+                                    <TextareaField
+                                        label={t('product.descriptionSale')}
+                                        value={form.data.description_sale}
+                                        error={form.errors.description_sale}
+                                        onChange={(value) => form.setData('description_sale', value)}
+                                        rows={3}
                                     />
                                 </FormRow>
 
                                 <FormRow>
                                     <TextareaField
-                                        label="Description de vente"
-                                        value={product.description_sale ?? ''}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        label={t('product.publicDescription')}
+                                        value={form.data.public_description}
+                                        error={form.errors.public_description}
+                                        onChange={(value) => form.setData('public_description', value)}
                                         rows={3}
+                                        hint={t('product.publicDescriptionHint')}
+                                    />
+                                </FormRow>
+
+                                <FormRow>
+                                    <TextareaField
+                                        label={t('product.internalNote')}
+                                        value={form.data.internal_note}
+                                        error={form.errors.internal_note}
+                                        onChange={(value) => form.setData('internal_note', value)}
+                                        rows={2}
                                     />
                                 </FormRow>
                             </FormSection>

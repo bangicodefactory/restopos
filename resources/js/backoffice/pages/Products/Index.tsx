@@ -7,14 +7,16 @@
  * deferred category list alone.
  */
 
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn } from '@shared/ui';
-import { type JSX } from 'react';
+import { useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
 import { useServerQuery } from '../../components/data-table/use-server-table';
+import { TextField } from '../../components/form';
+import { FormSection, MoneyField } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
-import { Badge, BoolCell } from '../../components/ui/primitives';
+import { Badge, BoolCell, Card, CardBody, CardHeader } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { EUR, money, subtractMoney } from '../../lib/money';
 import { routes } from '../../lib/routes';
@@ -116,7 +118,13 @@ export default function ProductsIndex({ products, filters, categories }: Product
             header: t('product.selfOrderAvailable'),
             align: 'center',
             defaultHidden: true,
-            cell: (row) => <BoolCell value={row.self_order_available} labels={[t('state.yes'), t('state.no')]} />,
+            cell: (row) => (
+                <EightySixToggle
+                    uuid={row.uuid}
+                    name={row.name}
+                    available={row.self_order_available}
+                />
+            ),
             sortValue: (row) => row.self_order_available,
             exportValue: (row) => (row.self_order_available ? '1' : '0'),
         },
@@ -195,6 +203,108 @@ export default function ProductsIndex({ products, filters, categories }: Product
                 exportFilename="produits"
                 onRowHref={(row) => routes.products.edit(row.uuid)}
             />
+
+            <div className="mt-6">
+                <AddProduct />
+            </div>
         </AppLayout>
+    );
+}
+
+
+/**
+ * 86-ing a dish, in one tap from the list (BOF-094).
+ *
+ * "86" is kitchen shorthand for "we are out of it". It happens mid-service, at speed, usually while
+ * somebody is standing at the pass shouting — and it used to mean two navigations into the editor
+ * and a save. The realtime half already worked: the write invalidates the catalogue cache and
+ * broadcasts, so the self-order menu drops the dish without a reload.
+ *
+ * `self_order_available` rather than `available_in_pos`: taking a dish off the guest-facing menu is
+ * a service decision, while pulling it from the till is a catalogue one — and the second is frozen
+ * during an open session anyway (BOF-083), which is exactly when 86-ing happens.
+ */
+function EightySixToggle({
+    uuid,
+    name,
+    available,
+}: {
+    uuid: string;
+    name: string;
+    available: boolean;
+}): JSX.Element {
+    const t = useT();
+    const [busy, setBusy] = useState(false);
+
+    return (
+        <Button
+            variant={available ? 'ghost' : 'secondary'}
+            size="sm"
+            loading={busy}
+            aria-label={`${available ? t('product.eightySix') : t('product.eightySixBack')} — ${name}`}
+            onClick={() => {
+                setBusy(true);
+                router.patch(
+                    routes.products.update(uuid),
+                    { self_order_available: !available },
+                    {
+                        preserveScroll: true,
+                        preserveState: true,
+                        onFinish: () => setBusy(false),
+                    },
+                );
+            }}
+        >
+            {available ? t('product.eightySix') : t('product.eightySixBack')}
+        </Button>
+    );
+}
+
+
+/**
+ * Adding a product (BOF-081).
+ *
+ * Name and price only. Everything else is on the product's own page, and a new product is given the
+ * venue's reference unit and one variant server-side — a product with no variant is listable,
+ * editable and unsellable, because an order line references a variant rather than a product.
+ */
+function AddProduct(): JSX.Element {
+    const t = useT();
+    const form = useForm<{ name: string; list_price: string }>({ name: '', list_price: '0.00' });
+
+    return (
+        <Card>
+            <CardHeader title={t('product.add')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <TextField
+                        label={t('productCategory.name')}
+                        required
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <MoneyField
+                        label={t('product.listPrice')}
+                        value={form.data.list_price}
+                        error={form.errors.list_price}
+                        onChange={(value) => form.setData('list_price', value)}
+                    />
+                </FormSection>
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.products.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('product.add')}
+                </Button>
+            </CardBody>
+        </Card>
     );
 }

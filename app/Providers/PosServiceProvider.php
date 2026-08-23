@@ -33,6 +33,7 @@ use App\Policies\PosNotePolicy;
 use App\Policies\PrepDisplayPolicy;
 use App\Policies\PrinterPolicy;
 use App\Policies\ProductCategoryPolicy;
+use App\Policies\ProductPolicy;
 use App\Policies\SessionPolicy;
 use App\Policies\TaxGroupPolicy;
 use App\Policies\TaxPolicy;
@@ -151,6 +152,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(PosBill::class, PosBillPolicy::class);
         Gate::policy(PosNote::class, PosNotePolicy::class);
         Gate::policy(PosCategory::class, PosCategoryPolicy::class);
+        Gate::policy(Product::class, ProductPolicy::class);
         Gate::policy(ProductCategory::class, ProductCategoryPolicy::class);
         Gate::policy(Tax::class, TaxPolicy::class);
         Gate::policy(TaxGroup::class, TaxGroupPolicy::class);
