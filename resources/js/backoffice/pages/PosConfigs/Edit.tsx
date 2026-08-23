@@ -89,6 +89,8 @@ type ConfigForm = {
     employee_ids: number[];
     floor_ids: number[];
     prep_display_ids: number[];
+    note_ids: number[];
+    bill_ids: number[];
 };
 
 function initialForm(config: PosConfigRecord): ConfigForm {
@@ -124,6 +126,8 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         employee_ids: config.employee_ids,
         floor_ids: config.floor_ids,
         prep_display_ids: config.prep_display_ids,
+        note_ids: config.note_ids,
+        bill_ids: config.bill_ids,
     };
 }
 
@@ -375,6 +379,25 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     error={form.errors.amount_authorized_diff}
                                     onChange={(value) => form.setData('amount_authorized_diff', value)}
                                 />
+
+                                <FormRow>
+                                    <DeferredRegion value={options} label={t('bill.title')}>
+                                        {(value) => (
+                                            <MultiSelectField
+                                                label={t('config.bills')}
+                                                values={form.data.bill_ids}
+                                                error={form.errors.bill_ids}
+                                                disabled={!form.data.has_cash_control}
+                                                options={value.bills.map((row) => ({
+                                                    value: String(row.id),
+                                                    label: `${row.name} · ${row.value}`,
+                                                }))}
+                                                onChange={(values) => form.setData('bill_ids', values)}
+                                                hint={t('config.billsHint')}
+                                            />
+                                        )}
+                                    </DeferredRegion>
+                                </FormRow>
                                 <ToggleField
                                     label="Validation automatique du terminal"
                                     checked={config.auto_validate_terminal_payment}
@@ -593,6 +616,24 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                                     label: `${row.name} · ${row.printer_type}`,
                                                 }))}
                                                 onChange={(values) => form.setData('printer_ids', values)}
+                                            />
+                                        )}
+                                    </DeferredRegion>
+                                </FormRow>
+
+                                <FormRow>
+                                    <DeferredRegion value={options} label={t('note.title')}>
+                                        {(value) => (
+                                            <MultiSelectField
+                                                label={t('config.notes')}
+                                                values={form.data.note_ids}
+                                                error={form.errors.note_ids}
+                                                options={value.notes.map((row) => ({
+                                                    value: String(row.id),
+                                                    label: `${row.name} · ${row.note_scope}`,
+                                                }))}
+                                                onChange={(values) => form.setData('note_ids', values)}
+                                                hint={t('config.notesHint')}
                                             />
                                         )}
                                     </DeferredRegion>

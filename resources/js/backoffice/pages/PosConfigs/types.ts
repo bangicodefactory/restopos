@@ -145,6 +145,8 @@ export type PosConfigRecord = {
     employee_ids: number[];
     floor_ids: number[];
     prep_display_ids: number[];
+    note_ids: number[];
+    bill_ids: number[];
 };
 
 export type OptionRow = { id: number; name: string };
@@ -159,6 +161,8 @@ export type PosConfigOptions = {
     /** Products marked `special_kind = tip` — the only ones a tip can be booked against (RST-120). */
     tip_products: { id: number; name: string }[];
     employees: { id: number; name: string; default_role: string }[];
+    notes: { id: number; name: string; note_scope: string }[];
+    bills: { id: number; name: string; value: string; currency_id: number }[];
 };
 
 export type PairedDevice = {
@@ -223,6 +227,8 @@ export const WRITABLE_CONFIG_KEYS = [
     'employee_ids',
     'floor_ids',
     'prep_display_ids',
+    'note_ids',
+    'bill_ids',
 ] as const;
 
 export type WritableConfigKey = (typeof WRITABLE_CONFIG_KEYS)[number];

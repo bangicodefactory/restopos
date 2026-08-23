@@ -400,6 +400,8 @@ return new class extends Migration
             $table->primary(['pos_config_id', 'pos_printer_id'], 'pos_config_printer_primary');
         });
 
+        // A pos_note with NO row here is global to every config of the company, exactly like
+        // `pos_config_bill` below (BAN-483). The scope enforcing that lives on the model.
         Schema::create('pos_config_note', function (Blueprint $table): void {
             $table->foreignId('pos_config_id')->constrained('pos_configs')->cascadeOnDelete();
             $table->foreignId('pos_note_id')->constrained('pos_notes')->cascadeOnDelete();
