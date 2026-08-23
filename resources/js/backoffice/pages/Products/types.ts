@@ -112,6 +112,8 @@ export type TaxOption = {
 export type ProductOptions = {
     categories: PosCategoryOption[];
     taxes: TaxOption[];
+    product_categories: { id: number; name: string; ledger_code: string | null }[];
+    uoms: { id: number; name: string }[];
 };
 
 export type ProductEditProps = {
@@ -126,9 +128,53 @@ export const WRITABLE_PRODUCT_KEYS = [
     'barcode',
     'list_price',
     'standard_price',
+    'product_type',
+    'product_category_id',
+    'uom_id',
     'available_in_pos',
     'self_order_available',
+    'sale_ok',
     'active',
+    'to_weight',
+    'track_stock',
+    'allow_negative_stock',
+    'description_sale',
+    'public_description',
+    'internal_note',
+    'color',
+    'pos_sequence',
+    'is_favorite',
     'pos_category_ids',
     'tax_ids',
+] as const;
+
+/** The product kinds the register can render. */
+export const PRODUCT_TYPE_OPTIONS = [
+    { value: 'consumable', label: 'Consommable' },
+    { value: 'service', label: 'Service' },
+    { value: 'combo', label: 'Menu / combo' },
+] as const;
+
+/**
+ * Columns the editor must never write, and why.
+ *
+ * `sale_count`, `last_sold_at`, `has_image`, `attribute_count` and `combo_count` are maintained by
+ * the code that causes them — a form that can write `sale_count` can make the reports disagree with
+ * the orders.
+ *
+ * `special_kind` / `is_special` decide **who prices the line**: `LinePriceAuthority` hands pricing to
+ * the client for anything whose kind is not `none`, so marking an ordinary product `tip` switches
+ * server-side price verification off for it. That wants its own guarded action, not a field.
+ *
+ * `image_media_id` has no upload route to feed it (BAN-393).
+ */
+export const READONLY_PRODUCT_KEYS = [
+    'sale_count',
+    'last_sold_at',
+    'has_image',
+    'attribute_count',
+    'combo_count',
+    'special_kind',
+    'is_special',
+    'image_media_id',
 ] as const;

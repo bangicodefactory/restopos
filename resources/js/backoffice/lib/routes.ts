@@ -27,8 +27,10 @@ export const routes = {
 
     products: {
         index: (): string => '/products',
+        store: (): string => '/products',
         edit: (uuid: string): string => `/products/${uuid}/edit`,
         update: (uuid: string): string => `/products/${uuid}`,
+        destroy: (uuid: string): string => `/products/${uuid}`,
     },
 
     categories: {
