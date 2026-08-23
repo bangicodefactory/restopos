@@ -18,6 +18,7 @@ use App\Http\Controllers\Backoffice\PricelistController;
 use App\Http\Controllers\Backoffice\PrinterController;
 use App\Http\Controllers\Backoffice\ProductCategoryController;
 use App\Http\Controllers\Backoffice\ProductController;
+use App\Http\Controllers\Backoffice\ProductVariantController;
 use App\Http\Controllers\Backoffice\ReportController;
 use App\Http\Controllers\Backoffice\SelfOrderSettingsController;
 use App\Http\Controllers\Backoffice\SessionController;
@@ -69,6 +70,9 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('products', [ProductController::class, 'store'])->name('products.store');
     Route::patch('products/{product}', [ProductController::class, 'update'])->name('products.update');
     Route::delete('products/{product}', [ProductController::class, 'destroy'])->name('products.destroy');
+    Route::post('products/{product}/variants', [ProductVariantController::class, 'store'])->name('product-variants.store');
+    Route::patch('products/{product}/variants/{variant}', [ProductVariantController::class, 'update'])->name('product-variants.update');
+    Route::delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy'])->name('product-variants.destroy');
 
     Route::get('categories', [CategoryController::class, 'index'])->name('categories.index');
     Route::post('categories', [CategoryController::class, 'store'])->name('categories.store');

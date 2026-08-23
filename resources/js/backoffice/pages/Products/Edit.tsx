@@ -38,10 +38,11 @@ import {
 } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { dateTime, integer } from '../../lib/format';
-import { EUR, money, percent, quantity, subtractMoney, toDecimal } from '../../lib/money';
+import { EUR, money, percent, subtractMoney, toDecimal } from '../../lib/money';
 import { routes } from '../../lib/routes';
 
 import { PRODUCT_TYPE_OPTIONS } from './types';
+import { VariantGrid } from './VariantGrid';
 
 import type { ProductEditProps } from './types';
 
@@ -350,65 +351,7 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
                         ) : null}
 
                         {tab === 'variants' ? (
-                            <div className="space-y-4">
-                                <Notice tone="info">{t('product.combosMissing')}</Notice>
-
-                                {product.variants.length === 0 ? (
-                                    <p className="text-sm text-slate-500">{t('product.variantsEmpty')}</p>
-                                ) : (
-                                    <div className="overflow-auto">
-                                        <table className="w-full border-collapse text-sm">
-                                            <caption className="sr-only">{t('product.variants')}</caption>
-                                            <thead className="bg-slate-50">
-                                                <tr>
-                                                    <th scope="col" className="px-3 py-2 text-start text-xs uppercase text-slate-600">
-                                                        Nom
-                                                    </th>
-                                                    <th scope="col" className="px-3 py-2 text-start text-xs uppercase text-slate-600">
-                                                        Référence
-                                                    </th>
-                                                    <th scope="col" className="px-3 py-2 text-start text-xs uppercase text-slate-600">
-                                                        Code-barres
-                                                    </th>
-                                                    <th scope="col" className="px-3 py-2 text-end text-xs uppercase text-slate-600">
-                                                        Supplément
-                                                    </th>
-                                                    <th scope="col" className="px-3 py-2 text-end text-xs uppercase text-slate-600">
-                                                        Stock
-                                                    </th>
-                                                    <th scope="col" className="px-3 py-2 text-center text-xs uppercase text-slate-600">
-                                                        {t('state.active')}
-                                                    </th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {product.variants.map((variant) => (
-                                                    <tr key={variant.id}>
-                                                        <td className="px-3 py-2">{variant.display_name}</td>
-                                                        <td className="px-3 py-2 font-mono text-xs">
-                                                            {variant.default_code ?? '—'}
-                                                        </td>
-                                                        <td className="px-3 py-2 font-mono text-xs">
-                                                            {variant.barcode ?? '—'}
-                                                        </td>
-                                                        <td className="px-3 py-2 text-end tabular-nums">
-                                                            {money(variant.price_extra, EUR)}
-                                                        </td>
-                                                        <td className="px-3 py-2 text-end tabular-nums">
-                                                            {quantity(variant.on_hand_qty)}
-                                                        </td>
-                                                        <td className="px-3 py-2 text-center">
-                                                            <Badge tone={variant.is_active_combination ? 'ok' : 'neutral'}>
-                                                                {variant.is_active_combination ? t('state.yes') : t('state.no')}
-                                                            </Badge>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
+                            <VariantGrid productUuid={product.uuid} variants={product.variants} />
                         ) : null}
 
                         {tab === 'combos' ? (
