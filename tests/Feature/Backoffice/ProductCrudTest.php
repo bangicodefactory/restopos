@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Backoffice\ProductCrud;
 
+use App\Listeners\InvalidateCatalogCache;
 use App\Models\Catalog\Product;
 use App\Models\Catalog\ProductCategory;
 use App\Models\Identity\Permission;
 use App\Models\Identity\Role;
 use App\Models\User;
+use Illuminate\Events\CallQueuedListener;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -400,4 +403,51 @@ it('refuses an accounting category that does not exist', function (): void {
 
 it('refuses a unit of measure that does not exist', function (): void {
     addProduct(['uom_id' => 999999])->assertStatus(422);
+});
+
+it('86-ing a dish schedules the catalogue invalidation that reaches the guest menu', function (): void {
+    // The ticket's acceptance criterion, and the half that is easy to assume. The button writes
+    // `self_order_available`; `Product::saved` is registered against `InvalidateCatalogCache`, which
+    // clears the cache and dispatches `BroadcastCatalogChange`, so the guest menu drops the dish
+    // without anybody reloading.
+    //
+    // Asserted on the *listener* rather than on `BroadcastCatalogChange`: the listener is itself
+    // `ShouldQueue`, so under a faked bus it is queued and never runs, and the inner job is never
+    // reached. Asserting the inner job would have failed for a reason that has nothing to do with
+    // whether the wiring exists — which is exactly what it did on the first attempt.
+    //
+    // Worth pinning at all because nothing in this controller references the listener: it is a
+    // registration in a service provider, and removing it would break the guest menu silently.
+    addProduct(['self_order_available' => true])->assertRedirect();
+    $product = productNamed('Soupe du jour');
+
+    // Faked *after* the create, not before. Creating a product also saves a variant, and
+    // `ProductVariant` is on the same invalidation list — so a fake opened earlier is satisfied by
+    // the creation and the assertion says nothing about the 86 at all. Caught by sabotage:
+    // unregistering `Product` from the list left this test green.
+    Bus::fake();
+
+    saveProduct($product, ['self_order_available' => false])->assertRedirect();
+
+    expect((bool) productNamed('Soupe du jour')->self_order_available)->toBeFalse();
+
+    Bus::assertDispatched(
+        CallQueuedListener::class,
+        static fn (CallQueuedListener $job): bool => $job->class === InvalidateCatalogCache::class,
+    );
+});
+
+it('lets a dish be 86-ed during service, which is when it happens', function (): void {
+    // `self_order_available` is deliberately outside the open-session freeze: taking a dish off the
+    // guest menu is a service decision, while pulling it from the tills is a catalogue one. Freezing
+    // both would block 86-ing at exactly the moment it is needed.
+    addProduct(['self_order_available' => true])->assertRedirect();
+    $product = productNamed('Soupe du jour');
+
+    $this->fx->withSession();
+
+    saveProduct($product, ['self_order_available' => false])
+        ->assertSessionHasNoErrors()->assertRedirect();
+
+    expect((bool) productNamed('Soupe du jour')->self_order_available)->toBeFalse();
 });
