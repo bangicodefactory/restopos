@@ -12,6 +12,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
 use App\Models\Catalog\ProductCategory;
+use App\Models\Catalog\ProductVariant;
 use App\Models\Catalog\Uom;
 use App\Models\Pricing\Tax;
 use App\Support\Tenancy\ActingCompany;
@@ -175,9 +176,24 @@ final class ProductController extends Controller
 
         $pivots = $this->takePivots($data);
 
-        $this->connection->transaction(function () use ($product, $data, $pivots): void {
+        $renamed = $this->realChanges($product, $data, ['name']) !== [];
+
+        $this->connection->transaction(function () use ($product, $data, $pivots, $renamed): void {
             $product->forceFill($data)->save();
             $this->syncPivots($product, $pivots);
+
+            // A variant's `display_name` embeds the product name and is in `posLoadFields`, so the
+            // register renders it directly rather than joining. Leave it and a rename never reaches
+            // the till: the button keeps the old wording indefinitely, on every size, and the only
+            // way to fix it is to re-save each variant by hand. Probed before this existed
+            // (review of #91).
+            if ($renamed) {
+                foreach ($product->variants()->withTrashed()->get() as $variant) {
+                    $variant->forceFill([
+                        'display_name' => ProductVariant::displayNameFor($product, $variant->name_suffix),
+                    ])->save();
+                }
+            }
         });
 
         return back()->with('success', 'Product saved.');

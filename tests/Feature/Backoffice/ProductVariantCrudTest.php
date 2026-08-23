@@ -331,3 +331,51 @@ it('lets a barcode be cleared once set', function (): void {
 
     expect(variantSuffixed('Large')->barcode)->toBeNull();
 });
+
+it('carries a product rename through to every variant name on the till', function (): void {
+    // `display_name` embeds the product name and is in `posLoadFields`, so the register renders it
+    // directly rather than joining. Without propagation a rename never reaches the till: the button
+    // keeps the old wording on every size, and the only fix is to re-save each variant by hand.
+    // Probed before this existed — renaming "Margherita" to "Potage du jour" left both variants
+    // reading "Margherita".
+    addVariant($this->fx->product, ['name_suffix' => 'Large'])->assertRedirect();
+    addVariant($this->fx->product, ['name_suffix' => 'Small'])->assertRedirect();
+
+    test()->patchJson("/products/{$this->fx->product->uuid}", ['name' => 'Potage du jour'])
+        ->assertSessionHasNoErrors()->assertRedirect();
+
+    expect((string) variantSuffixed('Large')->display_name)->toBe('Potage du jour Large')
+        ->and((string) variantSuffixed('Small')->display_name)->toBe('Potage du jour Small');
+});
+
+it('renames archived variants too, so restoring one does not resurrect an old name', function (): void {
+    addVariant($this->fx->product, ['name_suffix' => 'Large'])->assertRedirect();
+    addVariant($this->fx->product, ['name_suffix' => 'Small'])->assertRedirect();
+
+    $archived = variantSuffixed('Small');
+    test()->deleteJson("/products/{$this->fx->product->uuid}/variants/{$archived->uuid}")->assertRedirect();
+
+    test()->patchJson("/products/{$this->fx->product->uuid}", ['name' => 'Potage du jour'])
+        ->assertRedirect();
+
+    expect((string) ProductVariant::query()->withTrashed()->whereKey($archived->getKey())->value('display_name'))
+        ->toBe('Potage du jour Small');
+});
+
+it('leaves the variant names alone when the product is saved without a rename', function (): void {
+    // What this pins is the outcome, not the mechanism. Keying the rewrite off which keys *arrived*
+    // rather than what actually changed is a no-op here — the rewrite would set the same
+    // `display_name`, Eloquent would find nothing dirty and skip the write, and `updated_at` would
+    // not move. Sabotage confirmed that, so the `realChanges` call is an avoided query on a product
+    // with many variants rather than a guard, and it is not claimed as one.
+    addVariant($this->fx->product, ['name_suffix' => 'Large'])->assertRedirect();
+
+    $before = (string) variantSuffixed('Large')->updated_at;
+
+    test()->patchJson("/products/{$this->fx->product->uuid}", [
+        'name' => $this->fx->product->name,
+        'list_price' => '7.00',
+    ])->assertRedirect();
+
+    expect((string) variantSuffixed('Large')->updated_at)->toBe($before);
+});

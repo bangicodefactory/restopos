@@ -46,7 +46,7 @@ final class ProductVariantController extends Controller
             'product_id' => $product->getKey(),
             'company_id' => $product->company_id,
             'uuid' => (string) Str::uuid(),
-            'display_name' => $this->displayName($product, $data['name_suffix'] ?? null),
+            'display_name' => ProductVariant::displayNameFor($product, $data['name_suffix'] ?? null),
         ]);
 
         return back()->with('success', 'Variant added.');
@@ -71,7 +71,7 @@ final class ProductVariantController extends Controller
         }
 
         if (array_key_exists('name_suffix', $data)) {
-            $data['display_name'] = $this->displayName($product, $data['name_suffix']);
+            $data['display_name'] = ProductVariant::displayNameFor($product, $data['name_suffix']);
         }
 
         $variant->forceFill($data)->save();
@@ -138,14 +138,6 @@ final class ProductVariantController extends Controller
                 'variant' => 'That variant belongs to a different product.',
             ]);
         }
-    }
-
-    /** What the till shows on the button: the product, plus the suffix that distinguishes this one. */
-    private function displayName(Product $product, ?string $suffix): string
-    {
-        $suffix = trim((string) $suffix);
-
-        return $suffix === '' ? (string) $product->name : $product->name.' '.$suffix;
     }
 
     /** Is any register of this company mid-session? */
