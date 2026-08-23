@@ -96,3 +96,25 @@ it('has a reason recorded for every write the interface deliberately skips', fun
     expect(count($UNREACHED))->toBeLessThanOrEqual(5,
         'The exclusion list is growing. Each entry is a capability nobody can reach.');
 });
+
+it('has a page file for every component a controller renders', function (): void {
+    // The other half of the same defect, and the sharper one: `PosBillController::index` rendered
+    // `PosBills/Index` for weeks while no such file existed, so the route was not merely unreachable
+    // — it was live and broken. Inertia resolves components in the browser, so nothing on the server
+    // side notices, and a feature test asserting a 200 passes because the *server* rendered fine.
+    $missing = [];
+
+    foreach (File::allFiles(app_path('Http/Controllers')) as $file) {
+        preg_match_all("/Inertia::render\('([^']+)'/", $file->getContents(), $matches);
+
+        foreach ($matches[1] as $component) {
+            $page = resource_path('js/backoffice/pages/'.$component.'.tsx');
+
+            if (! File::exists($page)) {
+                $missing[] = $component.' — rendered by '.$file->getFilename().', no page file';
+            }
+        }
+    }
+
+    expect($missing)->toBe([], "Components with no page:\n  - ".implode("\n  - ", $missing));
+});
