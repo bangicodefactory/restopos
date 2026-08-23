@@ -364,3 +364,43 @@ it('leaves the sessions available when a build blows up', function (): void {
         ->and(DB::table('accounting_export_session')->where('pos_session_id', $sessionId)->count())->toBe(0)
         ->and(DB::table('pos_sessions')->where('id', $sessionId)->value('accounting_exported_at'))->toBeNull();
 });
+
+it('carries a ledger code set through the back office, not only one written by hand', function (): void {
+    // BAN-501's acceptance criterion, and the link the other tests skip: they build the category
+    // with a model call, which proves the export *reads* `ledger_code` but not that anything can
+    // *write* it. Until the product-category surface existed, nothing could — the column was
+    // settable by the seeder and by direct SQL, so a real venue shipped an export with a blank
+    // label on every sales row, which is the column BAN-448 was written to fill.
+    $role = Role::query()->create([
+        'name' => 'Config manager',
+        'slug' => 'config-manager-'.Str::random(6),
+        'is_system' => false,
+    ]);
+
+    foreach (['config.view', 'config.manage'] as $slug) {
+        $permission = Permission::query()->firstOrCreate(['slug' => $slug], ['group' => 'config']);
+        DB::table('permission_role')->insertOrIgnore([
+            'role_id' => $role->getKey(),
+            'permission_id' => $permission->getKey(),
+        ]);
+    }
+
+    $manager = User::factory()->create([
+        'company_id' => $this->fx->company->getKey(),
+        'is_super_admin' => false,
+    ]);
+    DB::table('role_user')->insert(['role_id' => $role->getKey(), 'user_id' => $manager->getKey()]);
+
+    // Through the endpoint a manager actually uses.
+    $this->actingAs($manager)
+        ->postJson(route('product-categories.store'), ['name' => 'Plats principaux', 'ledger_code' => '7011'])
+        ->assertRedirect();
+
+    $category = ProductCategory::query()->where('name', 'Plats principaux')->firstOrFail();
+
+    $this->fx->product->forceFill(['product_category_id' => $category->getKey()])->save();
+
+    closeSessionWith($this->fx);
+
+    expect(csvRows(buildExport($this->fx))['sales']['label'])->toBe('7011');
+});
