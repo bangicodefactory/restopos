@@ -208,3 +208,52 @@ it('never attaches another company note', function (): void {
         ->where('pos_config_id', $this->fx->config->getKey())
         ->where('pos_note_id', $foreign->getKey())->exists())->toBeFalse();
 });
+
+/**
+ * Every pivot on this endpoint, not just the two this ticket added.
+ *
+ * `sync()` writes whatever ids it is handed, and all eleven took them straight from the request.
+ * Probed on master: a foreign payment method and a foreign category both attached and the save
+ * reported success. A foreign payment method appears on this register's payment screen and its
+ * takings land in this venue's session; a foreign employee is granted till access nobody gave them.
+ *
+ * Parameterised over the five the fixtures can actually build a foreign row for. The other six —
+ * pricelists, fiscal positions, presets, printers, notes, bills — go through the identical
+ * `ownedIds()` call and every one of the eleven related models carries `BelongsToCompany`, which is
+ * the scope doing the work.
+ */
+it('refuses another company id on the %s pivot', function (string $field, string $table, string $column, callable $foreignId): void {
+    $other = PosFixtures::make()->withFloor()->withPrepDisplay();
+    $id = $foreignId($other);
+
+    expect($id)->toBeGreaterThan(0, 'the other venue must actually own one of these');
+
+    saveConfig($this->fx, [$field => [$id]])->assertStatus(422);
+
+    expect(DB::table($table)
+        ->where('pos_config_id', $this->fx->config->getKey())
+        ->where($column, $id)->exists())->toBeFalse();
+})->with([
+    ['payment_method_ids', 'pos_config_payment_method', 'payment_method_id',
+        fn (PosFixtures $fx): int => (int) $fx->card->getKey()],
+    ['limited_category_ids', 'pos_config_pos_category', 'pos_category_id',
+        fn (PosFixtures $fx): int => (int) $fx->category->getKey()],
+    ['employee_ids', 'pos_config_employee', 'employee_id',
+        fn (PosFixtures $fx): int => (int) DB::table('employees')->where('company_id', $fx->company->getKey())->value('id')],
+    ['floor_ids', 'pos_config_floor', 'restaurant_floor_id',
+        fn (PosFixtures $fx): int => (int) $fx->floor->getKey()],
+    ['prep_display_ids', 'pos_config_prep_display', 'prep_display_id',
+        fn (PosFixtures $fx): int => (int) $fx->display->getKey()],
+]);
+
+it('still lets a register clear a pivot entirely', function (): void {
+    // The empty list has to survive the ownership check, or "remove every note from this register"
+    // becomes impossible — and an early return on `[]` is exactly the kind of branch a rewrite drops.
+    $note = makeNote($this->fx, 'No ice');
+
+    saveConfig($this->fx, ['note_ids' => [$note->getKey()]])->assertRedirect();
+    expect(DB::table('pos_config_note')->where('pos_config_id', $this->fx->config->getKey())->count())->toBe(1);
+
+    saveConfig($this->fx, ['note_ids' => []])->assertRedirect();
+    expect(DB::table('pos_config_note')->where('pos_config_id', $this->fx->config->getKey())->count())->toBe(0);
+});
