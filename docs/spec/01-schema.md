@@ -1237,6 +1237,9 @@ Maps from `available_preset_ids`.
 
 ### `pos_config_note` (pivot)
 `pos_config_id` FK cascade U, `pos_note_id` FK cascade U. Maps from `note_ids`.
+(A `pos_note` with **no** rows here is global to every config of the company, the same rule as
+`pos_config_bill` below. `PosNote::posLoadScope` had no such fallback until BAN-483 and returned
+only linked notes — and nothing could write a link, so every register received an empty note list.)
 
 ### `pos_config_bill` (pivot)
 `pos_config_id` FK cascade U, `pos_bill_id` FK cascade U. Maps from `default_bill_ids`.

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Backoffice;
 use App\Enums\AuditSeverity;
 use App\Enums\DeviceType;
 use App\Enums\PaymentMethodType;
+use App\Enums\SessionState;
 use App\Enums\SpecialKind;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
@@ -14,7 +15,9 @@ use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
 use App\Models\Identity\Employee;
 use App\Models\Pos\PaymentMethod;
+use App\Models\Pos\PosBill;
 use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosNote;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
 use App\Models\Pricing\FiscalPosition;
@@ -80,6 +83,10 @@ final class PosConfigController extends Controller
                 'employee_ids' => $config->employees->pluck('id')->all(),
                 'floor_ids' => $config->floors->pluck('id')->all(),
                 'prep_display_ids' => $config->prepDisplays->pluck('id')->all(),
+                // Both are "empty means all", which the pages have to say out loud or an empty
+                // picker reads as "this register has no notes" rather than "it has every note".
+                'note_ids' => $config->notes->pluck('id')->all(),
+                'bill_ids' => $config->bills->pluck('id')->all(),
             ],
             'options' => Inertia::defer(fn (): array => [
                 'payment_methods' => PaymentMethod::query()->orderBy('sequence')->get(['id', 'name', 'method_type', 'is_cash_count'])->all(),
@@ -97,6 +104,9 @@ final class PosConfigController extends Controller
                     ->get(['id', 'name'])
                     ->all(),
                 'employees' => Employee::query()->where('active', true)->orderBy('name')->get(['id', 'name', 'default_role'])->all(),
+                'notes' => PosNote::query()->orderBy('sequence')->get(['id', 'name', 'note_scope'])->all(),
+                'bills' => PosBill::query()->orderBy('currency_id')->orderBy('sequence')
+                    ->get(['id', 'name', 'value', 'currency_id'])->all(),
             ]),
             'devices' => Inertia::defer(fn (): array => $config->devices()->orderBy('device_identifier')->get()
                 ->map(static fn ($d): array => [
@@ -158,6 +168,10 @@ final class PosConfigController extends Controller
             'employee_ids' => ['sometimes', 'array'],
             'floor_ids' => ['sometimes', 'array'],
             'prep_display_ids' => ['sometimes', 'array'],
+            'note_ids' => ['sometimes', 'array'],
+            'note_ids.*' => ['integer'],
+            'bill_ids' => ['sometimes', 'array'],
+            'bill_ids.*' => ['integer'],
         ]);
 
         $pivots = [
@@ -170,6 +184,8 @@ final class PosConfigController extends Controller
             'employee_ids' => 'employees',
             'floor_ids' => 'floors',
             'prep_display_ids' => 'prepDisplays',
+            'note_ids' => 'notes',
+            'bill_ids' => 'bills',
         ];
 
         // The pivots are read *before* the sync that overwrites them. They were originally left out
@@ -188,12 +204,31 @@ final class PosConfigController extends Controller
             $this->assertCashMethodsUnshared($config, array_map(intval(...), (array) $data['payment_method_ids']));
         }
 
+        // BOF-039 — the notes a register offers are frozen while it has a session open.
+        //
+        // The list is not decoration: a predefined note is the wording the kitchen reads and, for
+        // allergies, acts on. Take "allergy - nuts" off the register mid-service and the next order
+        // that needs it gets a free-typed approximation, or nothing. Orders already sent keep the
+        // text they were sent with, so the ticket in the pass and the picker at the till stop
+        // agreeing about what the venue's notes even are.
+        //
+        // Denominations are deliberately *not* frozen: the count sheet is read at close, so a
+        // correction made mid-shift is applied to the count that has not happened yet.
+        if (array_key_exists('note_ids', $data)
+            && $this->selectionMoves($config, 'notes', (array) $data['note_ids'])
+            && $this->hasOpenSession($config)) {
+            throw ValidationException::withMessages([
+                'note_ids' => 'This register has a session open. The notes it offers can be changed'
+                    .' once the session closes — the kitchen is already reading this list.',
+            ]);
+        }
+
         $pivotBefore = [];
 
         foreach ($pivots as $key => $relation) {
             if (array_key_exists($key, $data)) {
                 $pivotBefore[$key] = $this->pivotIds($config, $relation);
-                $config->{$relation}()->sync(array_map(intval(...), (array) $data[$key]));
+                $config->{$relation}()->sync($this->ownedIds($config, $relation, (array) $data[$key], $key));
                 unset($data[$key]);
             }
         }
@@ -249,6 +284,89 @@ final class PosConfigController extends Controller
         $config->bumpRevision();
 
         return back()->with('success', 'Register settings saved.');
+    }
+
+    /**
+     * Resolve submitted pivot ids through the *scoped* model, refusing anything that is not ours.
+     *
+     * `sync()` writes whatever ids it is handed. Every one of these eleven pivots took them straight
+     * from the request, so a manager could attach another company's payment method, employee,
+     * printer, category, floor, pricelist, fiscal position, preset or kitchen screen to their own
+     * register — probed on master: a foreign payment method and a foreign category both attached and
+     * the save reported success (XCT-101).
+     *
+     * That is not a cosmetic leak. A foreign payment method appears on this register's payment
+     * screen and its takings land in this venue's session; a foreign employee is granted till access
+     * they were never given.
+     *
+     * Refused rather than filtered, for the same reason as the printer and kitchen-screen category
+     * pivots (BAN-432, BAN-435): silently dropping an id means the operator ticks a box, the save
+     * succeeds, and the setting is simply not there.
+     *
+     * @param  list<mixed>  $ids
+     * @return list<int>
+     */
+    private function ownedIds(PosConfig $config, string $relation, array $ids, string $field): array
+    {
+        $wanted = array_values(array_unique(array_map(intval(...), $ids)));
+
+        if ($wanted === []) {
+            return [];
+        }
+
+        $related = $config->{$relation}()->getRelated();
+
+        // `newQuery()` carries the model's global company scope, which is the whole point: an id
+        // belonging to another tenant simply does not come back.
+        $found = $related->newQuery()->whereKey($wanted)->pluck($related->getKeyName())
+            ->map(static fn (mixed $v): int => (int) $v)->all();
+
+        $missing = array_values(array_diff($wanted, $found));
+
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                $field => 'No such record: '.implode(', ', $missing).'.',
+            ]);
+        }
+
+        return $found;
+    }
+
+    /**
+     * Would syncing this list actually change the selection?
+     *
+     * Compared as a *set*, not as two lists. Neither side carries an `ORDER BY`, and the page posts
+     * whatever order the operator's clicks left behind — so an equality check would refuse a save
+     * that changed nothing, which is the defect this project has now hit twice under other names
+     * (BAN-396, BAN-424).
+     *
+     * @param  list<mixed>  $submitted
+     */
+    private function selectionMoves(PosConfig $config, string $relation, array $submitted): bool
+    {
+        $now = $this->pivotIds($config, $relation);
+        $next = array_values(array_unique(array_map(intval(...), $submitted)));
+
+        sort($now);
+        sort($next);
+
+        return $now !== $next;
+    }
+
+    /** Is a session open on this register right now? */
+    private function hasOpenSession(PosConfig $config): bool
+    {
+        $query = $this->connection->table('pos_sessions')
+            ->where('pos_config_id', $config->getKey())
+            ->whereIn('state', [SessionState::Opened->value, SessionState::ClosingControl->value]);
+
+        // Redundant against the `pos_config_id` filter, since the config was resolved through the
+        // scoped model — but `pos_sessions` carries a `company_id` and `TenantIsolationTest` holds
+        // every raw query on a company-owned table to the same rule rather than to a case-by-case
+        // argument. It caught this one, which is the third time this run.
+        ActingCompany::scope($query);
+
+        return $query->exists();
     }
 
     /**

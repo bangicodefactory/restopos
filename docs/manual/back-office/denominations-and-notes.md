@@ -52,3 +52,11 @@ every drink that went out without ice.
 
 Both lists are register configuration, so changing them needs the same permission as the rest of the
 register's setup.
+
+## Which registers get them
+
+Both lists are shared across the venue, and a register chooses which of them it uses on its own
+settings page. The rule reads backwards from what most people expect — a note or denomination ticked
+on a register belongs to *that* register and stops appearing on the others, while one ticked nowhere
+appears everywhere. [What a register sends to the kitchen](register-preparation.md) explains it in
+full, including why the note list is frozen while a session is open.

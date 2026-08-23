@@ -17,7 +17,7 @@
  */
 
 import { Head, router, useForm } from '@inertiajs/react';
-import { cn } from '@shared/ui';
+import { Button, cn, useToast } from '@shared/ui';
 import { Fragment, useMemo, useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
@@ -34,6 +34,7 @@ import { AppLayout } from '../../components/layout/AppLayout';
 import { ConfirmAction } from '../../components/ui/ConfirmAction';
 import { Badge, Card, CardBody, CardHeader, EmptyState, Notice } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
+import { printBadge } from '../../lib/printBadge';
 import { routes } from '../../lib/routes';
 
 import {
@@ -192,6 +193,8 @@ function EmployeeEditor({
     const t = useT();
 
     const form = useForm<EmployeeEditForm>({ ...toForm(employee), pin: '', badge: '' });
+    const toast = useToast();
+    const [printing, setPrinting] = useState(false);
 
     useDirtyGuard(form.isDirty, t('confirm.leave'));
 
@@ -291,6 +294,40 @@ function EmployeeEditor({
                         maxLength={64}
                         hint={employee.has_badge ? t('employee.badgeReplaceHint') : t('employee.badgeNewHint')}
                     />
+                    <div className="md:col-span-2">
+                        {/*
+                          * Enabled only while the value is on screen, and that is not a UI nicety.
+                          * `barcode_hash` is a SHA-256: there is nothing to reprint from a record,
+                          * so the only moment a badge can be printed is the moment it is typed. A
+                          * lost badge is reissued, not reprinted.
+                          */}
+                        <Button
+                            variant="secondary"
+                            disabled={form.data.badge.trim() === ''}
+                            loading={printing}
+                            onClick={() => {
+                                setPrinting(true);
+                                void printBadge({
+                                    name: form.data.name,
+                                    jobTitle: form.data.job_title,
+                                    badge: form.data.badge,
+                                })
+                                    .then((ok) => {
+                                        if (!ok) {
+                                            toast.show({
+                                                id: 'badge',
+                                                tone: 'danger',
+                                                title: t('employee.badgePrintFailed'),
+                                            });
+                                        }
+                                    })
+                                    .finally(() => setPrinting(false));
+                            }}
+                        >
+                            {t('employee.printBadge')}
+                        </Button>
+                        <p className="mt-1 text-xs text-slate-500">{t('employee.printBadgeHint')}</p>
+                    </div>
                     <div className="flex flex-wrap items-end gap-2 md:col-span-2">
                         <ConfirmAction
                             label={t('employee.clearPin')}

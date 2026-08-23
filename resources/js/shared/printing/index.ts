@@ -22,6 +22,8 @@ export { WebUsbTransport, usbSignature } from './web-usb';
 export { BrowserPrintTransport } from './browser-print';
 export type { BrowserPrintOptions } from './browser-print';
 
+export { badgeDoc, badgeJob } from './badge';
+export type { BadgeInput } from './badge';
 export { PrinterRouter } from './router';
 export type { RouterEvent, RouterOptions } from './router';
 
