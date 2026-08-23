@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice\Concerns;
 
+use App\Services\Audit\AuditRecorder;
 use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 
@@ -26,6 +27,11 @@ use Illuminate\Database\Eloquent\Model;
  * stored `true`, `''` for a stored null, and a plain string against a cast enum; every one of those
  * reads as an edit under `!==`, and `==` is worse — it makes `'0'` equal to `''` and `'abc'` equal
  * to `0`.
+ *
+ * The numeric test is `AuditRecorder::bcSafe`, not `is_numeric`, and that is not style. `is_numeric`
+ * accepts `'1e2'`, which `bccomp` rejects with a `ValueError` — so a rate typed in exponent notation
+ * into a `type=number` box turned a refusal into a 500. `AuditRecorder` had already learned this and
+ * written down why; sharing the helper is what keeps the lesson in one place rather than two.
  */
 trait DetectsRealChanges
 {
@@ -67,7 +73,7 @@ trait DetectsRealChanges
             return ($current ?? '') === '' && ($submitted ?? '') === '';
         }
 
-        if (is_numeric($current) && is_numeric($submitted)) {
+        if (AuditRecorder::bcSafe($current) && AuditRecorder::bcSafe($submitted)) {
             // Decimal-safe: `'21'` and `'21.0000'` are the same rate, and neither is a float.
             return bccomp((string) $current, (string) $submitted, 6) === 0;
         }

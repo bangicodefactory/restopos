@@ -129,7 +129,8 @@ export const NAV: NavGroup[] = [
                 match: startsWith('/payment-methods'),
             },
             { key: 'taxes', labelKey: 'nav.taxes', href: routes.taxes.index(), match: startsWith('/taxes') },
-            { key: 'bills', labelKey: 'nav.bills', href: null, disabledReasonKey: 'nav.unavailable' },
+            { key: 'bills', labelKey: 'nav.bills', href: routes.posBills.index(), match: startsWith('/pos-bills') },
+            { key: 'notes', labelKey: 'nav.notes', href: routes.posNotes.index(), match: startsWith('/pos-notes') },
             { key: 'floors', labelKey: 'nav.floors', href: routes.floors.index(), match: startsWith('/floors') },
             {
                 key: 'prep-displays',

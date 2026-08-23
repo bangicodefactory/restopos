@@ -534,3 +534,28 @@ it('sees through the type differences the browser introduces', function (): void
         'sequence' => (string) $tax->sequence,
     ]))->assertRedirect();
 });
+
+it('does not 500 on a rate typed in exponent notation', function (): void {
+    // `is_numeric('1e2')` is true and `bccomp('1e2', …)` throws a `ValueError`, so the change
+    // comparator crashed on a value a `type=number` box will happily produce. Probed: 500 before the
+    // fix. `AuditRecorder::bcSafe` already knew — it rejects exactly this and says why — so the two
+    // comparators share the test rather than the mistake.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    test()->patchJson(route('taxes.update', $fx->tax->getKey()), ['amount' => '1e2'])
+        ->assertStatus(422);
+
+    expect((string) Tax::query()->whereKey($fx->tax->getKey())->value('amount'))->toStartWith('21');
+});
+
+it('treats an unreadable number as a change rather than swallowing it', function (): void {
+    // The other half: falling back to a string comparison must not make `'1e2'` look equal to
+    // `'21.0000'` and let the edit through unfrozen.
+    $fx = $this->fx->withSession();
+    openTabCarrying($fx);
+
+    $response = test()->patchJson(route('taxes.update', $fx->tax->getKey()), ['amount' => '1e2']);
+
+    expect((string) json_encode($response->json('errors')))->toContain('open order');
+});

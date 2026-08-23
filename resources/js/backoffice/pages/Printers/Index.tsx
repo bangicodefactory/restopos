@@ -36,6 +36,7 @@ import {
 import { FormSection } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
 import { ConfirmAction } from '../../components/ui/ConfirmAction';
+import { DeleteAction } from '../../components/ui/DeleteAction';
 import {
     Badge,
     BoolCell,
@@ -44,7 +45,6 @@ import {
     CardHeader,
     DeferredRegion,
     EmptyState,
-    Notice,
 } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { dateTime } from '../../lib/format';
@@ -189,9 +189,7 @@ export default function PrintersIndex({ printers, categories, queue }: PrintersI
 
                 <PrintQueue queue={queue} printers={printers} />
 
-                <Notice tone="info" title={t('printer.createMissingTitle')}>
-                    {t('printer.createMissing')}
-                </Notice>
+                <AddPrinter />
             </div>
         </AppLayout>
     );
@@ -224,7 +222,22 @@ function PrinterEditor({
             <CardHeader
                 title={printer.name}
                 description={PRINTER_TYPE_LABEL[printer.printer_type] ?? printer.printer_type}
-                actions={<TestTicket printerId={printer.id} printerName={printer.name} />}
+                actions={
+                    <span className="flex items-center gap-2">
+                        <TestTicket printerId={printer.id} printerName={printer.name} />
+                        {/*
+                          * The server refuses while print jobs are still queued for this printer and
+                          * says how many — those tickets would otherwise be deleted with it, and the
+                          * order each came from still says the kitchen was told.
+                          */}
+                        <DeleteAction
+                            size="md"
+                            label={t('printer.remove')}
+                            url={routes.printers.destroy(printer.id)}
+                            name={printer.name}
+                        />
+                    </span>
+                }
             />
             <CardBody>
                 <FormSection title={t('printer.connection')} description={t('printer.connectionHint')}>
@@ -473,6 +486,55 @@ function PrintQueue({
                         )
                     }
                 </DeferredRegion>
+            </CardBody>
+        </Card>
+    );
+}
+
+/**
+ * Adding a preparation printer (BOF-113).
+ *
+ * The kind is asked for up front because it decides which connection fields even apply — a network
+ * printer wants an IP, a proxy-attached one wants the proxy's address, and a USB one wants neither.
+ * The rest, including which categories it prints, is on the editor once the printer exists.
+ */
+function AddPrinter(): JSX.Element {
+    const t = useT();
+    const form = useForm<{ name: string; printer_type: string }>({ name: '', printer_type: 'network' });
+
+    return (
+        <Card>
+            <CardHeader title={t('printer.add')} description={t('printer.createMissing')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <TextField
+                        label="Nom"
+                        required
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <SelectField
+                        label={t('printer.connection')}
+                        value={form.data.printer_type}
+                        error={form.errors.printer_type}
+                        options={Object.entries(PRINTER_TYPE_LABEL).map(([value, label]) => ({ value, label }))}
+                        onChange={(value) => form.setData('printer_type', value)}
+                    />
+                </FormSection>
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.printers.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('printer.add')}
+                </Button>
             </CardBody>
         </Card>
     );
