@@ -16,6 +16,7 @@ use App\Http\Controllers\Backoffice\PosNoteController;
 use App\Http\Controllers\Backoffice\PrepDisplayController;
 use App\Http\Controllers\Backoffice\PricelistController;
 use App\Http\Controllers\Backoffice\PrinterController;
+use App\Http\Controllers\Backoffice\ProductCategoryController;
 use App\Http\Controllers\Backoffice\ProductController;
 use App\Http\Controllers\Backoffice\ReportController;
 use App\Http\Controllers\Backoffice\SelfOrderSettingsController;
@@ -75,6 +76,11 @@ Route::middleware(['auth'])->group(function (): void {
     Route::get('pricelists', [PricelistController::class, 'index'])->name('pricelists.index');
     Route::get('pricelists/{pricelist}/edit', [PricelistController::class, 'edit'])->name('pricelists.edit');
     Route::patch('pricelists/{pricelist}', [PricelistController::class, 'update'])->name('pricelists.update');
+
+    Route::get('product-categories', [ProductCategoryController::class, 'index'])->name('product-categories.index');
+    Route::post('product-categories', [ProductCategoryController::class, 'store'])->name('product-categories.store');
+    Route::patch('product-categories/{productCategory}', [ProductCategoryController::class, 'update'])->name('product-categories.update');
+    Route::delete('product-categories/{productCategory}', [ProductCategoryController::class, 'destroy'])->name('product-categories.destroy');
 
     Route::get('taxes', [TaxController::class, 'index'])->name('taxes.index');
     Route::post('taxes', [TaxController::class, 'store'])->name('taxes.store');

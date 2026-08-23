@@ -44,6 +44,13 @@ export const routes = {
         update: (id: number): string => `/pricelists/${id}`,
     },
 
+    productCategories: {
+        index: (): string => '/product-categories',
+        store: (): string => '/product-categories',
+        update: (id: number): string => `/product-categories/${id}`,
+        destroy: (id: number): string => `/product-categories/${id}`,
+    },
+
     taxes: {
         index: (): string => '/taxes',
         store: (): string => '/taxes',

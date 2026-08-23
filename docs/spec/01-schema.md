@@ -567,13 +567,20 @@ Internal/reporting category (single tree, used for sales grouping and loyalty ru
 Maps from `product.category`. Dropped: property accounts, costing method, removal strategy,
 valuation — all ERP.
 
+`path` is a materialised path of **ids, terminated** — `/4/9/22/` — so `scopeDescendantsOf`'s
+`LIKE path%` means "this branch" and nothing else. Both halves matter and neither held before
+BAN-501: name paths made `/Boissons` a prefix of `/Boissons speciales`, sweeping an unrelated
+sibling into the subtree, and forced a rewrite of every descendant on a rename. Ids do not change,
+so only a *move* touches the path, and `/1/` cannot prefix `/11/`. `App\Services\Catalog\CategoryTree`
+is the only writer; `pos_categories` follows the same rule (BAN-422).
+
 | Column | Type | Notes |
 |---|---|---|
 | id | id | |
 | company_id | FK→companies.id, cascade | |
 | parent_id | FK→product_categories.id nullable, cascade | |
 | name | string(96) | |
-| path | string(512), index | |
+| path | string(512), index | materialised path of **ids, terminated** (`/4/9/22/`); written only by `CategoryTree` |
 | sequence | integer default 10 | |
 | ledger_code | string(32) nullable | revenue account this category's sales post to; the source of `session_sales_summaries.ledger_code` |
 | timestamps | | |

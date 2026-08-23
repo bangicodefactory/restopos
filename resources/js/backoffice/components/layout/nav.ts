@@ -71,6 +71,12 @@ export const NAV: NavGroup[] = [
         labelKey: 'nav.group.products',
         items: [
             { key: 'products', labelKey: 'nav.products', href: routes.products.index(), match: startsWith('/products') },
+            {
+                key: 'product-categories',
+                labelKey: 'nav.productCategories',
+                href: routes.productCategories.index(),
+                match: startsWith('/product-categories'),
+            },
             { key: 'variants', labelKey: 'nav.variants', href: null, disabledReasonKey: 'nav.unavailable' },
             { key: 'combos', labelKey: 'nav.combos', href: null, disabledReasonKey: 'nav.unavailable' },
             {
