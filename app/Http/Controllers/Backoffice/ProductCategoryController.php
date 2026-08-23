@@ -223,8 +223,13 @@ final class ProductCategoryController extends Controller
             return;
         }
 
+        // Compared case-insensitively, and stored exactly as typed. `SALES-food` and `SALES-FOOD`
+        // are one account to any accountant, and letting both exist reproduces precisely the
+        // unreadable export this check is here to prevent — probed on the first pass: both were
+        // accepted. The casing the operator chose is kept, because a chart of accounts is somebody
+        // else's convention to follow, not ours to normalise.
         $clash = ProductCategory::query()
-            ->where('ledger_code', $code)
+            ->whereRaw('LOWER(ledger_code) = ?', [mb_strtolower(trim($code))])
             ->when($editing !== null, fn ($q) => $q->whereKeyNot($editing?->getKey()))
             ->value('name');
 

@@ -274,3 +274,30 @@ it('never touches another company category', function (): void {
     expect((string) ProductCategory::query()->withoutGlobalScopes()->whereKey($foreign->getKey())->value('name'))
         ->toBe('Theirs');
 });
+
+it('treats two spellings of one account as the same account', function (): void {
+    // `SALES-food` and `SALES-FOOD` are one revenue account to any accountant, and letting both
+    // exist reproduces exactly the unreadable export the uniqueness check is here to prevent.
+    // Probed on the first pass: both were accepted.
+    addProductCategory(['name' => 'Food', 'ledger_code' => 'SALES-food'])->assertRedirect();
+
+    addProductCategory(['name' => 'Snacks', 'ledger_code' => 'SALES-FOOD'])->assertStatus(422);
+
+    expect(ProductCategory::query()->where('name', 'Snacks')->exists())->toBeFalse();
+});
+
+it('keeps the casing the operator typed, because the chart of accounts is theirs', function (): void {
+    // Compared case-insensitively, stored verbatim: the export label has to match what their
+    // accounting system expects, and that is not ours to normalise.
+    addProductCategory(['ledger_code' => 'Sales-Food'])->assertRedirect();
+
+    expect((string) ledgerCategory('Food')->ledger_code)->toBe('Sales-Food');
+});
+
+it('does not let padding smuggle a duplicate past the check', function (): void {
+    // Laravel's `TrimStrings` middleware already handles this, so the assertion is about the
+    // outcome rather than about who does the trimming.
+    addProductCategory(['ledger_code' => '7010'])->assertRedirect();
+
+    addProductCategory(['name' => 'Drink', 'ledger_code' => '  7010  '])->assertStatus(422);
+});
