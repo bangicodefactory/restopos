@@ -11,13 +11,16 @@
  * discovered at service.
  */
 
-import { Head, Link } from '@inertiajs/react';
-import { FOCUS_RING, cn } from '@shared/ui';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Button, FOCUS_RING, cn } from '@shared/ui';
 import { useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
+import { NumberField, TextField, ToggleField } from '../../components/form';
+import { FormSection } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
-import { Badge, BoolCell, Notice } from '../../components/ui/primitives';
+import { DeleteAction } from '../../components/ui/DeleteAction';
+import { Badge, BoolCell, Card, CardBody, CardHeader } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { duration } from '../../lib/format';
 import { routes } from '../../lib/routes';
@@ -118,12 +121,20 @@ export default function PrepDisplaysIndex({ displays }: PrepDisplaysIndexProps):
             header: '',
             align: 'end',
             cell: (row) => (
-                <Link
-                    href={routes.prepDisplays.edit(row.uuid)}
-                    className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
-                >
-                    {t('action.edit')}
-                </Link>
+                <span className="flex items-center justify-end gap-2">
+                    <Link
+                        href={routes.prepDisplays.edit(row.uuid)}
+                        className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
+                    >
+                        {t('action.edit')}
+                    </Link>
+                    {/*
+                      * The server refuses while the board still holds tickets and says how many —
+                      * removing a screen removes its tickets, and the orders they came from still
+                      * say the kitchen was told.
+                      */}
+                    <DeleteAction url={routes.prepDisplays.destroy(row.uuid)} name={row.name} />
+                </span>
             ),
         },
     ];
@@ -147,10 +158,77 @@ export default function PrepDisplaysIndex({ displays }: PrepDisplaysIndexProps):
                     onRowHref={(row) => routes.prepDisplays.edit(row.uuid)}
                 />
 
-                <Notice tone="info" title={t('display.createMissingTitle')}>
-                    {t('display.createMissing')}
-                </Notice>
+                <AddPrepDisplay />
             </div>
         </AppLayout>
+    );
+}
+
+/**
+ * Adding a kitchen screen (BOF-115).
+ *
+ * Name only, plus the two timings that are wrong by default more often than not. Everything else —
+ * category routing, layout, sounds — is on the screen's own editor once it exists, and a new screen
+ * starts with the three stages a board needs to be usable at all.
+ */
+function AddPrepDisplay(): JSX.Element {
+    const t = useT();
+    const form = useForm<{
+        name: string;
+        average_prep_minutes: number | null;
+        late_threshold_minutes: number | null;
+        sound_on_new_order: boolean;
+    }>({ name: '', average_prep_minutes: 15, late_threshold_minutes: 20, sound_on_new_order: true });
+
+    return (
+        <Card>
+            <CardHeader title={t('display.add')} description={t('display.createMissing')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <TextField
+                        label={t('display.title')}
+                        required
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <NumberField
+                        label={t('display.avgPrep')}
+                        value={form.data.average_prep_minutes}
+                        error={form.errors.average_prep_minutes}
+                        onChange={(value) => form.setData('average_prep_minutes', value)}
+                        min={1}
+                        max={600}
+                    />
+                    <NumberField
+                        label={t('display.late')}
+                        value={form.data.late_threshold_minutes}
+                        error={form.errors.late_threshold_minutes}
+                        onChange={(value) => form.setData('late_threshold_minutes', value)}
+                        min={1}
+                        max={600}
+                    />
+                </FormSection>
+
+                <ToggleField
+                    label={t('display.sound')}
+                    checked={form.data.sound_on_new_order}
+                    onChange={(checked) => form.setData('sound_on_new_order', checked)}
+                />
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.prepDisplays.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('display.add')}
+                </Button>
+            </CardBody>
+        </Card>
     );
 }

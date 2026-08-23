@@ -51,6 +51,20 @@ export const routes = {
         destroy: (id: number): string => `/taxes/${id}`,
     },
 
+    posBills: {
+        index: (): string => '/pos-bills',
+        store: (): string => '/pos-bills',
+        update: (id: number): string => `/pos-bills/${id}`,
+        destroy: (id: number): string => `/pos-bills/${id}`,
+    },
+
+    posNotes: {
+        index: (): string => '/pos-notes',
+        store: (): string => '/pos-notes',
+        update: (id: number): string => `/pos-notes/${id}`,
+        destroy: (id: number): string => `/pos-notes/${id}`,
+    },
+
     taxGroups: {
         store: (): string => '/tax-groups',
         update: (id: number): string => `/tax-groups/${id}`,
@@ -72,7 +86,9 @@ export const routes = {
     floors: {
         index: (): string => '/floors',
         edit: (uuid: string): string => `/floors/${uuid}/edit`,
+        store: (): string => '/floors',
         update: (uuid: string): string => `/floors/${uuid}`,
+        destroy: (uuid: string): string => `/floors/${uuid}`,
         rotateTableToken: (tableUuid: string): string => `/tables/${tableUuid}/rotate-token`,
     },
 
@@ -96,14 +112,18 @@ export const routes = {
 
     printers: {
         index: (): string => '/printers',
+        store: (): string => '/printers',
         update: (id: number): string => `/printers/${id}`,
+        destroy: (id: number): string => `/printers/${id}`,
         test: (id: number): string => `/printers/${id}/test`,
     },
 
     prepDisplays: {
         index: (): string => '/prep-displays',
         edit: (uuid: string): string => `/prep-displays/${uuid}/edit`,
+        store: (): string => '/prep-displays',
         update: (uuid: string): string => `/prep-displays/${uuid}`,
+        destroy: (uuid: string): string => `/prep-displays/${uuid}`,
         rotateToken: (uuid: string): string => `/prep-displays/${uuid}/rotate-token`,
     },
 

@@ -17,7 +17,7 @@
  * operator knows the till is still selling.
  */
 
-import { Head, router } from '@inertiajs/react';
+import { Head } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn, useToast } from '@shared/ui';
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 
@@ -29,6 +29,7 @@ import { Badge, Card, CardBody, CardHeader, Notice } from '../../components/ui/p
 import { useT } from '../../i18n';
 import { dateTime, relative } from '../../lib/format';
 import { HttpError, postJson } from '../../lib/http';
+import { useGuardedDelete } from '../../lib/guardedRequest';
 import { routes } from '../../lib/routes';
 
 import {
@@ -44,6 +45,7 @@ import {
 
 export default function DevicesIndex({ devices, configs }: DevicesIndexProps): JSX.Element {
     const t = useT();
+    const revoke = useGuardedDelete();
     const [search, setSearch] = useState('');
     const [configFilter, setConfigFilter] = useState('');
 
@@ -156,7 +158,7 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
                     })}
                     confirmPhrase={String(row.device_identifier)}
                     disabled={!row.active}
-                    onConfirm={() => router.delete(routes.devices.destroy(row.uuid), { preserveScroll: true })}
+                    onConfirm={() => revoke(routes.devices.destroy(row.uuid))}
                 />
             ),
         },

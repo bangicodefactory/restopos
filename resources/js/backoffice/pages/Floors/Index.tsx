@@ -9,13 +9,16 @@
  * `restaurant_floors.table_count` column, so it is the truth as of this request.
  */
 
-import { Head, Link } from '@inertiajs/react';
-import { FOCUS_RING, cn } from '@shared/ui';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Button, FOCUS_RING, cn } from '@shared/ui';
 import { useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
+import { NumberField, TextField } from '../../components/form';
+import { FormSection } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
-import { Badge, Notice } from '../../components/ui/primitives';
+import { DeleteAction } from '../../components/ui/DeleteAction';
+import { Badge, Card, CardBody, CardHeader } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { integer } from '../../lib/format';
 import { routes } from '../../lib/routes';
@@ -99,12 +102,20 @@ export default function FloorsIndex({ floors }: FloorsIndexProps): JSX.Element {
             header: '',
             align: 'end',
             cell: (row) => (
-                <Link
-                    href={routes.floors.edit(row.uuid)}
-                    className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
-                >
-                    {t('floor.edit')}
-                </Link>
+                <span className="flex items-center justify-end gap-2">
+                    <Link
+                        href={routes.floors.edit(row.uuid)}
+                        className={cn('rounded-pos px-2 py-1 text-sm text-brand-700 hover:underline', FOCUS_RING)}
+                    >
+                        {t('floor.edit')}
+                    </Link>
+                    {/*
+                      * Refused while a table on this room is still open, and asks for confirmation
+                      * when the room holds tables at all — a room is soft-deleted, so the database
+                      * cascade never fires and the tables would be left pointing at nothing.
+                      */}
+                    <DeleteAction url={routes.floors.destroy(row.uuid)} name={row.name} />
+                </span>
             ),
         },
     ];
@@ -128,10 +139,55 @@ export default function FloorsIndex({ floors }: FloorsIndexProps): JSX.Element {
                     onRowHref={(row) => routes.floors.edit(row.uuid)}
                 />
 
-                <Notice tone="info" title={t('floor.createMissingTitle')}>
-                    {t('floor.createMissing')}
-                </Notice>
+                <AddFloor />
             </div>
         </AppLayout>
+    );
+}
+
+/**
+ * Adding a dining room (RST-030).
+ *
+ * A name and where it sits in the room switcher; the plan itself is drawn on the room's own editor,
+ * because a floor plan is a canvas and not a form field.
+ */
+function AddFloor(): JSX.Element {
+    const t = useT();
+    const form = useForm<{ name: string; sequence: number | null }>({ name: '', sequence: null });
+
+    return (
+        <Card>
+            <CardHeader title={t('floor.add')} description={t('floor.createMissing')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <TextField
+                        label={t('floor.title')}
+                        required
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <NumberField
+                        label={t('category.sequence')}
+                        value={form.data.sequence}
+                        error={form.errors.sequence}
+                        onChange={(value) => form.setData('sequence', value)}
+                    />
+                </FormSection>
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.floors.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('floor.add')}
+                </Button>
+            </CardBody>
+        </Card>
     );
 }
