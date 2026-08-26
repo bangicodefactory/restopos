@@ -332,6 +332,15 @@ features:
   BOF-006: { status: shipped, surface: user, manual: todo }
   BOF-008: { status: shipped, surface: user, manual: todo }
 
+  # Stock ledger (REG-325 … REG-328) — planned, not built
+  #
+  # Recorded rather than omitted because the *columns* exist and are editable:
+  # `product_variants.on_hand_qty`, `products.track_stock` and `allow_negative_stock` all round-trip
+  # through the back office (BAN-409), and nothing reads or decrements any of them. A ledger entry
+  # is the only place that fact is written down where a reader would look for it.
+  REG-327: { status: planned, surface: user, manual: todo }
+  REG-328: { status: planned, surface: user, manual: todo }
+
   # Register settings (BOF-030 … BOF-079) — user
   BOF-030: { status: shipped, surface: user, manual: todo }
   BOF-034: { status: shipped, surface: user, manual: todo }
