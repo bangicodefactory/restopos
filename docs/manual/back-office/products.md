@@ -5,6 +5,7 @@ features:
   - BOF-081
   - BOF-082
   - BOF-083
+  - BOF-087
   - BOF-094
 ---
 
@@ -61,6 +62,42 @@ order that includes it then names something the back office says is gone.
 
 Taking a dish off the **guest-facing** menu is not blocked, which is why 86-ing works during service
 and archiving does not.
+
+## Variants
+
+A variant is a size, a flavour, a version — and it is what a sale actually records. A product on its
+own is not sellable; the till adds a *variant* of it. Every product has at least one, even when
+there is nothing to choose between.
+
+The **Variants** tab on a product is where they live.
+
+- **Suffix** — what tells this one apart. "Large", "Gluten free". The till button reads the product
+  name plus the suffix, so leave it blank only for a product with a single variant.
+- **Supplement** — what this variant costs *on top of* the product price. Set the large at +2.00 and
+  a later price change to the product carries through to every size automatically. That is the whole
+  reason it is a supplement rather than its own price.
+- **Barcode** — its own, scannable at the till. It has to be free: a barcode already used by another
+  variant *or by a product* is refused, because the same code scanning two different things means the
+  till rings up whichever it happened to index first, and nothing anywhere reports the conflict.
+- **On hand** — see below.
+
+### Stock is recorded but nothing moves it yet
+
+You can type an on-hand count and it will be saved. **No sale decrements it.** The stock ledger is
+not built, so the number stays exactly as you left it until somebody edits it again.
+
+It is worth knowing before you rely on it for anything.
+
+### Archiving a variant
+
+Archive, never delete: every past sale points at a variant, and a history that cannot say *which*
+size was sold is worse than a menu carrying a discontinued one.
+
+**The last variant cannot be archived.** A product with none cannot be added to an order at all — it
+appears on the menu and simply refuses to be tapped. Archive the product instead.
+
+As with products, this is refused while a session is open. Prices and names can still be changed
+mid-service; a sold line records what it charged.
 
 ## Archive a product
 

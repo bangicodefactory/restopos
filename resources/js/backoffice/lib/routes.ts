@@ -46,6 +46,12 @@ export const routes = {
         update: (id: number): string => `/pricelists/${id}`,
     },
 
+    productVariants: {
+        store: (productUuid: string): string => `/products/${productUuid}/variants`,
+        update: (productUuid: string, uuid: string): string => `/products/${productUuid}/variants/${uuid}`,
+        destroy: (productUuid: string, uuid: string): string => `/products/${productUuid}/variants/${uuid}`,
+    },
+
     productCategories: {
         index: (): string => '/product-categories',
         store: (): string => '/product-categories',

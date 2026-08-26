@@ -48,6 +48,21 @@ class ProductVariant extends Model implements PosLoadable
         ];
     }
 
+    /**
+     * What the till button reads: the product, plus the suffix that distinguishes this variant.
+     *
+     * Denormalised on purpose — `display_name` is in `posLoadFields`, so the register renders it
+     * directly rather than joining. Which means it has to be *rewritten* whenever either half moves:
+     * renaming a product left every variant showing the old name on the till indefinitely, because
+     * nothing propagated. Probed before the fix (BAN-409 review).
+     */
+    public static function displayNameFor(Product $product, ?string $suffix): string
+    {
+        $suffix = trim((string) $suffix);
+
+        return $suffix === '' ? (string) $product->name : $product->name.' '.$suffix;
+    }
+
     /** @return BelongsTo<Product, $this> */
     public function product(): BelongsTo
     {
