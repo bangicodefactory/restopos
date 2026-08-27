@@ -971,7 +971,7 @@ function Assignments({
 }
 
 /**
- * The level each attached employee holds **on this register** (BOF-122, BAN-446).
+ * The level each attached employee holds **on this register** (BOF-117, BAN-446).
  *
  * `pos_config_employee.access_level` has existed since the table was written, with a CHECK
  * constraint and a default of `basic`, and the pivot was synced as bare ids — so every employee on
@@ -1017,7 +1017,7 @@ function AccessLevels({
 }
 
 /**
- * Per-register ability overrides (BOF-124, BAN-451).
+ * Per-register ability overrides (BOF-118, BAN-451).
  *
  * `EmployeeAuthService::abilitiesFor()` has read `role_abilities` off the config since it was
  * written — and the column was never created, so it answered null on every register and the

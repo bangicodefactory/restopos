@@ -9,7 +9,7 @@ use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
 /**
- * What a cashier's PIN may be (BOF-121, BAN-446).
+ * What a cashier's PIN may be (BOF-117, BAN-446).
  *
  * The rule was `min:4|max:12` and nothing else, so `0000` and `1234` were both acceptable — on the
  * credential that authorises a void, a price override and an over-variance session close.

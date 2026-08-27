@@ -130,7 +130,7 @@ export type PosConfigRecord = {
     email_receipt_template_id: number | null;
     order_edit_tracking: boolean;
     /**
-     * Per-register ability overrides keyed by role (BOF-124).
+     * Per-register ability overrides keyed by role (BOF-118).
      *
      * `null` means "use the venue defaults in `config/pos.php`". An empty object is not the same
      * thing — it is a deliberate override granting that role nothing.
@@ -150,7 +150,7 @@ export type PosConfigRecord = {
     printer_ids: number[];
     limited_category_ids: number[];
     employee_ids: number[];
-    /** employee id → the level they hold *on this register* (BOF-122). */
+    /** employee id → the level they hold *on this register* (BOF-117). */
     employee_access_levels: Record<string, string>;
     floor_ids: number[];
     prep_display_ids: number[];

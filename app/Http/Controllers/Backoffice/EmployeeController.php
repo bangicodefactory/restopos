@@ -159,7 +159,7 @@ final class EmployeeController extends Controller
             'default_role' => [$required, Rule::enum(EmployeeRole::class)],
             'color' => ['sometimes', 'integer', 'min:0', 'max:255'],
             'active' => ['sometimes', 'boolean'],
-            // BOF-121 — `min:4|max:12` accepted `0000` and `1234` on the credential that authorises
+            // BOF-117 — `min:4|max:12` accepted `0000` and `1234` on the credential that authorises
             // a void, a price override and an over-variance close.
             'pin' => ['sometimes', 'nullable', 'string', new StaffPin($companyId, $employeeId)],
             'badge' => ['sometimes', 'nullable', 'string', 'max:64'],

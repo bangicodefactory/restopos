@@ -89,7 +89,7 @@ final class PosConfigController extends Controller
                 'limited_category_ids' => $config->limitedCategories->pluck('id')->all(),
                 'employee_ids' => $config->employees->pluck('id')->all(),
                 // The level each of them holds *here*, so the editor can render it rather than
-                // showing every attached employee at the column default (BOF-122).
+                // showing every attached employee at the column default (BOF-117).
                 'employee_access_levels' => $config->employees
                     ->mapWithKeys(static fn ($e): array => [
                         (string) $e->getKey() => (string) ($e->pivot->access_level ?? AccessLevel::Basic->value),
@@ -214,7 +214,7 @@ final class PosConfigController extends Controller
 
         $pivotBefore = [];
 
-        // BOF-122 — the level an employee holds *on this register* (BAN-446).
+        // BOF-117 — the level an employee holds *on this register* (BAN-446).
         //
         // `pos_config_employee.access_level` has existed since the table was written, with a CHECK
         // constraint and a default of `basic`, and the sync wrote bare ids — so every employee

@@ -19,7 +19,7 @@ use Tests\TestCase;
 uses(TestCase::class, RefreshDatabase::class);
 
 /**
- * Hiring, removing, and the two things a member of staff carries (BOF-120…BOF-122, BAN-446).
+ * Hiring, removing, and the two things a member of staff carries (BOF-120…BOF-117, BAN-446).
  *
  * The staff list was whatever the seeder produced: an operator could edit a person and could not
  * add or remove one, so onboarding a starter meant a database write.
@@ -157,7 +157,7 @@ it('refuses to remove someone who has taken orders', function (): void {
 });
 
 it('sets the level an employee holds on one register and not another', function (): void {
-    // BOF-122. `pos_config_employee.access_level` has existed since the table was written, with a
+    // BOF-117. `pos_config_employee.access_level` has existed since the table was written, with a
     // CHECK constraint and a default of `basic`, and the sync wrote bare ids — so every employee on
     // every register sat at the default and "advanced on till 2 only" could not be expressed.
     $cashier = $this->fx->cashier->getKey();
@@ -200,7 +200,7 @@ it('never applies a level keyed to another company employee', function (): void 
 });
 
 it('overrides the abilities a role holds on one register', function (): void {
-    // BOF-124. EmployeeAuthService has read `role_abilities` off the config since it was written and
+    // BOF-118. EmployeeAuthService has read `role_abilities` off the config since it was written and
     // the column was never created, so getAttribute answered null on every register and the override
     // has never once applied.
     test()->patch("/pos-configs/{$this->fx->config->uuid}", [

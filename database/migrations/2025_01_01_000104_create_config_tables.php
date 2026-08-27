@@ -348,7 +348,7 @@ return new class extends Migration
             $table->foreignId('sms_template_id')->nullable()->constrained('notification_templates')->nullOnDelete();
             $table->foreignId('email_receipt_template_id')->nullable()->constrained('notification_templates')->nullOnDelete();
             $table->boolean('order_edit_tracking')->default(false);
-            // Per-register ability overrides, keyed by employee role (BOF-124, BAN-451).
+            // Per-register ability overrides, keyed by employee role (BOF-118, BAN-451).
             //
             // `EmployeeAuthService::abilitiesFor()` has read this since it was written — and the
             // column was never created, so `getAttribute('role_abilities')` answered null on every

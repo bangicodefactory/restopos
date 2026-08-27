@@ -1216,7 +1216,7 @@ onboarding scenario loaders.
 | sms_template_id | FK→notification_templates.id nullable, set null | |
 | email_receipt_template_id | FK→notification_templates.id nullable, set null | |
 | order_edit_tracking | boolean default false | audit edited/deleted lines |
-| role_abilities | json null | per-register ability overrides keyed by employee role; null means the `config/pos.php` defaults, `{}` means a deliberate override granting nothing (BOF-124) |
+| role_abilities | json null | per-register ability overrides keyed by employee role; null means the `config/pos.php` defaults, `{}` means a deliberate override granting nothing (BOF-118) |
 | limited_product_count | unsignedInteger default 5000 | bootstrap product cap |
 | limited_customer_count | unsignedInteger default 100 | bootstrap customer cap |
 | timestamps, softDeletes | | |

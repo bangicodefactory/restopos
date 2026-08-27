@@ -134,7 +134,7 @@ final class PosConfigRequest extends FormRequest
             'global_discount_percent' => ['sometimes', 'numeric', 'min:0', 'max:100'],
             'global_discount_product_id' => ['sometimes', 'nullable', 'integer', $this->ownedProduct($config)],
 
-            // ── per-register staff and abilities (BOF-122, BOF-124) ─────────────────────────
+            // ── per-register staff and abilities (BOF-117, BOF-118) ─────────────────────────
             //
             // `employee_access_levels` is a map of employee id → level, applied to the pivot rows
             // that survive the ownership check in `ownedIds()`.
