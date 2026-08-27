@@ -92,9 +92,12 @@ it('refuses a pricelist that prices in another currency', function (): void {
 });
 
 it('refuses another company pricelist', function (): void {
+    // Deliberately *our* currency. Given the other venue's, the currency rule refuses it and the
+    // ownership check is never reached — which is exactly how a sabotage removing that check
+    // passed clean. One rule at a time.
     $theirs = Pricelist::query()->create([
         'company_id' => $this->other->company->getKey(),
-        'currency_id' => $this->other->currency->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
         'name' => 'Their prices',
     ]);
 
@@ -163,9 +166,12 @@ it('refuses a foreign pricelist even to a super-admin', function (): void {
     // is not an authorisation question. It prices this venue's sales wrongly whoever did it.
     $this->actingAs(User::factory()->create(['is_super_admin' => true]));
 
+    // Deliberately *our* currency. Given the other venue's, the currency rule refuses it and the
+    // ownership check is never reached — which is exactly how a sabotage removing that check
+    // passed clean. One rule at a time.
     $theirs = Pricelist::query()->create([
         'company_id' => $this->other->company->getKey(),
-        'currency_id' => $this->other->currency->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
         'name' => 'Their prices',
     ]);
 
