@@ -526,6 +526,25 @@ export type PosConfigRow = {
     use_preparation_display: boolean;
     module_pos_restaurant_bill_split: boolean;
 
+    /*
+     * Connected devices (BOF-040, BAN-476).
+     *
+     * The columns have existed since the config table was written and none of them was declared
+     * here, so the bootstrap carried them and the client could not see them — a register configured
+     * for ePOS printing had no way to say so to the till that was meant to act on it. Settable since
+     * BAN-476; declared here so something can read them.
+     */
+    use_iot_box: boolean;
+    proxy_ip: string | null;
+    iot_scan: boolean;
+    iot_scale: boolean;
+    iot_print: boolean;
+    iot_cashdrawer: boolean;
+    use_epos_printer: boolean;
+    epos_printer_ip: string | null;
+    /** Shown between sales on the screen facing the customer. */
+    customer_display_bg_media_id: number | null;
+
     iface_tax_included: TaxDisplay;
     tax_rounding_method: TaxRoundingMethod;
     /** The master switch the server gates on; a `cash_rounding_id` alone does nothing without it. */
