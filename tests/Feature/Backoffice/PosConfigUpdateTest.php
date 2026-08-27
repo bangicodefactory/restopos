@@ -8,6 +8,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pricing\CashRounding;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\Pricelist;
+use App\Services\Pos\BootstrapService;
 use BackedEnum;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -130,6 +131,49 @@ it('switches cash rounding on and chooses the rule', function (): void {
 
     expect((bool) stored('use_cash_rounding'))->toBeTrue()
         ->and((int) stored('cash_rounding_id'))->toBe((int) $rounding->getKey());
+});
+
+it('refuses another company cash rounding rule', function (): void {
+    // Found in review of #95, in a rule this very PR added: `cash_rounding_id` used
+    // `Rule::exists('cash_roundings', 'id')` on a comment claiming the table was venue-wide
+    // reference data. It is not — it carries `company_id` and uses `BelongsToCompany`. And
+    // `Rule::exists` runs on the query builder, which is exactly what `CompanyScope` cannot reach,
+    // so the global scope offered no cover. Probed: 302, foreign rule stored, no complaint.
+    $theirs = CashRounding::query()->create([
+        'company_id' => $this->other->company->getKey(),
+        'name' => 'Their rounding',
+        'rounding' => '0.05',
+        'rounding_method' => 'half_up',
+    ]);
+
+    save(['use_cash_rounding' => true, 'cash_rounding_id' => $theirs->getKey()])
+        ->assertSessionHasErrors('cash_rounding_id');
+
+    expect(stored('cash_rounding_id'))->toBeNull();
+});
+
+it('ships the chosen defaults to the till, which is where they decide a price', function (): void {
+    // The acceptance criterion is not "the column stores" — it is that the register prices against
+    // it. `configPayload()` sends every column and `order-actions.ts` starts a new order on
+    // `config.pricelist_id` / `config.default_fiscal_position_id`, so this asserts the seam between
+    // them: a value saved here is a value the till is handed.
+    $pricelist = Pricelist::query()->create([
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'name' => 'Terrace',
+    ]);
+
+    save(['pricelist_id' => $pricelist->getKey()])->assertRedirect();
+
+    $payload = app(BootstrapService::class)->payload(
+        $this->fx->config->fresh(),
+        $this->fx->device,
+        ['pos_config'],
+    );
+
+    $shipped = $payload['data']['pos_config'] ?? [];
+
+    expect((int) ($shipped['pricelist_id'] ?? 0))->toBe((int) $pricelist->getKey());
 });
 
 it('round-trips the interface group', function (): void {

@@ -99,10 +99,13 @@ final class PosConfigRequest extends FormRequest
             'amount_authorized_diff' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'auto_validate_terminal_payment' => ['sometimes', 'boolean'],
             'use_fast_payment' => ['sometimes', 'boolean'],
-            // Cash rounding is venue-wide reference data rather than a company-owned table, so an
-            // unscoped `exists` is the honest rule here.
             'use_cash_rounding' => ['sometimes', 'boolean'],
-            'cash_rounding_id' => ['sometimes', 'nullable', 'integer', Rule::exists('cash_roundings', 'id')],
+            // Scoped, not `Rule::exists`. `cash_roundings` carries a `company_id` and uses
+            // `BelongsToCompany`, so it is every bit as tenant-owned as a pricelist — and
+            // `Rule::exists` runs on the query builder, which is precisely what `CompanyScope`
+            // says it cannot reach. Probed during review of #95 with an unscoped rule in place:
+            // another company's rounding rule attached, 302, no complaint.
+            'cash_rounding_id' => ['sometimes', 'nullable', 'integer', $this->owned($config, 'cashRounding')],
             'only_round_cash_payments' => ['sometimes', 'boolean'],
 
             // ── receipts (BOF-038) ──────────────────────────────────────────────────────────
@@ -269,7 +272,14 @@ final class PosConfigRequest extends FormRequest
                 return;
             }
 
+            // Both halves matter. `newQuery()` carries `CompanyScope`, which is what stops an
+            // ordinary user reaching another tenant. The explicit `where` is what stops a
+            // *super-admin* — the scope deliberately steps aside for one, and "may cross companies"
+            // should not mean "may point this register at another company's pricelist". That is not
+            // an authorisation question; a foreign pricelist prices this venue's sales wrongly no
+            // matter who attached it.
             $exists = $config->{$relation}()->getRelated()->newQuery()
+                ->where('company_id', $config->company_id)
                 ->whereKey((int) $value)
                 ->exists();
 

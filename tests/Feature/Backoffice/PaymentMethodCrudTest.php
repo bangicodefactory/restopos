@@ -485,3 +485,58 @@ it('does not mistake an emptied ledger code for no change', function (): void {
 
     expect((string) PaymentMethod::query()->whereKey($method->getKey())->value('ledger_code'))->toBe('7001');
 });
+
+it('never points a payment method at another venue image', function (): void {
+    // Found by `ScopedExistsTest` during the review of #95, not by anyone reading this file.
+    //
+    // `image_media_id` was validated with `Rule::exists('media_files', 'id')`. That runs on the
+    // query builder, and `CompanyScope` is an Eloquent scope — its own docblock says the builder is
+    // the thing it cannot reach. So the rule asked "does any tenant have this row?" and answered
+    // yes. Probed on master: 302, another venue's uploaded image stored, and it then ships to every
+    // till as this method's icon.
+    $theirs = PosFixtures::make();
+
+    $foreign = DB::table('media_files')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $theirs->company->getKey(),
+        'disk' => 'local',
+        'path' => 'their/logo.png',
+        'filename' => 'logo.png',
+        'mime_type' => 'image/png',
+        'size_bytes' => 1024,
+        'checksum' => str_repeat('a', 64),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $id = $this->fx->cash->getKey();
+
+    $this->patch("/payment-methods/{$id}", ['image_media_id' => $foreign])
+        ->assertSessionHasErrors('image_media_id');
+
+    expect(PaymentMethod::query()->whereKey($id)->value('image_media_id'))->toBeNull();
+});
+
+it('still accepts an image of its own venue', function (): void {
+    // The negative half. A guard that refuses everything is not a guard, and with no upload route
+    // in the app yet there is no other test that would notice.
+    $ours = DB::table('media_files')->insertGetId([
+        'uuid' => (string) Str::uuid(),
+        'company_id' => $this->fx->company->getKey(),
+        'disk' => 'local',
+        'path' => 'ours/logo.png',
+        'filename' => 'logo.png',
+        'mime_type' => 'image/png',
+        'size_bytes' => 1024,
+        'checksum' => str_repeat('b', 64),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $id = $this->fx->cash->getKey();
+
+    $this->patch("/payment-methods/{$id}", ['image_media_id' => $ours])
+        ->assertSessionHasNoErrors();
+
+    expect((int) PaymentMethod::query()->whereKey($id)->value('image_media_id'))->toBe($ours);
+});
