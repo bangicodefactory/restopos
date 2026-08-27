@@ -14,23 +14,23 @@ final class PrepDisplayPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'pos.kitchen.view');
+        return $this->userCan($user, 'kitchen.view');
     }
 
     public function view(User $user, PrepDisplay $display): bool
     {
-        return $this->sameCompany($user, $display->company_id) && $this->userCan($user, 'pos.kitchen.view');
+        return $this->sameCompany($user, $display->company_id) && $this->userCan($user, 'kitchen.view');
     }
 
     /** Adding a screen is configuration, the same right as changing one (BAN-435). */
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'pos.kitchen.manage');
+        return $this->userCan($user, 'kitchen.manage_displays');
     }
 
     public function update(User $user, PrepDisplay $display): bool
     {
-        return $this->view($user, $display) && $this->userCan($user, 'pos.kitchen.manage');
+        return $this->view($user, $display) && $this->userCan($user, 'kitchen.manage_displays');
     }
 
     /**

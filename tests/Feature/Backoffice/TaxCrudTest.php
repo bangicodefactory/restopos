@@ -51,7 +51,7 @@ beforeEach(function (): void {
 
     $this->fx = PosFixtures::make();
     $this->group = TaxGroup::query()->where('company_id', $this->fx->company->getKey())->firstOrFail();
-    $this->actingAs(taxActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(taxActor($this->fx, ['catalog.view', 'catalog.manage_taxes']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -219,7 +219,7 @@ it('refuses a user who may not configure the register', function (): void {
     addTax((int) $this->group->getKey())->assertRedirect();
     $tax = Tax::query()->where('name', 'Reduced 10%')->firstOrFail();
 
-    test()->actingAs(taxActor($this->fx, ['config.view']));
+    test()->actingAs(taxActor($this->fx, ['catalog.view']));
 
     addTax((int) $this->group->getKey(), ['name' => 'Sneaky'])->assertForbidden();
     test()->deleteJson(route('taxes.destroy', $tax->getKey()))->assertForbidden();

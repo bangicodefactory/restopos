@@ -49,7 +49,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make()->withSession()->withPrepDisplay();
-    $this->actingAs(displayActor($this->fx, ['pos.kitchen.view', 'pos.kitchen.manage']));
+    $this->actingAs(displayActor($this->fx, ['kitchen.view', 'kitchen.manage_displays']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -232,7 +232,7 @@ it('refuses a user who may not configure the kitchen', function (): void {
     addDisplay()->assertRedirect();
     $display = PrepDisplay::query()->where('name', 'Cold larder')->firstOrFail();
 
-    test()->actingAs(displayActor($this->fx, ['pos.kitchen.view']));
+    test()->actingAs(displayActor($this->fx, ['kitchen.view']));
 
     addDisplay(['name' => 'Sneaky'])->assertForbidden();
     test()->deleteJson(route('prep-displays.destroy', $display->uuid))->assertForbidden();

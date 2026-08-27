@@ -20,22 +20,22 @@ final class ProductAttributePolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'catalog.view');
     }
 
     public function view(User $user, ProductAttribute $attribute): bool
     {
-        return $this->sameCompany($user, $attribute->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $attribute->company_id) && $this->userCan($user, 'catalog.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'catalog.manage_products');
     }
 
     public function update(User $user, ProductAttribute $attribute): bool
     {
-        return $this->sameCompany($user, $attribute->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $attribute->company_id) && $this->userCan($user, 'catalog.manage_products');
     }
 
     /**

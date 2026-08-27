@@ -14,12 +14,12 @@ final class SessionPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'pos.session.view');
+        return $this->userCan($user, 'backoffice.view_reports');
     }
 
     public function view(User $user, PosSession $session): bool
     {
-        return $this->sameCompany($user, $session->company_id) && $this->userCan($user, 'pos.session.view');
+        return $this->sameCompany($user, $session->company_id) && $this->userCan($user, 'backoffice.view_reports');
     }
 
     /** Closing someone else's session from the back-office is manager-only. */
@@ -36,6 +36,6 @@ final class SessionPolicy
 
     public function export(User $user): bool
     {
-        return $this->userCan($user, 'pos.accounting.export');
+        return $this->userCan($user, 'backoffice.export_accounting');
     }
 }

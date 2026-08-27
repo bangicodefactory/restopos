@@ -50,7 +50,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make()->withSession()->withPrepDisplay();
-    $this->actingAs(stageActor($this->fx, ['pos.kitchen.view', 'pos.kitchen.manage']));
+    $this->actingAs(stageActor($this->fx, ['kitchen.view', 'kitchen.manage_displays']));
 });
 
 /**
@@ -432,7 +432,7 @@ it('keeps the display and its stages, which is the point of rotating rather than
 it('refuses a user who may not configure the kitchen', function (): void {
     $before = (string) PrepDisplay::query()->whereKey($this->fx->display->getKey())->value('access_token');
 
-    test()->actingAs(stageActor($this->fx, ['pos.kitchen.view']));
+    test()->actingAs(stageActor($this->fx, ['kitchen.view']));
 
     test()->post(route('prep-displays.rotate-token', $this->fx->display->uuid))->assertForbidden();
 

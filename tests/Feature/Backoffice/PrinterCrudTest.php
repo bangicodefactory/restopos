@@ -63,7 +63,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(actorWith($this->fx, ['pos.kitchen.view', 'pos.kitchen.manage']));
+    $this->actingAs(actorWith($this->fx, ['kitchen.view', 'kitchen.manage_displays']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -297,7 +297,7 @@ it('refuses a user who may not configure the kitchen', function (): void {
     createPrinter(['name' => 'Grill'])->assertRedirect();
     $printer = PosPrinter::query()->where('name', 'Grill')->firstOrFail();
 
-    test()->actingAs(actorWith($this->fx, ['pos.kitchen.view']));
+    test()->actingAs(actorWith($this->fx, ['kitchen.view']));
 
     createPrinter(['name' => 'Sneaky'])->assertForbidden();
     test()->delete(route('printers.destroy', $printer))->assertForbidden();

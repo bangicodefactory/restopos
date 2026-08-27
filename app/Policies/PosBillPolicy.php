@@ -19,22 +19,22 @@ final class PosBillPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'backoffice.access');
     }
 
     public function view(User $user, PosBill $bill): bool
     {
-        return $this->sameCompany($user, $bill->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $bill->company_id) && $this->userCan($user, 'backoffice.access');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function update(User $user, PosBill $bill): bool
     {
-        return $this->sameCompany($user, $bill->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $bill->company_id) && $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function delete(User $user, PosBill $bill): bool
