@@ -354,7 +354,11 @@ features:
   BOF-083: { status: shipped, surface: user, manual: back-office/products.md#changing-availability-during-service }
   BOF-084: { status: shipped, surface: user, manual: back-office/menu-categories.md#menu-categories }
   BOF-085: { status: shipped, surface: user, manual: back-office/products.md#options }
+  # Enforced at the till (product-flow.ts) but not authorable — no editor writes
+  # product_attribute_exclusions, so the table is empty on every install (BAN-412 carve-out).
+  BOF-086: { status: planned, surface: user, manual: todo }
   BOF-087: { status: shipped, surface: user, manual: back-office/products.md#variants }
+  BOF-089: { status: planned, surface: user, manual: todo }
   BOF-090: { status: shipped, surface: user, manual: todo }
   BOF-091: { status: shipped, surface: user, manual: back-office/taxes.md#taxes }
   BOF-092: { status: shipped, surface: user, manual: todo }
