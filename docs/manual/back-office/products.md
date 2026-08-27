@@ -5,6 +5,7 @@ features:
   - BOF-081
   - BOF-082
   - BOF-083
+  - BOF-085
   - BOF-087
   - BOF-094
 ---
@@ -62,6 +63,53 @@ order that includes it then names something the back office says is gone.
 
 Taking a dish off the **guest-facing** menu is not blocked, which is why 86-ing works during service
 and archiving does not.
+
+## Options
+
+Options are the choices offered on a dish: *Size — small, medium, large*. *Cooking — rare, medium,
+well done.* *Extras — bacon, avocado.*
+
+They are defined once for the venue, on **Product options**, and then offered on the products that
+have them. "Size" means the same thing on every dish, and a per-product copy becomes three spellings
+of "Large" by the second month.
+
+### Defining an option
+
+Beyond a name, two settings decide how it behaves:
+
+- **Display** — what the till shows: radio buttons, pills, a dropdown, colour swatches, or multiple
+  choice. **Multiple choice is the only one that lets a guest pick more than one**, so it is what
+  extras want and what sizes do not.
+- **Variants** — whether choosing produces a distinct sellable item. *One variant per combination*
+  suits a size that has its own barcode and its own stock. *No variant* keeps one item and records
+  the choice on the order line, which is what "no onions" wants: nobody stocks an onion-less burger.
+
+A value can be marked **free text** instead of a choice — "name on the cake". The guest types rather
+than picks.
+
+### Offering an option on a product
+
+On the product's **Options** tab, add the option and tick the values this dish offers. Each ticked
+value gets a **supplement**: what it adds to *this* product's price.
+
+The supplement lives here rather than on the value itself because "large" is +2.00 on a coffee and
++6.00 on a pizza. A venue forced to choose one number for both would stop using the feature.
+
+**Mark the choice required** to stop "one coffee" reaching the kitchen without a size.
+
+A ticked list with nothing in it renders an empty picker on the till, so the page says so before you
+save.
+
+### Removing options
+
+Past orders record what was chosen, so:
+
+- An option **a product offers** cannot be deleted — take it off the products first.
+- A value **an order has chosen** cannot be removed from a product, and neither can the whole option
+  line. That includes free-text values somebody typed.
+
+**Deactivate instead** in every one of those cases. The option disappears from the till and every
+past order keeps saying what it was sold with.
 
 ## Variants
 

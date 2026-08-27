@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Backoffice\AttributeController;
+use App\Http\Controllers\Backoffice\AttributeValueController;
+use App\Http\Controllers\Backoffice\ProductAttributeLineController;
 use App\Http\Controllers\Backoffice\CategoryController;
 use App\Http\Controllers\Backoffice\DashboardController;
 use App\Http\Controllers\Backoffice\DeviceController;
@@ -70,6 +73,19 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('products', [ProductController::class, 'store'])->name('products.store');
     Route::patch('products/{product}', [ProductController::class, 'update'])->name('products.update');
     Route::delete('products/{product}', [ProductController::class, 'destroy'])->name('products.destroy');
+    Route::get('product-attributes', [AttributeController::class, 'index'])->name('product-attributes.index');
+    Route::post('product-attributes', [AttributeController::class, 'store'])->name('product-attributes.store');
+    Route::patch('product-attributes/{attribute}', [AttributeController::class, 'update'])->name('product-attributes.update');
+    Route::delete('product-attributes/{attribute}', [AttributeController::class, 'destroy'])->name('product-attributes.destroy');
+
+    Route::post('product-attributes/{attribute}/values', [AttributeValueController::class, 'store'])->name('attribute-values.store');
+    Route::patch('product-attributes/{attribute}/values/{value}', [AttributeValueController::class, 'update'])->name('attribute-values.update');
+    Route::delete('product-attributes/{attribute}/values/{value}', [AttributeValueController::class, 'destroy'])->name('attribute-values.destroy');
+
+    Route::post('products/{product}/attribute-lines', [ProductAttributeLineController::class, 'store'])->name('product-attribute-lines.store');
+    Route::patch('products/{product}/attribute-lines/{line}', [ProductAttributeLineController::class, 'update'])->name('product-attribute-lines.update');
+    Route::delete('products/{product}/attribute-lines/{line}', [ProductAttributeLineController::class, 'destroy'])->name('product-attribute-lines.destroy');
+
     Route::post('products/{product}/variants', [ProductVariantController::class, 'store'])->name('product-variants.store');
     Route::patch('products/{product}/variants/{variant}', [ProductVariantController::class, 'update'])->name('product-variants.update');
     Route::delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy'])->name('product-variants.destroy');

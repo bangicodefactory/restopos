@@ -6,6 +6,8 @@
  * (`list_price`, `standard_price`, `price_extra`) are decimal strings.
  */
 
+import type { AttributeLineRow, AttributeOption } from './AttributeLines';
+
 import type { Deferred, MoneyString, Paginator } from '../../types/inertia';
 
 export type ProductListRow = {
@@ -100,6 +102,7 @@ export type ProductRecord = {
     pos_category_ids: number[];
     tax_ids: number[];
     variants: ProductVariantRow[];
+    attribute_lines: AttributeLineRow[];
 };
 
 export type TaxOption = {
@@ -114,6 +117,7 @@ export type ProductOptions = {
     taxes: TaxOption[];
     product_categories: { id: number; name: string; ledger_code: string | null }[];
     uoms: { id: number; name: string }[];
+    attributes: AttributeOption[];
 };
 
 export type ProductEditProps = {
