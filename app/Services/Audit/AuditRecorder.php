@@ -9,6 +9,7 @@ use App\Models\Audit\AuditLog;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
+use BackedEnum;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
@@ -125,7 +126,13 @@ final readonly class AuditRecorder
                 continue;
             }
 
-            $changes[$field] = ['old' => $old, 'new' => $new];
+            // Unwrapped for the same reason `same()` unwraps: the trail is a JSON column an auditor
+            // reads, and an enum instance serialises as `{}` there — "tax_display changed from {}
+            // to total" answers nothing.
+            $changes[$field] = [
+                'old' => $old instanceof BackedEnum ? $old->value : $old,
+                'new' => $new instanceof BackedEnum ? $new->value : $new,
+            ];
         }
 
         return $changes;
@@ -141,6 +148,15 @@ final readonly class AuditRecorder
      */
     private static function same(mixed $old, mixed $new): bool
     {
+        // `getOriginal()` applies the model's casts, so an enum-backed column hands back a
+        // `BackedEnum` while the request hands back the plain string it was submitted as. Comparing
+        // those with `(string)` is a fatal — "Object of class TaxDisplay could not be converted to
+        // string" — which surfaced the first time a settings column with an enum cast became
+        // writable (`tax_display`, BAN-466). Unwrapped to the backing value, which is what the
+        // column holds and what an auditor wants to read.
+        $old = $old instanceof BackedEnum ? $old->value : $old;
+        $new = $new instanceof BackedEnum ? $new->value : $new;
+
         if (self::bcSafe($old) && self::bcSafe($new)) {
             return bccomp((string) $old, (string) $new, 6) === 0;
         }

@@ -27,6 +27,7 @@ import {
     MultiSelectField,
     NumberField,
     SaveBar,
+    SelectField,
     TextField,
     TextareaField,
     ToggleField,
@@ -91,7 +92,47 @@ type ConfigForm = {
     prep_display_ids: number[];
     note_ids: number[];
     bill_ids: number[];
+
+    // Widened in BAN-466. Each one has a matching rule in `PosConfigRequest`; the two lists move
+    // together or a control saves into nothing.
+    pricelist_id: number | null;
+    default_fiscal_position_id: number | null;
+    default_preset_id: number | null;
+    use_presets: boolean;
+    tax_display: string;
+    default_screen: string;
+    idle_return_seconds: number;
+    show_product_images: boolean;
+    show_category_images: boolean;
+    group_products_by_category: boolean;
+    big_scrollbars: boolean;
+    allow_manual_discount: boolean;
+    restrict_price_control: boolean;
+    show_margins_to_all: boolean;
+    auto_validate_terminal_payment: boolean;
+    use_fast_payment: boolean;
+    use_cash_rounding: boolean;
+    cash_rounding_id: number | null;
+    only_round_cash_payments: boolean;
+    show_receipt_header_footer: boolean;
+    basic_receipt: boolean;
+    auto_print_receipt: boolean;
+    skip_receipt_screen: boolean;
+    enable_bill_print: boolean;
+    prep_auto_fire_first_course: boolean;
+    order_edit_tracking: boolean;
 };
+
+/** The two enum columns the settings screen offers, spelled the way the operator reads them. */
+const TAX_DISPLAYS = [
+    { value: 'subtotal', label: 'Hors taxes (sous-total)' },
+    { value: 'total', label: 'Taxes comprises (total)' },
+] as const;
+
+const DEFAULT_SCREENS = [
+    { value: 'tables', label: 'Plan de salle' },
+    { value: 'register', label: 'Caisse' },
+] as const;
 
 function initialForm(config: PosConfigRecord): ConfigForm {
     return {
@@ -128,6 +169,33 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         prep_display_ids: config.prep_display_ids,
         note_ids: config.note_ids,
         bill_ids: config.bill_ids,
+
+        pricelist_id: config.pricelist_id,
+        default_fiscal_position_id: config.default_fiscal_position_id,
+        default_preset_id: config.default_preset_id,
+        use_presets: config.use_presets,
+        tax_display: config.tax_display,
+        default_screen: config.default_screen,
+        idle_return_seconds: config.idle_return_seconds,
+        show_product_images: config.show_product_images,
+        show_category_images: config.show_category_images,
+        group_products_by_category: config.group_products_by_category,
+        big_scrollbars: config.big_scrollbars,
+        allow_manual_discount: config.allow_manual_discount,
+        restrict_price_control: config.restrict_price_control,
+        show_margins_to_all: config.show_margins_to_all,
+        auto_validate_terminal_payment: config.auto_validate_terminal_payment,
+        use_fast_payment: config.use_fast_payment,
+        use_cash_rounding: config.use_cash_rounding,
+        cash_rounding_id: config.cash_rounding_id,
+        only_round_cash_payments: config.only_round_cash_payments,
+        show_receipt_header_footer: config.show_receipt_header_footer,
+        basic_receipt: config.basic_receipt,
+        auto_print_receipt: config.auto_print_receipt,
+        skip_receipt_screen: config.skip_receipt_screen,
+        enable_bill_print: config.enable_bill_print,
+        prep_auto_fire_first_course: config.prep_auto_fire_first_course,
+        order_edit_tracking: config.order_edit_tracking,
     };
 }
 
@@ -213,19 +281,31 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     onChange={(checked) => form.setData('use_employee_login', checked)}
                                     description="Chaque vente est attribuée à un employé identifié par PIN ou badge."
                                 />
+                                {/*
+                                 * The currency stays read-only here even though the server now
+                                 * accepts it: it is only changeable until the register takes its
+                                 * first payment, and every register that has one has taken one.
+                                 * A field that is writable on the day a venue is created and
+                                 * refused for the rest of its life reads better as a decision made
+                                 * at creation — which is BAN-472's surface, not this one.
+                                 */}
                                 <NumberField
                                     label="Devise (id)"
                                     value={config.currency_id}
                                     onChange={() => {}}
                                     disabled
-                                    lockedReason={locked}
+                                    lockedReason="La devise est fixée à la création du point de vente : la changer redénominerait les sessions et commandes déjà enregistrées."
                                 />
-                                <TextField
+                                <SelectField
                                     label="Écran par défaut"
-                                    value={config.default_screen}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    value={form.data.default_screen}
+                                    error={form.errors.default_screen}
+                                    options={DEFAULT_SCREENS.map((screen) => ({
+                                        value: screen.value,
+                                        label: screen.label,
+                                    }))}
+                                    onChange={(value) => form.setData('default_screen', value)}
+                                    hint="L’écran sur lequel la caisse revient entre deux ventes."
                                 />
                                 <FormRow>
                                     <TokenField label={t('config.accessToken')} value={config.access_token} />
@@ -237,38 +317,31 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                             <FormSection description="Options d’affichage de la caisse (BOF-034).">
                                 <ToggleField
                                     label="Images des produits"
-                                    checked={config.show_product_images}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.show_product_images}
+                                    onChange={(checked) => form.setData('show_product_images', checked)}
                                 />
                                 <ToggleField
                                     label="Images des catégories"
-                                    checked={config.show_category_images}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.show_category_images}
+                                    onChange={(checked) => form.setData('show_category_images', checked)}
                                 />
                                 <ToggleField
                                     label="Grouper par catégorie"
-                                    checked={config.group_products_by_category}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.group_products_by_category}
+                                    onChange={(checked) => form.setData('group_products_by_category', checked)}
                                 />
                                 <ToggleField
                                     label="Grandes barres de défilement"
-                                    checked={config.big_scrollbars}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.big_scrollbars}
+                                    onChange={(checked) => form.setData('big_scrollbars', checked)}
                                 />
                                 <NumberField
                                     label="Retour automatique (s)"
-                                    value={config.idle_return_seconds}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    value={form.data.idle_return_seconds}
+                                    min={15}
+                                    max={3600}
+                                    error={form.errors.idle_return_seconds}
+                                    onChange={(value) => form.setData('idle_return_seconds', value ?? 180)}
                                     suffix="s"
                                 />
                                 <NumberField
@@ -305,10 +378,8 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     />
                                     <ToggleField
                                         label="Impression d’addition"
-                                        checked={config.enable_bill_print}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.enable_bill_print}
+                                        onChange={(checked) => form.setData('enable_bill_print', checked)}
                                     />
                                     <ToggleField
                                         label="Pourboires"
@@ -400,25 +471,53 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                 </FormRow>
                                 <ToggleField
                                     label="Validation automatique du terminal"
-                                    checked={config.auto_validate_terminal_payment}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.auto_validate_terminal_payment}
+                                    onChange={(checked) => form.setData('auto_validate_terminal_payment', checked)}
                                 />
                                 <ToggleField
                                     label="Paiement rapide"
-                                    checked={config.use_fast_payment}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.use_fast_payment}
+                                    onChange={(checked) => form.setData('use_fast_payment', checked)}
                                 />
                                 <ToggleField
                                     label="Arrondi en espèces"
-                                    checked={config.use_cash_rounding}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.use_cash_rounding}
+                                    onChange={(checked) => form.setData('use_cash_rounding', checked)}
+                                    description="Arrondit le total en espèces au pas choisi, là où la pièce d’un centime n’a plus cours."
                                 />
+                                <ToggleField
+                                    label="Arrondir uniquement les espèces"
+                                    checked={form.data.only_round_cash_payments}
+                                    disabled={!form.data.use_cash_rounding}
+                                    onChange={(checked) => form.setData('only_round_cash_payments', checked)}
+                                    description="Un règlement par carte passe au centime près ; seul le paiement en espèces est arrondi."
+                                />
+
+                                <FormRow>
+                                    <DeferredRegion value={options} label="Règle d’arrondi">
+                                        {(value) => (
+                                            <SelectField
+                                                label="Règle d’arrondi"
+                                                value={form.data.cash_rounding_id === null ? '' : String(form.data.cash_rounding_id)}
+                                                error={form.errors.cash_rounding_id}
+                                                placeholder="Aucune"
+                                                disabled={!form.data.use_cash_rounding}
+                                                lockedReason={
+                                                    form.data.use_cash_rounding
+                                                        ? undefined
+                                                        : 'Activez d’abord l’arrondi en espèces.'
+                                                }
+                                                options={value.cash_roundings.map((row) => ({
+                                                    value: String(row.id),
+                                                    label: `${row.name} · ${row.rounding} (${row.rounding_method})`,
+                                                }))}
+                                                onChange={(chosen) =>
+                                                    form.setData('cash_rounding_id', chosen === '' ? null : Number(chosen))
+                                                }
+                                            />
+                                        )}
+                                    </DeferredRegion>
+                                </FormRow>
 
                                 <FormRow>
                                     <DeferredRegion value={options} label={t('payment.title')}>
@@ -469,24 +568,21 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                 />
                                 <ToggleField
                                     label="Remise manuelle"
-                                    checked={config.allow_manual_discount}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.allow_manual_discount}
+                                    onChange={(checked) => form.setData('allow_manual_discount', checked)}
                                 />
                                 <ToggleField
                                     label="Contrôle du prix restreint"
-                                    checked={config.restrict_price_control}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.restrict_price_control}
+                                    onChange={(checked) => form.setData('restrict_price_control', checked)}
                                 />
-                                <TextField
+                                <SelectField
                                     label="Affichage des taxes"
-                                    value={config.tax_display}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    value={form.data.tax_display}
+                                    error={form.errors.tax_display}
+                                    options={TAX_DISPLAYS.map((mode) => ({ value: mode.value, label: mode.label }))}
+                                    onChange={(value) => form.setData('tax_display', value)}
+                                    hint="Prix affichés taxes comprises ou hors taxes sur la caisse."
                                 />
                                 <ToggleField
                                     label="Limiter les catégories"
@@ -498,6 +594,51 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     <DeferredRegion value={options} label={t('pricelist.title')}>
                                         {(value) => (
                                             <div className="grid gap-4 md:grid-cols-3">
+                                                {/*
+                                                 * The two fields this whole ticket is about. Every
+                                                 * price the till quotes is decided here, and
+                                                 * neither could be set from anywhere: the rule set
+                                                 * dropped them, so the only way to point a register
+                                                 * at a pricelist was to edit the database.
+                                                 *
+                                                 * A pricelist prices in its own currency, so the
+                                                 * server refuses one that disagrees with this
+                                                 * register's — the till would otherwise quote its
+                                                 * amounts under the wrong symbol.
+                                                 */}
+                                                <SelectField
+                                                    label="Liste de prix par défaut"
+                                                    value={form.data.pricelist_id === null ? '' : String(form.data.pricelist_id)}
+                                                    error={form.errors.pricelist_id}
+                                                    placeholder="Prix de vente du produit"
+                                                    options={value.pricelists.map((row) => ({
+                                                        value: String(row.id),
+                                                        label: row.name,
+                                                    }))}
+                                                    onChange={(chosen) =>
+                                                        form.setData('pricelist_id', chosen === '' ? null : Number(chosen))
+                                                    }
+                                                />
+                                                <SelectField
+                                                    label="Position fiscale par défaut"
+                                                    value={
+                                                        form.data.default_fiscal_position_id === null
+                                                            ? ''
+                                                            : String(form.data.default_fiscal_position_id)
+                                                    }
+                                                    error={form.errors.default_fiscal_position_id}
+                                                    placeholder="Taxes du produit"
+                                                    options={value.fiscal_positions.map((row) => ({
+                                                        value: String(row.id),
+                                                        label: row.name,
+                                                    }))}
+                                                    onChange={(chosen) =>
+                                                        form.setData(
+                                                            'default_fiscal_position_id',
+                                                            chosen === '' ? null : Number(chosen),
+                                                        )
+                                                    }
+                                                />
                                                 <MultiSelectField
                                                     label={t('pricelist.title')}
                                                     values={form.data.pricelist_ids}
@@ -554,31 +695,23 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                 <div className="grid gap-4 md:grid-cols-2">
                                     <ToggleField
                                         label="Impression automatique"
-                                        checked={config.auto_print_receipt}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.auto_print_receipt}
+                                        onChange={(checked) => form.setData('auto_print_receipt', checked)}
                                     />
                                     <ToggleField
                                         label="Ignorer l’écran de ticket"
-                                        checked={config.skip_receipt_screen}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.skip_receipt_screen}
+                                        onChange={(checked) => form.setData('skip_receipt_screen', checked)}
                                     />
                                     <ToggleField
                                         label="Ticket simplifié"
-                                        checked={config.basic_receipt}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.basic_receipt}
+                                        onChange={(checked) => form.setData('basic_receipt', checked)}
                                     />
                                     <ToggleField
                                         label="Afficher en-tête et pied"
-                                        checked={config.show_receipt_header_footer}
-                                        onChange={() => {}}
-                                        disabled
-                                        lockedReason={locked}
+                                        checked={form.data.show_receipt_header_footer}
+                                        onChange={(checked) => form.setData('show_receipt_header_footer', checked)}
                                     />
                                 </div>
                             </FormSection>
@@ -598,10 +731,8 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                 />
                                 <ToggleField
                                     label="Envoi automatique du 1er service"
-                                    checked={config.prep_auto_fire_first_course}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.prep_auto_fire_first_course}
+                                    onChange={(checked) => form.setData('prep_auto_fire_first_course', checked)}
                                 />
 
                                 <FormRow>
@@ -678,17 +809,13 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                             <FormSection>
                                 <ToggleField
                                     label="Suivi des modifications de commande"
-                                    checked={config.order_edit_tracking}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.order_edit_tracking}
+                                    onChange={(checked) => form.setData('order_edit_tracking', checked)}
                                 />
                                 <ToggleField
                                     label="Marges visibles par tous"
-                                    checked={config.show_margins_to_all}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.show_margins_to_all}
+                                    onChange={(checked) => form.setData('show_margins_to_all', checked)}
                                 />
                                 <ToggleField
                                     label="Fidélité"
@@ -780,6 +907,36 @@ function Assignments({
                 values={form.data.preset_ids}
                 options={options.presets.map((row) => ({ value: String(row.id), label: `${row.name} · ${row.service_at}` }))}
                 onChange={(values) => form.setData('preset_ids', values)}
+            />
+            <ToggleField
+                label="Modes de service"
+                checked={form.data.use_presets}
+                onChange={(checked) => form.setData('use_presets', checked)}
+                description="Sur place, à emporter, livraison — proposés au début de chaque commande."
+            />
+            {/*
+             * A register could be given a list of service modes and no default, so the till opened
+             * on "choose one" every time even where a venue only ever does one (BOF-032).
+             *
+             * Choosing a default adds it to the available list if it is not already there — an
+             * unavailable default is a register whose opening screen offers a mode it then refuses.
+             */}
+            <SelectField
+                label="Service par défaut"
+                value={form.data.default_preset_id === null ? '' : String(form.data.default_preset_id)}
+                error={form.errors.default_preset_id}
+                placeholder="Aucun"
+                disabled={!form.data.use_presets}
+                lockedReason={form.data.use_presets ? undefined : 'Activez d’abord les modes de service.'}
+                options={options.presets.map((row) => ({ value: String(row.id), label: row.name }))}
+                onChange={(chosen) => {
+                    const id = chosen === '' ? null : Number(chosen);
+                    form.setData('default_preset_id', id);
+
+                    if (id !== null && !form.data.preset_ids.includes(id)) {
+                        form.setData('preset_ids', [...form.data.preset_ids, id]);
+                    }
+                }}
             />
             <MultiSelectField
                 label={t('employee.title')}

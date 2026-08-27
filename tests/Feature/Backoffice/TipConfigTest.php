@@ -16,7 +16,9 @@ uses(TestCase::class, RefreshDatabase::class);
 
 beforeEach(function (): void {
     $this->fx = PosFixtures::make();
-    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+    // A real permissioned user, not a super-admin: a super-admin passes every policy by
+    // short-circuit and would prove nothing about the check.
+    $this->actingAs($this->fx->userWith('backoffice.access', 'backoffice.manage_configs'));
 });
 
 function patchConfig(PosFixtures $fx, array $payload): TestResponse

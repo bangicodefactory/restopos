@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 142
+  manual_debt: 140
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -343,8 +343,22 @@ features:
 
   # Register settings (BOF-030 … BOF-079) — user
   BOF-030: { status: shipped, surface: user, manual: todo }
-  BOF-034: { status: shipped, surface: user, manual: todo }
-  BOF-037: { status: shipped, surface: user, manual: todo }
+  # The register settings screen. BAN-466 widened the write surface from 29 keys to the whole
+  # screen; before it, most of these controls rendered locked because Laravel drops what a rule
+  # set omits, so the switch flipped, saved "successfully" and came back unchanged.
+  BOF-031: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-032: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-033: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-034: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-035: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-036: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-037: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  # Partial: `auto_print_receipt`, `skip_receipt_screen` and `basic_receipt` are settable here, but
+  # the ticket's "ticket QR" and "unique ticket code" are `receipt_ticket_url_display_mode` and
+  # `receipt_ticket_unique_code` on `companies` — a company-level surface that does not exist yet.
+  BOF-038: { status: partial, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-041: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-044: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-039: { status: shipped, surface: user, manual: back-office/register-preparation.md#notes-the-register-offers }
 
   # Catalogue / menu management (BOF-080 … BOF-109) — user

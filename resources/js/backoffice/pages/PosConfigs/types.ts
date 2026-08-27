@@ -155,6 +155,9 @@ export type PosConfigOptions = {
     payment_methods: { id: number; name: string; method_type: string; is_cash_count: boolean }[];
     pricelists: { id: number; name: string; currency_id: number }[];
     fiscal_positions: OptionRow[];
+    // BOF-033 — the rounding rule a cash total is snapped to. `cash_rounding_id` is meaningless
+    // without the list to choose from.
+    cash_roundings: { id: number; name: string; rounding: string; rounding_method: string }[];
     presets: { id: number; name: string; service_at: string }[];
     printers: { id: number; name: string; printer_type: string }[];
     categories: { id: number; name: string; parent_id: number | null }[];
@@ -194,6 +197,11 @@ export type PairingCodeResponse = {
  * set would appear to save and then reappear unchanged after a reload. Every control bound to a
  * key that is *not* here is rendered disabled with `config.readOnly` as the reason — a visibly
  * locked switch is honest; a switch that forgets is not.
+ *
+ * `currency_id` is the one key the server accepts that is *not* here. It is only settable until the
+ * register takes its first payment — after that, changing it would re-denominate every session and
+ * order already recorded — so it belongs to register creation (BAN-472) rather than to a settings
+ * tab that would refuse it for the rest of the register's life.
  */
 export const WRITABLE_CONFIG_KEYS = [
     'name',
@@ -218,6 +226,37 @@ export const WRITABLE_CONFIG_KEYS = [
     'limited_customer_count',
     'receipt_header',
     'receipt_footer',
+
+    // Widened in BAN-466, in step with `PosConfigRequest`. The default pricelist and default
+    // fiscal position lead the list because they are the two fields that decide every price the
+    // till quotes, and neither could be set at all.
+    'pricelist_id',
+    'default_fiscal_position_id',
+    'default_preset_id',
+    'use_presets',
+    'tax_display',
+    'default_screen',
+    'idle_return_seconds',
+    'show_product_images',
+    'show_category_images',
+    'group_products_by_category',
+    'big_scrollbars',
+    'allow_manual_discount',
+    'restrict_price_control',
+    'show_margins_to_all',
+    'auto_validate_terminal_payment',
+    'use_fast_payment',
+    'use_cash_rounding',
+    'cash_rounding_id',
+    'only_round_cash_payments',
+    'show_receipt_header_footer',
+    'basic_receipt',
+    'auto_print_receipt',
+    'skip_receipt_screen',
+    'enable_bill_print',
+    'prep_auto_fire_first_course',
+    'order_edit_tracking',
+
     'payment_method_ids',
     'pricelist_ids',
     'fiscal_position_ids',

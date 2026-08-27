@@ -10,6 +10,7 @@ use App\Enums\PaymentMethodType;
 use App\Enums\SessionState;
 use App\Enums\SpecialKind;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Backoffice\PosConfigRequest;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
@@ -20,6 +21,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosNote;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
+use App\Models\Pricing\CashRounding;
 use App\Models\Pricing\FiscalPosition;
 use App\Models\Pricing\Pricelist;
 use App\Services\Audit\AuditRecorder;
@@ -29,7 +31,7 @@ use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -53,6 +55,8 @@ final class PosConfigController extends Controller
 
     public function index(): Response
     {
+        Gate::authorize('viewAny', PosConfig::class);
+
         return Inertia::render('PosConfigs/Index', [
             'configs' => PosConfig::query()->orderBy('name')->get()->map(static fn (PosConfig $c): array => [
                 'id' => (int) $c->getKey(),
@@ -69,6 +73,8 @@ final class PosConfigController extends Controller
 
     public function edit(PosConfig $config): Response
     {
+        Gate::authorize('view', $config);
+
         $config->load(['paymentMethods', 'pricelists', 'fiscalPositions', 'presets', 'printers', 'limitedCategories', 'employees', 'floors', 'prepDisplays']);
 
         return Inertia::render('PosConfigs/Edit', [
@@ -92,6 +98,10 @@ final class PosConfigController extends Controller
                 'payment_methods' => PaymentMethod::query()->orderBy('sequence')->get(['id', 'name', 'method_type', 'is_cash_count'])->all(),
                 'pricelists' => Pricelist::query()->orderBy('name')->get(['id', 'name', 'currency_id'])->all(),
                 'fiscal_positions' => FiscalPosition::query()->orderBy('name')->get(['id', 'name'])->all(),
+                // BOF-033. The rule the register rounds a cash total to — 0.05 where one-cent coins
+                // are gone. Offered here because `cash_rounding_id` is meaningless without it.
+                'cash_roundings' => CashRounding::query()->orderBy('name')
+                    ->get(['id', 'name', 'rounding', 'rounding_method'])->all(),
                 'presets' => PosPreset::query()->orderBy('sequence')->get(['id', 'name', 'service_at'])->all(),
                 'printers' => PosPrinter::query()->orderBy('name')->get(['id', 'name', 'printer_type'])->all(),
                 'categories' => PosCategory::query()->orderBy('sequence')->get(['id', 'name', 'parent_id'])->all(),
@@ -121,58 +131,27 @@ final class PosConfigController extends Controller
         ]);
     }
 
-    public function update(Request $request, PosConfig $config): RedirectResponse
+    public function update(PosConfigRequest $request, PosConfig $config): RedirectResponse
     {
-        $data = $request->validate([
-            'name' => ['sometimes', 'string', 'max:96'],
-            'active' => ['sometimes', 'boolean'],
-            'is_restaurant' => ['sometimes', 'boolean'],
-            'use_pricelists' => ['sometimes', 'boolean'],
-            'limit_categories' => ['sometimes', 'boolean'],
-            'use_fiscal_positions' => ['sometimes', 'boolean'],
-            'has_cash_control' => ['sometimes', 'boolean'],
-            'set_maximum_difference' => ['sometimes', 'boolean'],
-            'amount_authorized_diff' => ['sometimes', 'nullable', 'numeric'],
-            'use_preparation_display' => ['sometimes', 'boolean'],
-            'use_preparation_printers' => ['sometimes', 'boolean'],
-            'use_employee_login' => ['sometimes', 'boolean'],
-            'enable_tips' => ['sometimes', 'boolean'],
-            // RST-120, RST-122 (BAN-522). Both columns have existed since the config table was
-            // written and neither was settable: the register could not be put into tip-after-payment
-            // mode from the back office at all, and `tip_product_id` — the product a tip is booked
-            // against — could only be set by editing the database.
-            //
-            // The product is scoped to the company rather than merely required to exist: it names a
-            // row this venue's tips are posted to, and an unscoped `exists` is the hole BAN-520
-            // closed on the ingest side of the same kind of reference.
-            'tip_after_payment' => ['sometimes', 'boolean'],
-            'tip_product_id' => [
-                'sometimes',
-                'nullable',
-                'integer',
-                Rule::exists('products', 'id')->where('company_id', $config->company_id),
-            ],
-            'enable_split_bill' => ['sometimes', 'boolean'],
-            'enable_global_discount' => ['sometimes', 'boolean'],
-            'global_discount_percent' => ['sometimes', 'numeric', 'min:0', 'max:100'],
-            'limited_product_count' => ['sometimes', 'integer', 'min:1'],
-            'limited_customer_count' => ['sometimes', 'integer', 'min:1'],
-            'receipt_header' => ['sometimes', 'nullable', 'string'],
-            'receipt_footer' => ['sometimes', 'nullable', 'string'],
-            'payment_method_ids' => ['sometimes', 'array'],
-            'pricelist_ids' => ['sometimes', 'array'],
-            'fiscal_position_ids' => ['sometimes', 'array'],
-            'preset_ids' => ['sometimes', 'array'],
-            'printer_ids' => ['sometimes', 'array'],
-            'limited_category_ids' => ['sometimes', 'array'],
-            'employee_ids' => ['sometimes', 'array'],
-            'floor_ids' => ['sometimes', 'array'],
-            'prep_display_ids' => ['sometimes', 'array'],
-            'note_ids' => ['sometimes', 'array'],
-            'note_ids.*' => ['integer'],
-            'bill_ids' => ['sometimes', 'array'],
-            'bill_ids.*' => ['integer'],
-        ]);
+        // `PosConfigRequest::authorize()` runs the policy; this controller used to sit behind
+        // `auth` alone, so any signed-in user could rewrite any register's settings (BAN-466).
+        $data = $request->validated();
+
+        // BOF-032 — a default service mode the register does not offer is a till whose opening
+        // screen names a mode it then refuses. The editor already adds it to the list, but the
+        // editor is not the only way in: this is a `PATCH` a script can make directly.
+        //
+        // Widened rather than refused, because the operator's intent is unambiguous — they picked
+        // this preset as the default, so they want it available.
+        $defaultPreset = (int) ($data['default_preset_id'] ?? $config->default_preset_id ?? 0);
+
+        if ($defaultPreset !== 0 && array_key_exists('preset_ids', $data)) {
+            $chosen = array_map(intval(...), (array) $data['preset_ids']);
+
+            if (! in_array($defaultPreset, $chosen, true)) {
+                $data['preset_ids'] = [...$chosen, $defaultPreset];
+            }
+        }
 
         $pivots = [
             'payment_method_ids' => 'paymentMethods',
@@ -392,6 +371,9 @@ final class PosConfigController extends Controller
     /** `POST /backoffice/pos-configs/{config}/pairing-codes` (spec 03 §2.2). */
     public function pairingCode(CreatePairingCodeRequest $request, PosConfig $config): JsonResponse
     {
+        // Pairing mints a long-lived device token, so it is checked separately from a settings save.
+        Gate::authorize('pairDevice', $config);
+
         return new JsonResponse($this->pairing->createCode(
             $config,
             DeviceType::from((string) $request->validated('device_type')),

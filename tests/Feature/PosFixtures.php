@@ -15,6 +15,8 @@ use App\Models\Catalog\Uom;
 use App\Models\Catalog\UomCategory;
 use App\Models\Identity\Company;
 use App\Models\Identity\Employee;
+use App\Models\Identity\Permission;
+use App\Models\Identity\Role;
 use App\Models\Kitchen\PrepDisplay;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
@@ -25,9 +27,12 @@ use App\Models\Pricing\Tax;
 use App\Models\Pricing\TaxGroup;
 use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
+use App\Models\User;
 use App\Services\Device\DeviceTokenService;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * A minimal but *real* venue: one company, one currency, one 21 % tax, one
@@ -416,5 +421,58 @@ final class PosFixtures
     public static function inertiaVersion(): string
     {
         return (string) app(HandleInertiaRequests::class)->version(request());
+    }
+
+    /**
+     * A back-office user of *this* company holding exactly the permissions named.
+     *
+     * Not a super-admin: `hasPermission` short-circuits for one, so a super-admin passes every
+     * policy and proves nothing about the check under test. And not a bare `User::factory()` either
+     * — that user holds no permissions, so it only passes on a route that forgot to authorize.
+     *
+     * Each slug is checked against `RoleSeeder::slugs()`. Tests used to mint whatever slug they
+     * needed with `Permission::firstOrCreate`, which meant the suite granted permissions production
+     * never creates — that is precisely why sixteen policies spent their whole life asking for
+     * abilities nobody could hold, and every test still passed.
+     */
+    public function userWith(string ...$slugs): User
+    {
+        $known = RoleSeeder::slugs();
+
+        foreach ($slugs as $slug) {
+            if (! in_array($slug, $known, true)) {
+                throw new InvalidArgumentException(
+                    "'{$slug}' is not a permission RoleSeeder creates, so no real user could ever"
+                    .' hold it. Add it to RoleSeeder::PERMISSIONS, or use the slug that exists.',
+                );
+            }
+        }
+
+        $role = Role::query()->create([
+            'name' => 'Test role',
+            'slug' => 'test-role-'.Str::random(8),
+            'is_system' => false,
+        ]);
+
+        foreach ($slugs as $slug) {
+            $permission = Permission::query()->firstOrCreate(
+                ['slug' => $slug],
+                ['group' => explode('.', $slug)[0]],
+            );
+
+            DB::table('permission_role')->insertOrIgnore([
+                'role_id' => $role->getKey(),
+                'permission_id' => $permission->getKey(),
+            ]);
+        }
+
+        $user = User::factory()->create([
+            'company_id' => $this->company->getKey(),
+            'is_super_admin' => false,
+        ]);
+
+        DB::table('role_user')->insert(['role_id' => $role->getKey(), 'user_id' => $user->getKey()]);
+
+        return $user->fresh();
     }
 }

@@ -10,9 +10,11 @@ use App\Enums\SessionState;
 use App\Enums\TerminalProvider;
 use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
+use App\Models\Identity\MediaFile;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PaymentProvider;
 use App\Models\Pricing\Currency;
+use App\Models\Scopes\CompanyScope;
 use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\RedirectResponse;
@@ -248,7 +250,34 @@ final class PaymentMethodController extends Controller
             // no media *upload* route anywhere in the app — only `GET /api/media/{id}` to serve one —
             // so a picker would offer a choice of nothing. Stated rather than dressed up as a locked
             // field pretending the endpoint is the problem.
-            'image_media_id' => ['sometimes', 'nullable', 'integer', Rule::exists('media_files', 'id')],
+            //
+            // Scoped through the model, not `Rule::exists`. `media_files` carries a `company_id`
+            // and `Rule::exists` runs on the query builder — which is exactly what `CompanyScope`
+            // says it cannot reach, so the model's isolation offered no cover here at all. Probed
+            // during review of #95: another tenant's uploaded image attached to our payment method
+            // with a 302, and it would then ship to every till as that method's icon.
+            //
+            // A NULL `company_id` is a genuinely shared asset and stays allowed.
+            'image_media_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                // Two checks rather than one `where`, because neither can be written as a
+                // `company_id = ?`: `ActingCompany::id()` answers `'*'` for a super-admin, and
+                // `CompanyScope` compiles to `where(company_id, id)`, which excludes the NULL rows
+                // that mean "shared". So: ours, as the scoped model sees it — or global.
+                $ours = MediaFile::query()->whereKey((int) $value)->exists()
+                    || MediaFile::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
 
             'is_cash_count' => ['sometimes', 'boolean'],
             'identify_customer' => ['sometimes', 'boolean'],

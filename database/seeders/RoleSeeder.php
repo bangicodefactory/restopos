@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 class RoleSeeder extends Seeder
 {
     /** @var array<string, array<string, string>> group => slug => description */
-    private const PERMISSIONS = [
+    public const PERMISSIONS = [
         'register' => [
             'pos.open_session' => 'Ouvrir une session de caisse',
             'pos.close_session' => 'Clôturer une session de caisse',
@@ -118,6 +118,21 @@ class RoleSeeder extends Seeder
             ],
         ],
     ];
+
+    /**
+     * Every permission slug that exists, flat.
+     *
+     * Public because a policy may only ask for a slug that is seeded — `User::hasPermission` is an
+     * exact string match, so an unseeded slug is a permanent denial rather than a strict check.
+     * `PolicyAbilityTest` and `PosFixtures::userWith()` both read this list so a test cannot grant
+     * itself a permission production never creates, which is how that defect stayed hidden.
+     *
+     * @return list<string>
+     */
+    public static function slugs(): array
+    {
+        return array_merge(...array_map(array_keys(...), array_values(self::PERMISSIONS)));
+    }
 
     public function run(): void
     {
