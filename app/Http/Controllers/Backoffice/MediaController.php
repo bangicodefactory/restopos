@@ -50,9 +50,14 @@ final class MediaController extends Controller
         Gate::authorize('create', MediaFile::class);
 
         $data = $request->validate([
-            // `mimetypes` sniffs the file; `mimes` would trust the extension, which is the client's
-            // to choose. Both the rule and the service check, because a rule that is loosened later
-            // must not silently widen what reaches the disk.
+            // `mimetypes` rather than `mimes`, but not for the reason it looks like: `mimes` sniffs
+            // too — it calls `guessExtension()`, which derives from the read mime and not from the
+            // client's filename. Checked in the framework rather than assumed, after a sabotage
+            // swapping one for the other changed nothing.
+            //
+            // The reason is that `mimetypes` names the exact media types, and this list is shared
+            // with the service that decides the stored extension. Two lists that must agree are
+            // better as one.
             'file' => ['required', 'file', 'max:8192', 'mimetypes:'.implode(',', MediaUploadService::ALLOWED_MIME)],
             'collection' => ['required', Rule::enum(MediaCollection::class)],
         ]);

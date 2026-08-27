@@ -6,6 +6,7 @@ namespace Tests\Feature\Backoffice\MediaUpload;
 
 use App\Models\Catalog\Product;
 use App\Models\Identity\MediaFile;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -92,6 +93,37 @@ it('stores one row when the same file is uploaded twice', function (): void {
 
     expect($second)->toBe($first)
         ->and(MediaFile::query()->count())->toBe($before);
+});
+
+it('does not share one row between two venues uploading the same file', function (): void {
+    // Deduplication is per venue, and a sabotage removing that passed clean until this existed:
+    // every other upload test acts as one venue, so the cross-venue case never arose.
+    //
+    // Sharing would mean either venue could delete the other's logo, and a row carries one
+    // `company_id` — so whichever uploaded second would own a file it never uploaded.
+    $ours = upload(UploadedFile::fake()->image('shared.png', 30, 30))->json('id');
+
+    $this->actingAs($this->other->userWith('backoffice.access', 'backoffice.manage_media'));
+
+    $theirs = upload(UploadedFile::fake()->image('shared.png', 30, 30))->json('id');
+
+    expect($theirs)->not->toBe($ours)
+        ->and((int) MediaFile::query()->whereKey($theirs)->value('company_id'))
+        ->toBe((int) $this->other->company->getKey());
+});
+
+it('refuses to serve a file to someone with no back-office ability', function (): void {
+    // `CompanyScope` already hides another venue's media, which is why the cross-venue test passes
+    // with the Gate removed. What the Gate adds is this: a signed-in user holding no abilities at
+    // all is not entitled to read the venue's files.
+    $id = upload()->json('id');
+
+    $this->actingAs(User::factory()->create([
+        'company_id' => $this->fx->company->getKey(),
+        'is_super_admin' => false,
+    ]));
+
+    $this->get("/media/{$id}")->assertForbidden();
 });
 
 it('refuses an SVG, which is a document and not a picture', function (): void {
