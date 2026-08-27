@@ -117,7 +117,7 @@ final readonly class BootstrapService
 
         return [
             'schema_version' => (int) $this->config->get('pos.api.schema_version', 1),
-            'min_client_version' => (string) $this->config->get('pos.api.min_client_version', '1.0.0'),
+            'min_client_version' => $this->minClientVersion($config),
             'profile' => $profile,
             'config_revision' => (int) $config->config_revision,
             'dataset_fingerprint' => $this->fingerprint($config),
@@ -165,7 +165,7 @@ final readonly class BootstrapService
 
         return [
             'schema_version' => (int) $this->config->get('pos.api.schema_version', 1),
-            'min_client_version' => (string) $this->config->get('pos.api.min_client_version', '1.0.0'),
+            'min_client_version' => $this->minClientVersion($config),
             'dataset_fingerprint' => $this->fingerprint($config),
             'config_revision' => (int) $config->config_revision,
             'server_time' => Carbon::now()->toIso8601ZuluString('microsecond'),
@@ -453,6 +453,28 @@ final readonly class BootstrapService
         $ids = $query->pluck($table.'.'.$key)->all();
 
         return $ids;
+    }
+
+    /**
+     * The client version this register's devices are expected to be on (BAN-456).
+     *
+     * Per register, falling back to the deploy-wide constant. That constant is the only thing that
+     * existed, so raising the floor for one venue that had updated its tills raised it for every
+     * venue that had not — and lowering it for the laggard lowered it for everyone.
+     *
+     * Shipped to the client, which is what acts on it. Nothing here refuses a request from an
+     * outdated build: only the sync path sends a version at all, and only optionally, so a hard
+     * server-side block would refuse traffic from every path that does not — which is most of them.
+     * Blocking is a separate decision with a rollout behind it; this is the half that makes the
+     * question answerable.
+     */
+    private function minClientVersion(PosConfig $config): string
+    {
+        $perRegister = trim((string) ($config->min_client_version ?? ''));
+
+        return $perRegister !== ''
+            ? $perRegister
+            : (string) $this->config->get('pos.api.min_client_version', '1.0.0');
     }
 
     /** @return array<string, mixed> */

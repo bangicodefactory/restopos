@@ -33,6 +33,12 @@ final class DevicePairingController extends Controller
                 'name' => $request->validated('name'),
                 'device_type' => $request->validated('device_type'),
                 'user_agent' => $request->userAgent(),
+                // Both were validated here and then dropped on the floor, with no column to hold
+                // them either (BAN-456). The fingerprint is what tells a re-paired terminal from a
+                // new one; the version is what the back office needs in order to say which till is
+                // running an outdated build.
+                'hardware_fingerprint' => $request->validated('hardware_fingerprint'),
+                'app_version' => $request->validated('app_version'),
             ]);
         } catch (RuntimeException $e) {
             return new JsonResponse(['error' => ['code' => 'invalid_pairing_code', 'message' => $e->getMessage()]], 422);

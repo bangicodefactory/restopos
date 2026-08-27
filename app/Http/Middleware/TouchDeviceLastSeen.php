@@ -25,8 +25,20 @@ final class TouchDeviceLastSeen
     {
         $device = $request->attributes->get(AuthenticateDevice::ATTRIBUTE);
 
-        if ($device instanceof PosDevice) {
-            TouchDeviceSeen::dispatch((int) $device->getKey(), (string) $request->userAgent());
+        if (! $device instanceof PosDevice) {
+            return;
         }
+
+        $version = $request->input('client_version');
+
+        TouchDeviceSeen::dispatch(
+            (int) $device->getKey(),
+            (string) $request->userAgent(),
+            is_string($version) && trim($version) !== '' ? trim($version) : null,
+            // A request carrying an `orders` array is a push; a catalogue read is not. That
+            // distinction is the whole point of having two columns — "last seen" answers "is this
+            // thing switched on", and "last synced" answers "has it actually sent what it took".
+            $request->has('orders'),
+        );
     }
 }

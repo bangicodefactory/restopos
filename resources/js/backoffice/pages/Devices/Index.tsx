@@ -17,7 +17,7 @@
  * operator knows the till is still selling.
  */
 
-import { Head } from '@inertiajs/react';
+import { Head, useForm } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn, useToast } from '@shared/ui';
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 
@@ -73,6 +73,20 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
             sortValue: (row) => row.name ?? String(row.device_identifier),
             searchValue: (row) => `${row.name ?? ''} ${row.uuid} ${row.device_type}`,
             exportValue: (row) => row.name ?? '',
+        },
+        {
+            id: 'app_version',
+            header: t('device.version'),
+            cell: (row) => (
+                <span className="flex flex-col">
+                    <span className="font-mono text-xs">{row.app_version ?? '—'}</span>
+                    {row.has_fingerprint ? null : (
+                        <span className="text-xs text-amber-700">{t('device.noFingerprint')}</span>
+                    )}
+                </span>
+            ),
+            sortValue: (row) => row.app_version ?? '',
+            exportValue: (row) => row.app_version ?? '',
         },
         {
             id: 'device_type',
@@ -149,6 +163,8 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
             header: '',
             align: 'end',
             cell: (row) => (
+                <span className="inline-flex items-center gap-2">
+                <RenameDevice row={row} />
                 <ConfirmAction
                     size="sm"
                     label={t('device.revoke')}
@@ -160,6 +176,7 @@ export default function DevicesIndex({ devices, configs }: DevicesIndexProps): J
                     disabled={!row.active}
                     onConfirm={() => revoke(routes.devices.destroy(row.uuid))}
                 />
+                </span>
             ),
         },
     ];
@@ -361,5 +378,53 @@ function PairingPanel({ configs }: { configs: DevicesIndexProps['configs'] }): J
                 )}
             </CardBody>
         </Card>
+    );
+}
+
+/**
+ * Naming a device without revoking it (BAN-456).
+ *
+ * A device could be revoked and nothing else, so "which of these five is the bar till?" had no
+ * answer beyond a number allocated in pairing order — and the only way to correct a label was to
+ * revoke the terminal and re-pair it, which is a service interruption to fix a name.
+ */
+function RenameDevice({ row }: { row: DeviceRow }): JSX.Element {
+    const t = useT();
+    const [open, setOpen] = useState(false);
+    const form = useForm<{ name: string }>({ name: row.name ?? '' });
+
+    if (!open) {
+        return (
+            <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
+                {t('device.rename')}
+            </Button>
+        );
+    }
+
+    return (
+        <span className="inline-flex items-center gap-2">
+            <input
+                aria-label={t('device.rename')}
+                className="min-h-touch rounded border border-slate-300 px-2 text-sm"
+                value={form.data.name}
+                maxLength={80}
+                onChange={(event) => form.setData('name', event.target.value)}
+            />
+            <Button
+                size="sm"
+                loading={form.processing}
+                onClick={() =>
+                    form.patch(routes.devices.update(row.uuid), {
+                        preserveScroll: true,
+                        onSuccess: () => setOpen(false),
+                    })
+                }
+            >
+                {t('action.save')}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+                {t('action.cancel')}
+            </Button>
+        </span>
     );
 }

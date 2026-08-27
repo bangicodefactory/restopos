@@ -101,19 +101,56 @@ final readonly class DevicePairingService
             );
         }
 
+        $fingerprint = $this->normaliseFingerprint($attributes['hardware_fingerprint'] ?? null);
+
         /** @var PosDevice $device */
-        $device = $this->connection->transaction(function () use ($config, $kind, $attributes, $payload): PosDevice {
+        $device = $this->connection->transaction(function () use ($config, $kind, $attributes, $payload, $fingerprint): PosDevice {
+            // Is this the same physical machine coming back?
+            //
+            // A terminal is re-paired for ordinary reasons — the browser storage was cleared, the
+            // tablet was reset, the token was revoked and reissued. Without this every one of those
+            // minted another row, so a venue's device list filled with ghosts of machines still
+            // sitting on the counter and "which of these five is the bar till?" had no answer.
+            //
+            // Matched within the config, never across: the same tablet moved to another register is
+            // a different device there, and recognising it across venues would be a leak.
+            $existing = $fingerprint === null
+                ? null
+                : PosDevice::query()
+                    ->where('pos_config_id', $config->getKey())
+                    ->where('hardware_fingerprint', $fingerprint)
+                    ->first();
+
+            $metadata = [
+                'device_type' => $kind->value,
+                'user_agent' => $attributes['user_agent'] ?? null,
+                'hardware_fingerprint' => $fingerprint,
+                'app_version' => $attributes['app_version'] ?? null,
+                'paired_at' => now(),
+                'last_seen_at' => now(),
+                'active' => true,
+            ];
+
+            if ($existing !== null) {
+                // Its identifier and uuid are kept. Both appear on printed tickets and in the audit
+                // trail, and a machine that is physically the same one should not change identity in
+                // the history because somebody cleared its cache.
+                $existing->forceFill([
+                    ...$metadata,
+                    'name' => $attributes['name'] ?? $existing->name,
+                ])->save();
+
+                return $existing;
+            }
+
             $identifier = $this->allocateIdentifier($config);
 
             return PosDevice::query()->create([
+                ...$metadata,
                 'uuid' => (string) Str::uuid(),
                 'pos_config_id' => $config->getKey(),
                 'device_identifier' => $identifier,
                 'name' => $attributes['name'] ?? $payload['name'] ?? ucfirst($kind->value).' '.$identifier,
-                'device_type' => $kind->value,
-                'user_agent' => $attributes['user_agent'] ?? null,
-                'last_seen_at' => now(),
-                'active' => true,
             ]);
         });
 
@@ -126,6 +163,20 @@ final readonly class DevicePairingService
             'abilities' => $issued['abilities'],
             'device_secret' => $this->tokens->deviceSecret($device),
         ];
+    }
+
+    /**
+     * A fingerprint worth matching on, or null.
+     *
+     * An empty or whitespace-only string is what a client sends when it could not compute one, and
+     * treating that as a value would match every such device to the first one that failed —
+     * handing a new terminal another machine's identity and its history.
+     */
+    private function normaliseFingerprint(mixed $value): ?string
+    {
+        $fingerprint = trim((string) ($value ?? ''));
+
+        return $fingerprint === '' ? null : $fingerprint;
     }
 
     /**

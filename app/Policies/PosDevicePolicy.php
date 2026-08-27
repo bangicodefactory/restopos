@@ -8,7 +8,11 @@ use App\Models\Pos\PosDevice;
 use App\Models\User;
 
 /**
- * Back-office authorisation for paired devices (BOF-060…BOF-069).
+ * Back-office authorisation for paired devices.
+ *
+ * No feature id: `02-features.md` has no row for device management at all — BOF-040 is the
+ * connected-devices settings group and BOF-045 is sequences. The parity reference simply does not
+ * cover pairing, revocation or the device list.
  *
  * A device is owned through its register: `pos_devices` has a `pos_config_id` and **no
  * `company_id`**, so it carries no `BelongsToCompany` and gets no global scope. Ownership therefore
