@@ -458,6 +458,9 @@ Dropped: IoT box device inventory (kept as connection settings on `pos_configs`)
 | name | string(80) nullable | "Bar terminal 2" |
 | device_type | enum('register','kiosk','customer_display','self_mobile','prep_display') default 'register' | |
 | user_agent | string(255) nullable | |
+| hardware_fingerprint | string(128) nullable **indexed** | identifies the physical machine, so a re-paired terminal is recognised rather than added again (BAN-456) |
+| app_version | string(32) nullable | the client build this device last reported; recorded at pairing and refreshed on sync |
+| paired_at | timestamp nullable | when this device was enrolled, kept separate from `created_at` so a re-pair can be told from a first pair |
 | last_seen_at | timestamp nullable, index | |
 | last_synced_at | timestamp(3) nullable | server clock at last successful bootstrap/delta — client echoes it back as `since` |
 | has_paper | boolean default true | kiosk printer paper status (`/change-printer-status`) |
@@ -1217,6 +1220,7 @@ onboarding scenario loaders.
 | email_receipt_template_id | FK→notification_templates.id nullable, set null | |
 | order_edit_tracking | boolean default false | audit edited/deleted lines |
 | role_abilities | json null | per-register ability overrides keyed by employee role; null means the `config/pos.php` defaults, `{}` means a deliberate override granting nothing (BOF-118) |
+| min_client_version | string(32) null | the client version this register's devices are expected to be on; null falls back to the deploy-wide `pos.api.min_client_version` (BAN-456) |
 | limited_product_count | unsignedInteger default 5000 | bootstrap product cap |
 | limited_customer_count | unsignedInteger default 100 | bootstrap customer cap |
 | timestamps, softDeletes | | |

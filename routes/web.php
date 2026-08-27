@@ -173,6 +173,7 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('self-order/{config}/rotate-token', [SelfOrderSettingsController::class, 'rotateToken'])->name('self-order.rotate-token');
 
     Route::get('devices', [DeviceController::class, 'index'])->name('devices.index');
+    Route::patch('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');
     Route::delete('devices/{device}', [DeviceController::class, 'destroy'])->name('devices.destroy');
 });
 

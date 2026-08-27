@@ -358,6 +358,13 @@ return new class extends Migration
             // Null means "use the defaults in config/pos.php", which is not the same as an empty
             // object: `{}` is a deliberate override granting nothing.
             $table->json('role_abilities')->nullable();
+            // The client version this register's devices are expected to be on (BAN-456).
+            //
+            // `config('pos.api.min_client_version')` is a deploy-wide constant shipped to every
+            // client in the bootstrap. A venue that has not updated one terminal cannot be
+            // expressed, and raising the floor for one venue raises it for all of them. Null falls
+            // back to the deploy constant, so nothing changes for a venue that never sets it.
+            $table->string('min_client_version', 32)->nullable();
             $table->unsignedInteger('limited_product_count')->default(5000);
             $table->unsignedInteger('limited_customer_count')->default(100);
             $table->timestamps();
@@ -471,6 +478,17 @@ return new class extends Migration
             $table->string('name', 80)->nullable();
             $table->string('device_type', 24)->default(DeviceType::Register->value);
             $table->string('user_agent', 255)->nullable();
+            // BAN-456. `PairDeviceRequest` has validated `hardware_fingerprint` and
+            // `app_version` since it was written, and `DevicePairingController` never passed either
+            // to `pair()` — so both were validated and thrown away, and there was nowhere to put
+            // them anyway.
+            //
+            // The fingerprint is what tells a re-paired terminal from a new one. Without it every
+            // re-pair minted another row, and a venue's device list slowly filled with ghosts of
+            // machines still sitting on the counter.
+            $table->string('hardware_fingerprint', 128)->nullable()->index();
+            $table->string('app_version', 32)->nullable();
+            $table->timestamp('paired_at')->nullable();
             $table->timestamp('last_seen_at')->nullable()->index();
             $table->timestamp('last_synced_at', 3)->nullable();
             $table->boolean('has_paper')->default(true);

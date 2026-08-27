@@ -609,6 +609,10 @@ export const boFr = {
 
     // ── devices
     'device.title': 'Appareils',
+    'device.version': 'Version',
+    'device.noFingerprint': 'Machine non identifiée : un nouvel appairage créera une seconde fiche.',
+    'device.rename': 'Renommer',
+    'device.renameHint': 'Le nom sert à retrouver l’appareil ici ; il n’est pas envoyé à la caisse.',
     'device.type': 'Type',
     'device.identifier': 'N° appareil',
     'device.lastSeen': 'Vu le',
@@ -1391,6 +1395,10 @@ export const boEn: BoDictionary = {
     'report.noSession': 'No session selected',
 
     'device.title': 'Devices',
+    'device.version': 'Version',
+    'device.noFingerprint': 'Machine not identified: pairing again will create a second record.',
+    'device.rename': 'Rename',
+    'device.renameHint': 'The name is how you find the device here; it is not sent to the till.',
     'device.type': 'Type',
     'device.identifier': 'Device number',
     'device.lastSeen': 'Last seen',

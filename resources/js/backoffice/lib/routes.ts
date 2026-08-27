@@ -171,6 +171,7 @@ export const routes = {
 
     devices: {
         index: (): string => '/devices',
+        update: (uuid: string): string => `/devices/${uuid}`,
         destroy: (uuid: string): string => `/devices/${uuid}`,
     },
 

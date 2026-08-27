@@ -358,6 +358,11 @@ features:
   # `receipt_ticket_unique_code` on `companies` — a company-level surface that does not exist yet.
   BOF-038: { status: partial, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-041: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  # Both are real rows in 02-features.md that nothing has built yet, and both are named in
+  # PosDevicePolicy's docblock to explain what device management is *not* — which the gate reads as
+  # a claim. Recorded as planned rather than reworded away: they are genuinely planned, with tickets.
+  BOF-040: { status: planned, surface: user, manual: todo }   # connected devices group — BAN-476
+  BOF-045: { status: planned, surface: user, manual: todo }   # sequences & numbering — BAN-488
   BOF-044: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-039: { status: shipped, surface: user, manual: back-office/register-preparation.md#notes-the-register-offers }
 

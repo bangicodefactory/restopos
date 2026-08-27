@@ -17,6 +17,17 @@ export type DeviceRow = {
     last_seen_at: string | null;
     last_synced_at: string | null;
     user_agent: string | null;
+    /** The build this device last reported — recorded at pairing, refreshed on every sync. */
+    app_version: string | null;
+    paired_at: string | null;
+    /**
+     * Whether a hardware fingerprint is recorded, never the value.
+     *
+     * The fingerprint identifies a physical machine and is what a re-pair is matched on, so putting
+     * it on screen would hand anyone reading it the means to claim this device's identity, its
+     * `device_identifier` and its history.
+     */
+    has_fingerprint: boolean;
     active: boolean;
 };
 
