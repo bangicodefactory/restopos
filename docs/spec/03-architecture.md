@@ -378,7 +378,11 @@ POST   /pos-self/orders/{uuid}/pay        → start online payment  (order token
 
 Two orthogonal axes, both required.
 
-**Axis 1 — Back-office (users)**: Laravel policies + a role/permission table. Roles: `admin`, `manager`, `accountant`, `staff`. Enforce with `Gate::authorize()` in controllers and `can` props for the Inertia UI. Nothing exotic; `spatie/laravel-permission` is acceptable.
+**Axis 1 — Back-office (users)**: Laravel policies + a role/permission table. Enforce with `Gate::authorize()` in controllers and `can` props for the Inertia UI. Nothing exotic; `spatie/laravel-permission` is acceptable.
+
+The shipped roles are `owner`, `manager`, `cashier`, `waiter`, `kitchen`, and **`database/seeders/RoleSeeder.php` is the source of truth for the permission slugs** — `backoffice.*`, `catalog.*`, `restaurant.*`, `kitchen.*` and the `pos.*` register set. `User::hasPermission` is an exact string match against seeded rows, so a policy that asks for a slug the seeder does not create is not a strict check but a permanent denial, and `is_super_admin` hides it by short-circuiting the lookup. Adding a permission means adding it there first.
+
+**The two axes do not share a vocabulary.** `config.manage` below is an *employee* ability from `config/pos.php`; it is not an admin-app permission, and a policy must never reach for it. `tests/Feature/Backoffice/PolicyAbilityTest.php` fails the build if one does.
 
 **Axis 2 — Register (employees)**: an ability set evaluated *client-side while offline* and *server-side on ingest*. Same string constants, one source of truth:
 
