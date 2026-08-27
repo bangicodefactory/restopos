@@ -125,6 +125,15 @@ type ConfigForm = {
     employee_access_levels: Record<string, string>;
     role_abilities: Record<string, string[]> | null;
     receipt_logo_media_id: number | null;
+    customer_display_bg_media_id: number | null;
+    use_iot_box: boolean;
+    proxy_ip: string | null;
+    iot_scan: boolean;
+    iot_scale: boolean;
+    iot_print: boolean;
+    iot_cashdrawer: boolean;
+    use_epos_printer: boolean;
+    epos_printer_ip: string | null;
 };
 
 /** The levels `pos_config_employee.access_level` accepts, in increasing capability. */
@@ -210,6 +219,15 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         employee_access_levels: config.employee_access_levels,
         role_abilities: config.role_abilities,
         receipt_logo_media_id: config.receipt_logo_media_id,
+        customer_display_bg_media_id: config.customer_display_bg_media_id,
+        use_iot_box: config.use_iot_box,
+        proxy_ip: config.proxy_ip,
+        iot_scan: config.iot_scan,
+        iot_scale: config.iot_scale,
+        iot_print: config.iot_print,
+        iot_cashdrawer: config.iot_cashdrawer,
+        use_epos_printer: config.use_epos_printer,
+        epos_printer_ip: config.epos_printer_ip,
     };
 }
 
@@ -861,26 +879,78 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                         ) : null}
 
                         {tab === 'hardware' ? (
-                            <FormSection>
-                                <ToggleField label="Boîtier IoT" checked={config.use_iot_box} onChange={() => {}} disabled lockedReason={locked} />
-                                <TextField label="IP du proxy" value={config.proxy_ip ?? ''} onChange={() => {}} disabled lockedReason={locked} />
-                                <ToggleField label="Scanner" checked={config.iot_scan} onChange={() => {}} disabled lockedReason={locked} />
-                                <ToggleField label="Balance" checked={config.iot_scale} onChange={() => {}} disabled lockedReason={locked} />
-                                <ToggleField label="Impression" checked={config.iot_print} onChange={() => {}} disabled lockedReason={locked} />
-                                <ToggleField label="Tiroir-caisse" checked={config.iot_cashdrawer} onChange={() => {}} disabled lockedReason={locked} />
+                            <FormSection description={t('config.hardwareHint')}>
+                                <ToggleField
+                                    label="Boîtier IoT"
+                                    checked={form.data.use_iot_box}
+                                    onChange={(checked) => form.setData('use_iot_box', checked)}
+                                    description={t('config.iotBoxHint')}
+                                />
+                                <TextField
+                                    label="IP du proxy"
+                                    value={form.data.proxy_ip ?? ''}
+                                    error={form.errors.proxy_ip}
+                                    disabled={!form.data.use_iot_box}
+                                    lockedReason={form.data.use_iot_box ? undefined : t('config.iotBoxFirst')}
+                                    placeholder="192.168.1.50"
+                                    onChange={(value) => form.setData('proxy_ip', value === '' ? null : value)}
+                                />
+                                {/*
+                                  * All four are what the box is *used for*, so they follow it. A
+                                  * scanner ticked with no box behind it is a setting that reads as
+                                  * configured and does nothing.
+                                  */}
+                                <ToggleField
+                                    label="Scanner"
+                                    checked={form.data.iot_scan}
+                                    disabled={!form.data.use_iot_box}
+                                    onChange={(checked) => form.setData('iot_scan', checked)}
+                                />
+                                <ToggleField
+                                    label="Balance"
+                                    checked={form.data.iot_scale}
+                                    disabled={!form.data.use_iot_box}
+                                    onChange={(checked) => form.setData('iot_scale', checked)}
+                                />
+                                <ToggleField
+                                    label="Impression"
+                                    checked={form.data.iot_print}
+                                    disabled={!form.data.use_iot_box}
+                                    onChange={(checked) => form.setData('iot_print', checked)}
+                                />
+                                <ToggleField
+                                    label="Tiroir-caisse"
+                                    checked={form.data.iot_cashdrawer}
+                                    disabled={!form.data.use_iot_box}
+                                    onChange={(checked) => form.setData('iot_cashdrawer', checked)}
+                                />
+
                                 <ToggleField
                                     label="Imprimante ePOS"
-                                    checked={config.use_epos_printer}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    checked={form.data.use_epos_printer}
+                                    onChange={(checked) => form.setData('use_epos_printer', checked)}
+                                    description={t('config.eposHint')}
                                 />
                                 <TextField
                                     label="IP imprimante ePOS"
-                                    value={config.epos_printer_ip ?? ''}
-                                    onChange={() => {}}
-                                    disabled
-                                    lockedReason={locked}
+                                    value={form.data.epos_printer_ip ?? ''}
+                                    error={form.errors.epos_printer_ip}
+                                    disabled={!form.data.use_epos_printer}
+                                    lockedReason={form.data.use_epos_printer ? undefined : t('config.eposFirst')}
+                                    placeholder="192.168.1.60"
+                                    onChange={(value) => form.setData('epos_printer_ip', value === '' ? null : value)}
+                                />
+
+                                {/*
+                                  * Buildable at last: BAN-393 added the upload pipeline this needed.
+                                  * Before it, a picker here would have offered a choice of nothing.
+                                  */}
+                                <MediaField
+                                    label={t('config.customerDisplayBg')}
+                                    collection="image"
+                                    value={form.data.customer_display_bg_media_id}
+                                    onChange={(id: number | null) => form.setData('customer_display_bg_media_id', id)}
+                                    hint={t('config.customerDisplayBgHint')}
                                 />
                             </FormSection>
                         ) : null}

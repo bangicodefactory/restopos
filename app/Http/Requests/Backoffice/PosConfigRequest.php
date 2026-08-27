@@ -14,6 +14,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\Pricelist;
 use App\Models\Scopes\CompanyScope;
+use App\Rules\LocalHost;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -151,6 +152,24 @@ final class PosConfigRequest extends FormRequest
                     $fail('That image belongs to another venue, or no longer exists.');
                 }
             }],
+
+            // ── connected devices (BOF-040, BAN-476) ────────────────────────────────────────
+            //
+            // The whole group rendered `disabled` because none of these eight columns was in this
+            // rule set. Removing `disabled` alone would have produced a save that reports success
+            // and stores nothing, which is worse than a locked switch.
+            'use_iot_box' => ['sometimes', 'boolean'],
+            'iot_scan' => ['sometimes', 'boolean'],
+            'iot_scale' => ['sometimes', 'boolean'],
+            'iot_print' => ['sometimes', 'boolean'],
+            'iot_cashdrawer' => ['sometimes', 'boolean'],
+            'use_epos_printer' => ['sometimes', 'boolean'],
+            // Both are host addresses a browser on the till will fetch from. Validated as a
+            // hostname or an IP rather than a free string: an ePOS printer is reached over plain
+            // HTTP on the local network, and a value like `evil.example.com` here points every till
+            // on this register at somebody else's endpoint — a stored SSRF from a settings field.
+            'proxy_ip' => ['sometimes', 'nullable', 'string', 'max:64', new LocalHost],
+            'epos_printer_ip' => ['sometimes', 'nullable', 'string', 'max:128', new LocalHost],
 
             // ── receipts (BOF-038) ──────────────────────────────────────────────────────────
             'show_receipt_header_footer' => ['sometimes', 'boolean'],
