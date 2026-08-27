@@ -11,6 +11,7 @@ use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
+use App\Models\Catalog\ProductAttribute;
 use App\Models\Catalog\ProductCategory;
 use App\Models\Catalog\ProductVariant;
 use App\Models\Catalog\Uom;
@@ -87,19 +88,53 @@ final class ProductController extends Controller
     {
         Gate::authorize('view', $product);
 
-        $product->load(['variants', 'posCategories:id,name', 'taxes:id,name,amount']);
+        $product->load([
+            'variants',
+            'posCategories:id,name',
+            'taxes:id,name,amount',
+            'attributeLines.attribute',
+            'attributeLines.lineValues.value',
+        ]);
 
         return Inertia::render('Products/Edit', [
             'product' => $product->attributesToArray() + [
                 'pos_category_ids' => $product->posCategories->pluck('id')->all(),
                 'tax_ids' => $product->taxes->pluck('id')->all(),
                 'variants' => $product->variants->map(static fn ($v): array => $v->attributesToArray())->all(),
+                'attribute_lines' => $product->attributeLines->map(static fn ($line): array => [
+                    'id' => (int) $line->getKey(),
+                    'product_attribute_id' => (int) $line->product_attribute_id,
+                    'attribute_name' => (string) ($line->attribute?->name ?? ''),
+                    'is_required' => (bool) $line->is_required,
+                    'active' => (bool) $line->active,
+                    'values' => $line->lineValues->map(static fn ($v): array => [
+                        'product_attribute_value_id' => (int) $v->product_attribute_value_id,
+                        'name' => (string) ($v->value?->name ?? ''),
+                        'price_extra' => (string) $v->price_extra,
+                    ])->values()->all(),
+                ])->values()->all(),
             ],
             'options' => Inertia::defer(fn (): array => [
                 'categories' => PosCategory::query()->orderBy('sequence')->get(['id', 'name', 'parent_id'])->all(),
                 'taxes' => Tax::query()->where('active', true)->orderBy('sequence')->get(['id', 'name', 'amount', 'amount_type'])->all(),
                 'product_categories' => ProductCategory::query()->orderBy('name')->get(['id', 'name', 'ledger_code'])->all(),
                 'uoms' => Uom::query()->orderBy('name')->get(['id', 'name'])->all(),
+                // Only active attributes: an inactive one is off the till, and offering it here
+                // would produce a picker nothing renders.
+                'attributes' => ProductAttribute::query()
+                    ->where('active', true)
+                    ->with(['values' => fn ($q) => $q->where('active', true)->orderBy('sequence')])
+                    ->orderBy('sequence')
+                    ->get()
+                    ->map(static fn (ProductAttribute $a): array => [
+                        'id' => (int) $a->getKey(),
+                        'name' => (string) $a->name,
+                        'display_type' => (string) ($a->display_type?->value ?? $a->display_type),
+                        'values' => $a->values->map(static fn ($v): array => [
+                            'id' => (int) $v->getKey(),
+                            'name' => (string) $v->name,
+                        ])->values()->all(),
+                    ])->values()->all(),
             ]),
         ]);
     }

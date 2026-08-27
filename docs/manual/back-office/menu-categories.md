@@ -3,7 +3,6 @@ title: Menu categories
 audience: manager
 features:
   - BOF-084
-  - BOF-085
 ---
 
 # Menu categories

@@ -353,7 +353,7 @@ features:
   BOF-082: { status: shipped, surface: user, manual: back-office/products.md#what-each-setting-does }
   BOF-083: { status: shipped, surface: user, manual: back-office/products.md#changing-availability-during-service }
   BOF-084: { status: shipped, surface: user, manual: back-office/menu-categories.md#menu-categories }
-  BOF-085: { status: shipped, surface: user, manual: back-office/menu-categories.md#add-a-category }
+  BOF-085: { status: shipped, surface: user, manual: back-office/products.md#options }
   BOF-087: { status: shipped, surface: user, manual: back-office/products.md#variants }
   BOF-090: { status: shipped, surface: user, manual: todo }
   BOF-091: { status: shipped, surface: user, manual: back-office/taxes.md#taxes }

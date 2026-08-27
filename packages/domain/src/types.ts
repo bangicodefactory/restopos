@@ -331,6 +331,16 @@ export type ProductAttributeLineRow = {
     product_attribute_id: number;
     is_required: boolean;
     sequence: number;
+    /**
+     * The column existed and this type omitted it (BAN-412 review).
+     *
+     * `product_attribute_lines.active` is on the table and the bootstrap sends it — `posLoadFields`
+     * defaults to every column — but nothing on the client could see it, so deactivating an option
+     * on a product changed nothing at the till. That matters because "deactivate it instead" is
+     * exactly what the back office tells an operator when a delete is refused for having been
+     * chosen on a past order.
+     */
+    active: boolean;
 };
 
 /** The id order lines actually reference (Odoo's `product.template.attribute.value`). */

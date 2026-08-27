@@ -42,6 +42,7 @@ import { EUR, money, percent, subtractMoney, toDecimal } from '../../lib/money';
 import { routes } from '../../lib/routes';
 
 import { PRODUCT_TYPE_OPTIONS } from './types';
+import { AttributeLines } from './AttributeLines';
 import { VariantGrid } from './VariantGrid';
 
 import type { ProductEditProps } from './types';
@@ -121,6 +122,7 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
         { id: 'general', label: t('config.group.general') },
         { id: 'pricing', label: t('product.pricing') },
         { id: 'variants', label: t('product.variants'), badge: <Badge>{product.variants.length}</Badge> },
+        { id: 'options', label: t('attribute.title') },
         { id: 'combos', label: t('product.combos') },
         { id: 'meta', label: t('order.audit') },
     ];
@@ -352,6 +354,18 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
 
                         {tab === 'variants' ? (
                             <VariantGrid productUuid={product.uuid} variants={product.variants} />
+                        ) : null}
+
+                        {tab === 'options' ? (
+                            <DeferredRegion value={options} label={t('attribute.title')} rows={3}>
+                                {(value) => (
+                                    <AttributeLines
+                                        productUuid={product.uuid}
+                                        lines={product.attribute_lines}
+                                        attributes={value.attributes}
+                                    />
+                                )}
+                            </DeferredRegion>
                         ) : null}
 
                         {tab === 'combos' ? (
