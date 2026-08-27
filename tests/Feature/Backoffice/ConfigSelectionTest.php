@@ -7,7 +7,6 @@ namespace Tests\Feature\Backoffice\ConfigSelection;
 use App\Models\Pos\PosBill;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosNote;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -22,7 +21,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(User::factory()->create(['company_id' => $this->fx->company->getKey()]));
+    $this->actingAs($this->fx->userWith('backoffice.access', 'backoffice.manage_configs'));
 });
 
 /** @param array<string, mixed> $payload */

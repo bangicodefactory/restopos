@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\Audit\AuditLog;
-use App\Models\User;
 use App\Support\Audit\AuditEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
@@ -26,7 +25,7 @@ uses(TestCase::class, RefreshDatabase::class);
  */
 beforeEach(function (): void {
     $this->fx = PosFixtures::make();
-    $this->user = User::factory()->create(['company_id' => $this->fx->company->getKey()]);
+    $this->user = $this->fx->userWith('backoffice.access', 'backoffice.manage_configs');
 
     $this->actingAs($this->user);
 });
