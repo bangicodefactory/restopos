@@ -119,7 +119,9 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy'])->name('payment-methods.destroy');
 
     Route::get('employees', [EmployeeController::class, 'index'])->name('employees.index');
+    Route::post('employees', [EmployeeController::class, 'store'])->name('employees.store');
     Route::patch('employees/{employee}', [EmployeeController::class, 'update'])->name('employees.update');
+    Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])->name('employees.destroy');
 
     Route::get('floors', [FloorController::class, 'index'])->name('floors.index');
     Route::get('floors/{floor}/edit', [FloorController::class, 'edit'])->name('floors.edit');

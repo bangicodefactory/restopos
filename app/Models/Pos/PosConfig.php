@@ -127,6 +127,7 @@ class PosConfig extends Model
             'enable_loyalty' => 'boolean',
             'enable_sms_receipt' => 'boolean',
             'order_edit_tracking' => 'boolean',
+            'role_abilities' => 'array',
             'limited_product_count' => 'integer',
             'limited_customer_count' => 'integer',
         ];

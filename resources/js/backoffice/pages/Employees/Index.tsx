@@ -32,7 +32,8 @@ import {
 import { FormSection } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
 import { ConfirmAction } from '../../components/ui/ConfirmAction';
-import { Badge, Card, CardBody, CardHeader, EmptyState, Notice } from '../../components/ui/primitives';
+import { DeleteAction } from '../../components/ui/DeleteAction';
+import { Badge, Card, CardBody, CardHeader, EmptyState } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { printBadge } from '../../lib/printBadge';
 import { routes } from '../../lib/routes';
@@ -157,23 +158,21 @@ export default function EmployeesIndex({ employees, roles, abilities }: Employee
                     exportFilename="employes"
                     perPage={50}
                     emptyTitle={t('state.empty')}
-                    emptyHint={t('employee.createMissing')}
+                    emptyHint={t('employee.hireHint')}
                     rowClassName={(row) => (row.id === selectedId ? 'bg-brand-50' : undefined)}
                 />
 
                 {selected === null ? (
                     <Card>
-                        <EmptyState title={t('state.empty')} hint={t('employee.createMissing')} />
+                        <EmptyState title={t('state.empty')} hint={t('employee.hireHint')} />
                     </Card>
                 ) : (
                     <EmployeeEditor key={selected.id} employee={selected} roles={roles} />
                 )}
 
-                <PermissionMatrix abilities={abilities} roles={roles} />
+                <HireForm roles={roles} />
 
-                <Notice tone="info" title={t('employee.createMissingTitle')}>
-                    {t('employee.createMissing')}
-                </Notice>
+                <PermissionMatrix abilities={abilities} roles={roles} />
             </div>
         </AppLayout>
     );
@@ -231,6 +230,16 @@ function EmployeeEditor({
                         <Badge tone={employee.active ? 'ok' : 'neutral'}>
                             {employee.active ? t('state.active') : t('state.inactive')}
                         </Badge>
+                        {/*
+                          * Refused once they have rung anything up — the server says so and names
+                          * the count. `DeleteAction` surfaces that refusal, which an Inertia delete
+                          * otherwise drops on the floor: it arrives as `errors`, and a delete has no
+                          * field to render one under.
+                          */}
+                        <DeleteAction
+                            url={routes.employees.destroy(employee.id)}
+                            name={employee.name}
+                        />
                     </>
                 }
             />
@@ -370,6 +379,59 @@ function EmployeeEditor({
     );
 }
 
+// ───────────────────────────────────────────────────────────── hire
+
+/**
+ * Adding a starter (BOF-120, BAN-446).
+ *
+ * Name and role only. The PIN and the badge are set afterwards on the record, because both are
+ * write-only credentials and a hire form that collects them invites writing them on the same piece
+ * of paper as the name.
+ */
+function HireForm({ roles }: { roles: EmployeesIndexProps['roles'] }): JSX.Element {
+    const t = useT();
+    const form = useForm<{ name: string; default_role: string }>({
+        name: '',
+        default_role: roles[0]?.value ?? 'cashier',
+    });
+
+    return (
+        <Card>
+            <CardHeader title={t('employee.hire')} description={t('employee.hireHint')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <TextField
+                        label={t('employee.nameLabel')}
+                        value={form.data.name}
+                        error={form.errors.name}
+                        onChange={(value) => form.setData('name', value)}
+                    />
+                    <SelectField
+                        label={t('employee.role')}
+                        value={form.data.default_role}
+                        error={form.errors.default_role}
+                        options={roles.map((role) => ({ value: role.value, label: role.label }))}
+                        onChange={(value) => form.setData('default_role', value)}
+                    />
+                </FormSection>
+
+                <Button
+                    loading={form.processing}
+                    disabled={form.data.name.trim() === ''}
+                    onClick={() =>
+                        form.post(routes.employees.store(), {
+                            preserveScroll: true,
+                            onSuccess: () => form.reset(),
+                        })
+                    }
+                >
+                    {t('employee.hire')}
+                </Button>
+            </CardBody>
+        </Card>
+    );
+}
+
 // ───────────────────────────────────────────────────────────── matrix
 
 function PermissionMatrix({
@@ -393,7 +455,13 @@ function PermissionMatrix({
 
     return (
         <Card>
-            <CardHeader title={t('employee.matrix')} description={t('employee.matrixHint')} />
+            {/*
+              * Still a reader, and correctly so: these are `config/pos.php` defaults, which are
+              * venue-wide and only change with a deploy. What an operator *can* change is the
+              * per-register override, and that lives on the register's own settings page next to
+              * the rest of that register's configuration (BOF-118).
+              */}
+            <CardHeader title={t('employee.matrix')} description={t('employee.matrixDefaults')} />
             <CardBody className="p-0">
                 {groups.length === 0 ? (
                     <EmptyState title={t('state.empty')} />

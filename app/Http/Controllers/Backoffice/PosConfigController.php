@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
+use App\Enums\AccessLevel;
 use App\Enums\AuditSeverity;
 use App\Enums\DeviceType;
 use App\Enums\PaymentMethodType;
@@ -87,6 +88,12 @@ final class PosConfigController extends Controller
                 'printer_ids' => $config->printers->pluck('id')->all(),
                 'limited_category_ids' => $config->limitedCategories->pluck('id')->all(),
                 'employee_ids' => $config->employees->pluck('id')->all(),
+                // The level each of them holds *here*, so the editor can render it rather than
+                // showing every attached employee at the column default (BOF-117).
+                'employee_access_levels' => $config->employees
+                    ->mapWithKeys(static fn ($e): array => [
+                        (string) $e->getKey() => (string) ($e->pivot->access_level ?? AccessLevel::Basic->value),
+                    ])->all(),
                 'floor_ids' => $config->floors->pluck('id')->all(),
                 'prep_display_ids' => $config->prepDisplays->pluck('id')->all(),
                 // Both are "empty means all", which the pages have to say out loud or an empty
@@ -114,6 +121,9 @@ final class PosConfigController extends Controller
                     ->get(['id', 'name'])
                     ->all(),
                 'employees' => Employee::query()->where('active', true)->orderBy('name')->get(['id', 'name', 'default_role'])->all(),
+                // What an override starts from. Without these the editor would show empty rows and
+                // an operator would have to know the default ability set by heart to reproduce it.
+                'ability_defaults' => (array) config('pos.role_abilities', []),
                 'notes' => PosNote::query()->orderBy('sequence')->get(['id', 'name', 'note_scope'])->all(),
                 'bills' => PosBill::query()->orderBy('currency_id')->orderBy('sequence')
                     ->get(['id', 'name', 'value', 'currency_id'])->all(),
@@ -204,10 +214,37 @@ final class PosConfigController extends Controller
 
         $pivotBefore = [];
 
+        // BOF-117 — the level an employee holds *on this register* (BAN-446).
+        //
+        // `pos_config_employee.access_level` has existed since the table was written, with a CHECK
+        // constraint and a default of `basic`, and the sync wrote bare ids — so every employee
+        // attached to every register sat at the default and "this cashier is a manager on till 2
+        // only" could not be expressed at all.
+        $levels = [];
+
+        foreach ((array) ($data['employee_access_levels'] ?? []) as $employeeId => $level) {
+            $levels[(int) $employeeId] = ['access_level' => (string) $level];
+        }
+
+        unset($data['employee_access_levels']);
+
         foreach ($pivots as $key => $relation) {
             if (array_key_exists($key, $data)) {
                 $pivotBefore[$key] = $this->pivotIds($config, $relation);
-                $config->{$relation}()->sync($this->ownedIds($config, $relation, (array) $data[$key], $key));
+                $owned = $this->ownedIds($config, $relation, (array) $data[$key], $key);
+
+                // Levels are attached to the ids that survived the ownership check, never to the
+                // submitted ones — a level keyed to an id from another company would otherwise
+                // re-introduce through the pivot payload exactly what `ownedIds` just refused.
+                $config->{$relation}()->sync(
+                    $relation === 'employees'
+                        ? array_combine($owned, array_map(
+                            static fn (int $id): array => $levels[$id] ?? [],
+                            $owned,
+                        ))
+                        : $owned,
+                );
+
                 unset($data[$key]);
             }
         }

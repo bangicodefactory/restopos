@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Backoffice;
 
+use App\Enums\AccessLevel;
 use App\Enums\DefaultScreen;
 use App\Enums\TaxDisplay;
 use App\Models\Catalog\Product;
@@ -132,6 +133,19 @@ final class PosConfigRequest extends FormRequest
             'enable_global_discount' => ['sometimes', 'boolean'],
             'global_discount_percent' => ['sometimes', 'numeric', 'min:0', 'max:100'],
             'global_discount_product_id' => ['sometimes', 'nullable', 'integer', $this->ownedProduct($config)],
+
+            // ── per-register staff and abilities (BOF-117, BOF-118) ─────────────────────────
+            //
+            // `employee_access_levels` is a map of employee id → level, applied to the pivot rows
+            // that survive the ownership check in `ownedIds()`.
+            'employee_access_levels' => ['sometimes', 'array'],
+            'employee_access_levels.*' => [Rule::enum(AccessLevel::class)],
+
+            // Null means "use the defaults in config/pos.php". An empty object is NOT the same
+            // thing: it is a deliberate override granting the role nothing.
+            'role_abilities' => ['sometimes', 'nullable', 'array'],
+            'role_abilities.*' => ['array'],
+            'role_abilities.*.*' => ['string', 'max:64'],
 
             // ── order audit (BOF-044) ───────────────────────────────────────────────────────
             'order_edit_tracking' => ['sometimes', 'boolean'],

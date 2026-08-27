@@ -129,6 +129,13 @@ export type PosConfigRecord = {
     sms_template_id: number | null;
     email_receipt_template_id: number | null;
     order_edit_tracking: boolean;
+    /**
+     * Per-register ability overrides keyed by role (BOF-118).
+     *
+     * `null` means "use the venue defaults in `config/pos.php`". An empty object is not the same
+     * thing — it is a deliberate override granting that role nothing.
+     */
+    role_abilities: Record<string, string[]> | null;
     limited_product_count: number;
     limited_customer_count: number;
 
@@ -143,6 +150,8 @@ export type PosConfigRecord = {
     printer_ids: number[];
     limited_category_ids: number[];
     employee_ids: number[];
+    /** employee id → the level they hold *on this register* (BOF-117). */
+    employee_access_levels: Record<string, string>;
     floor_ids: number[];
     prep_display_ids: number[];
     note_ids: number[];
@@ -164,6 +173,8 @@ export type PosConfigOptions = {
     /** Products marked `special_kind = tip` — the only ones a tip can be booked against (RST-120). */
     tip_products: { id: number; name: string }[];
     employees: { id: number; name: string; default_role: string }[];
+    /** Ability defaults per role, from `config/pos.php` — what an override starts from. */
+    ability_defaults: Record<string, string[]>;
     notes: { id: number; name: string; note_scope: string }[];
     bills: { id: number; name: string; value: string; currency_id: number }[];
 };
@@ -264,6 +275,8 @@ export const WRITABLE_CONFIG_KEYS = [
     'printer_ids',
     'limited_category_ids',
     'employee_ids',
+    'employee_access_levels',
+    'role_abilities',
     'floor_ids',
     'prep_display_ids',
     'note_ids',

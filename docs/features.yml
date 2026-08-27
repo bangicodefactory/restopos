@@ -386,6 +386,12 @@ features:
   BOF-115: { status: shipped, surface: user, manual: back-office/kitchen-screens.md#kitchen-screens }
   BOF-116: { status: shipped, surface: user, manual: back-office/floors.md#dining-rooms }
   BOF-119: { status: shipped, surface: user, manual: todo }
+  # Staff (BAN-446, BAN-451).
+  BOF-117: { status: shipped, surface: user, manual: back-office/staff.md#hire-someone }
+  # Partial: the per-register ability override ships; creating arbitrary roles does not.
+  # employees.default_role is a string behind a DB CHECK fed by the EmployeeRole enum, and
+  # replacing it touches the till auth path, so it stays its own piece of work.
+  BOF-118: { status: partial, surface: user, manual: back-office/staff.md#what-a-role-means-and-what-a-register-can-change-about-it }
   BOF-120: { status: shipped, surface: user, manual: back-office/register-preparation.md#cashier-badges }
 
   # Orders, sessions & payments administration (BOF-130 … BOF-159) — user
