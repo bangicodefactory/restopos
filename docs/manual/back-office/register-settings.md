@@ -3,6 +3,7 @@ title: Register settings
 audience: manager
 features:
   - BOF-006
+  - BOF-040
   - BOF-031
   - BOF-032
   - BOF-033
@@ -134,6 +135,31 @@ On the **Receipts** tab:
 On the **Restaurant** tab, **print the bill early** lets a waiter print the addition before payment.
 On the **Preparation** tab, **fire the first course automatically** sends the first course to the
 kitchen as soon as the order is sent, rather than waiting for the waiter to release it.
+
+## Connect the hardware
+
+**Register settings → Connected devices.** This is where a till learns about the equipment sitting
+next to it.
+
+**IoT box.** The box that connects a scanner, a scale, a receipt printer and a cash drawer to the
+till. Switch it on, put in its address, then tick what is actually plugged into it. The four ticks
+stay greyed out until the box is on, because a scanner ticked with no box behind it is a setting
+that reads as configured and does nothing.
+
+**ePOS printer.** A network printer the till talks to directly, without a box in between. Same
+shape: switch it on, then give its address.
+
+**Addresses are addresses, not web links.** Type `192.168.1.50`, or `192.168.1.50:9100` if it uses a
+particular port, or a name like `printer.local` if your network has its own. A full web address —
+anything with `http://` in front of it, or a slash, or a question mark — is refused.
+
+That refusal is worth understanding rather than working around. The till fetches from whatever is in
+this box, on your own network, with nothing checking that the thing answering is the printer you
+meant. If a web address could go here, one typed by mistake — or by someone who should not have been
+in this screen — would quietly point every till on this register somewhere else, and printing would
+appear to work.
+
+**Customer display background.** The picture shown between sales on the screen facing the customer.
 
 ## Track who changes an order
 

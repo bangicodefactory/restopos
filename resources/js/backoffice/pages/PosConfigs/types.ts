@@ -248,6 +248,14 @@ export const WRITABLE_CONFIG_KEYS = [
     'receipt_footer',
     'receipt_logo_media_id',
     'customer_display_bg_media_id',
+    'use_iot_box',
+    'proxy_ip',
+    'iot_scan',
+    'iot_scale',
+    'iot_print',
+    'iot_cashdrawer',
+    'use_epos_printer',
+    'epos_printer_ip',
 
     // Widened in BAN-466, in step with `PosConfigRequest`. The default pricelist and default
     // fiscal position lead the list because they are the two fields that decide every price the
