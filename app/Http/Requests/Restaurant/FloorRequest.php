@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Requests\Restaurant;
 
 use App\Enums\TableShape;
+use App\Models\Identity\MediaFile;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -24,6 +26,27 @@ final class FloorRequest extends FormRequest
             // blank the name because that form did not render it (BAN-439).
             'name' => [$this->route('floor') === null ? 'required' : 'sometimes', 'string', 'max:64'],
             'background_color' => ['nullable', 'string', 'max:24'],
+            // The upload pipeline exists now (BAN-393). Scoped through the model rather than
+            // `Rule::exists`, because `media_files` carries a `company_id` and `Rule::exists` runs
+            // on the query builder — the one place `CompanyScope` cannot reach. A NULL company is a
+            // genuinely shared asset and stays allowed.
+            'background_media_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                $ours = MediaFile::query()->whereKey((int) $value)->exists()
+                    || MediaFile::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
+
             'sequence' => ['nullable', 'integer'],
             'active' => ['nullable', 'boolean'],
 

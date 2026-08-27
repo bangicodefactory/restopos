@@ -172,6 +172,11 @@ export const routes = {
         rotateToken: (configUuid: string): string => `/self-order/${configUuid}/rotate-token`,
     },
 
+    media: {
+        store: (): string => '/media',
+        show: (id: number): string => `/media/${id}`,
+        destroy: (id: number): string => `/media/${id}`,
+    },
     devices: {
         index: (): string => '/devices',
         update: (uuid: string): string => `/devices/${uuid}`,

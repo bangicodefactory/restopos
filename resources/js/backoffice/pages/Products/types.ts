@@ -128,6 +128,8 @@ export type ProductEditProps = {
 /** Keys `PATCH /products/{product}` validates. Everything else is displayed read-only. */
 export const WRITABLE_PRODUCT_KEYS = [
     'name',
+    // Writable since BAN-393 gave it an upload route to feed it.
+    'image_media_id',
     'default_code',
     'barcode',
     'list_price',
@@ -169,8 +171,6 @@ export const PRODUCT_TYPE_OPTIONS = [
  * `special_kind` / `is_special` decide **who prices the line**: `LinePriceAuthority` hands pricing to
  * the client for anything whose kind is not `none`, so marking an ordinary product `tip` switches
  * server-side price verification off for it. That wants its own guarded action, not a field.
- *
- * `image_media_id` has no upload route to feed it (BAN-393).
  */
 export const READONLY_PRODUCT_KEYS = [
     'sale_count',

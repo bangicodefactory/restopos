@@ -15,7 +15,9 @@ use App\Models\Catalog\ProductAttribute;
 use App\Models\Catalog\ProductCategory;
 use App\Models\Catalog\ProductVariant;
 use App\Models\Catalog\Uom;
+use App\Models\Identity\MediaFile;
 use App\Models\Pricing\Tax;
+use App\Models\Scopes\CompanyScope;
 use App\Support\Tenancy\ActingCompany;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -384,9 +386,6 @@ final class ProductController extends Controller
      *    deliberate, consequence-carrying act and not one field among thirty; it wants its own
      *    guarded action, which is not this ticket.
      *
-     * `image_media_id` is absent for the reason payment methods gave: there is no media *upload*
-     * route in the app, only `GET /api/media/{id}` to serve one, so a picker would offer a choice of
-     * nothing. BAN-393 owns that pipeline.
      *
      * @return array<string, mixed>
      */
@@ -396,6 +395,27 @@ final class ProductController extends Controller
 
         $data = $request->validate([
             'name' => [$required, 'string', 'max:200'],
+            // The upload pipeline exists now (BAN-393). Scoped through the model rather than
+            // `Rule::exists`, because `media_files` carries a `company_id` and `Rule::exists` runs
+            // on the query builder — the one place `CompanyScope` cannot reach. A NULL company is a
+            // genuinely shared asset and stays allowed.
+            'image_media_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                $ours = MediaFile::query()->whereKey((int) $value)->exists()
+                    || MediaFile::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
+
             'default_code' => ['sometimes', 'nullable', 'string', 'max:64'],
             'barcode' => ['sometimes', 'nullable', 'string', 'max:64'],
             'list_price' => ['sometimes', 'numeric', 'min:0'],

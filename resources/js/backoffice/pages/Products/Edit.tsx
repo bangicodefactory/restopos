@@ -15,6 +15,7 @@ import { Head, useForm } from '@inertiajs/react';
 import { useCallback, useMemo, useState, type JSX } from 'react';
 
 import {
+    MediaField,
     MoneyField,
     MultiSelectField,
     SaveBar,
@@ -49,6 +50,7 @@ import type { ProductEditProps } from './types';
 
 type ProductForm = {
     name: string;
+    image_media_id: number | null;
     default_code: string;
     barcode: string;
     list_price: string;
@@ -80,6 +82,7 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
     const initial: ProductForm = useMemo(
         () => ({
             name: product.name,
+        image_media_id: product.image_media_id,
             default_code: product.default_code ?? '',
             barcode: product.barcode ?? '',
             list_price: product.list_price,
@@ -269,14 +272,17 @@ export default function ProductEdit({ product, options }: ProductEditProps): JSX
                                 </FormRow>
 
                                 {/*
-                                  * No image control at all, rather than a locked one. The app has no
-                                  * media *upload* route - only `GET /api/media/{id}` to serve one -
-                                  * so a picker would offer a choice of nothing, and a greyed field
-                                  * suggests a permission you might be granted rather than a feature
-                                  * that does not exist. BAN-393 owns that pipeline.
+                                  * A real picker now that there is somewhere to put a file
+                                  * (BAN-393). The upload happens on pick and the form holds only the
+                                  * id, so saving the product again never re-uploads the image.
                                   */}
                                 <FormRow>
-                                    <Notice tone="info">{t('product.imageMissing')}</Notice>
+                                    <MediaField
+                                        label={t('product.image')}
+                                        collection="image"
+                                        value={form.data.image_media_id}
+                                        onChange={(id: number | null) => form.setData('image_media_id', id)}
+                                    />
                                 </FormRow>
 
                                 <FormRow>
