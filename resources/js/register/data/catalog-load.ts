@@ -271,12 +271,21 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         nomenclatures.find((n) => n.id === company?.barcode_nomenclature_id) ?? nomenclatures[0] ?? null;
     const fallbackRow = nomenclatures.find((n) => n.id !== primaryNomenclature?.id) ?? null;
 
+    // Inactive lines and values are dropped here rather than server-side, because the bootstrap
+    // deliberately *sends* archived rows so the client can purge its own copies (§5.5). Variants
+    // already did this; attribute options did not, so deactivating an option changed nothing on the
+    // till — and "deactivate it instead" is what the back office tells an operator to do when a
+    // delete is refused because an order recorded the choice (BAN-412 review).
     const attributeLinesByProduct = groupBy<ProductAttributeLineRow, number>(
-        [...attributeLines].sort((a, b) => a.sequence - b.sequence || a.id - b.id),
+        attributeLines
+            .filter((row) => row.active)
+            .sort((a, b) => a.sequence - b.sequence || a.id - b.id),
         (row) => row.product_id,
     );
     const attributeLineValuesByLine = groupBy<ProductAttributeLineValueRow, number>(
-        [...attributeLineValues].sort((a, b) => a.sequence - b.sequence || a.id - b.id),
+        attributeLineValues
+            .filter((row) => row.active)
+            .sort((a, b) => a.sequence - b.sequence || a.id - b.id),
         (row) => row.product_attribute_line_id,
     );
 
