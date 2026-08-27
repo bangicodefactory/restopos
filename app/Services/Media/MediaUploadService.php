@@ -63,7 +63,15 @@ final readonly class MediaUploadService
 
         // Deduplicated within the venue and the collection. Not globally: two companies uploading
         // the same stock photo must not end up sharing a row, because either could then delete the
-        // other's logo.
+        // other's logo, and a row carries one `company_id` — so whichever uploaded second would own
+        // a file it never uploaded.
+        //
+        // The explicit `company_id` filter is belt-and-braces today: `CompanyScope` already scopes
+        // this query, and the one caller that bypasses the scope — a super-admin — cannot reach here
+        // at all, because `MediaController` refuses an upload from someone with no company. A
+        // sabotage removing the filter therefore changes nothing, and no test can catch it. It stays
+        // because the moment uploading becomes reachable without an acting company, this line is the
+        // only thing standing between two venues and a shared row.
         $existing = MediaFile::query()
             ->where('company_id', $companyId)
             ->where('collection', $collection->value)
