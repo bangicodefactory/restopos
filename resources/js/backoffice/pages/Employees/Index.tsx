@@ -459,7 +459,7 @@ function PermissionMatrix({
               * Still a reader, and correctly so: these are `config/pos.php` defaults, which are
               * venue-wide and only change with a deploy. What an operator *can* change is the
               * per-register override, and that lives on the register's own settings page next to
-              * the rest of that register's configuration (BOF-124).
+              * the rest of that register's configuration (BOF-118).
               */}
             <CardHeader title={t('employee.matrix')} description={t('employee.matrixDefaults')} />
             <CardBody className="p-0">
