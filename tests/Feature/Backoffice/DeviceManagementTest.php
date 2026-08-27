@@ -52,6 +52,30 @@ it('keeps the metadata it has always validated and thrown away', function (): vo
         ->and($device->paired_at)->not->toBeNull();
 });
 
+it('keeps the metadata when it arrives the way a real device sends it', function (): void {
+    // Through the HTTP endpoint, not the service.
+    //
+    // The defect was *in the controller*: it validated `hardware_fingerprint` and `app_version` and
+    // then did not pass them on. Every other test here calls `pair()` directly, so a sabotage that
+    // removed the controller's two lines passed clean — the tests never went through the code that
+    // was broken.
+    $service = app(DevicePairingService::class);
+    $code = $service->createCode($this->fx->config, DeviceType::Register, 'Till');
+
+    $this->postJson('/api/devices/pair', [
+        'code' => $code['code'],
+        'name' => 'Comptoir',
+        'hardware_fingerprint' => 'machine-http',
+        'app_version' => '3.1.4',
+    ])->assertSuccessful();
+
+    $device = PosDevice::query()->where('hardware_fingerprint', 'machine-http')->first();
+
+    expect($device)->not->toBeNull()
+        ->and((string) $device->app_version)->toBe('3.1.4')
+        ->and((string) $device->name)->toBe('Comptoir');
+});
+
 it('recognises the same machine coming back instead of adding a ghost', function (): void {
     // A terminal is re-paired for ordinary reasons: storage cleared, tablet reset, token revoked.
     // Each one used to mint another row, so a venue's list filled with ghosts of machines still
