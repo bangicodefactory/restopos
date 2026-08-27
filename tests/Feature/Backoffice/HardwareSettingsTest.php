@@ -95,6 +95,19 @@ it('refuses a full URL where an address belongs', function (): void {
     expect(storedHardware('proxy_ip'))->toBeNull();
 });
 
+it('tells an operator a URL is the wrong shape, not that it is unreadable', function (): void {
+    // The hostname check alone already refuses these — a sabotage removing the scheme/path guard
+    // passed clean until this existed. What the guard adds is the *message*: "not a full URL" is
+    // actionable, "that does not look like an address" reads like a bug when the operator has just
+    // pasted something that plainly is one.
+    $uuid = $this->fx->config->uuid;
+
+    $this->patch("/pos-configs/{$uuid}", ['proxy_ip' => 'http://iotbox.local:8069'])
+        ->assertSessionHasErrors([
+            'proxy_ip' => 'Enter an address such as 192.168.1.50 or printer.local, optionally with a port — not a full URL.',
+        ]);
+});
+
 it('refuses a port that is not a real one', function (): void {
     $uuid = $this->fx->config->uuid;
 
