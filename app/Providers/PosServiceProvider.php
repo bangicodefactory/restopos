@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Listeners\InvalidateCatalogCache;
+use App\Models\Catalog\BarcodeNomenclature;
 use App\Models\Catalog\PosCategory;
 use App\Models\Catalog\Product;
 use App\Models\Catalog\ProductAttribute;
@@ -27,6 +28,8 @@ use App\Models\Pricing\Tax;
 use App\Models\Pricing\TaxGroup;
 use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
+use App\Models\Scopes\CompanyScope;
+use App\Policies\BarcodeNomenclaturePolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FloorPolicy;
 use App\Policies\MediaPolicy;
@@ -48,6 +51,7 @@ use App\Policies\TaxGroupPolicy;
 use App\Policies\TaxPolicy;
 use App\Services\Payment\NullProvider;
 use App\Services\Payment\PaymentProvider;
+use App\Support\Tenancy\ActingCompany;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
@@ -143,6 +147,31 @@ final class PosServiceProvider extends ServiceProvider
             ->orWhere('id', ctype_digit($value) ? (int) $value : 0)
             ->firstOrFail());
 
+        /*
+         * A barcode nomenclature may be shared: `company_id` is nullable because the standard
+         * EAN-13 and UPC-A nomenclatures are the same everywhere.
+         *
+         * `CompanyScope` compiles to `where(company_id, ?)`, which excludes NULL — so without this
+         * a shared row 404s on every write, and an operator who can *see* it in the list gets "not
+         * found" the moment they touch it. Resolved here so the controller can refuse it with the
+         * actual reason: it belongs to every venue at once.
+         */
+        Route::bind('nomenclature', fn (string $value): BarcodeNomenclature => BarcodeNomenclature::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('id', ctype_digit($value) ? (int) $value : 0)
+            ->where(function ($query): void {
+                $query->whereNull('company_id');
+
+                $companyId = ActingCompany::id();
+
+                if (is_int($companyId)) {
+                    $query->orWhere('company_id', $companyId);
+                } elseif ($companyId === ActingCompany::UNRESTRICTED) {
+                    $query->orWhereNotNull('company_id');
+                }
+            })
+            ->firstOrFail());
+
         Route::bind('table', fn (string $value): RestaurantTable => RestaurantTable::query()
             ->where('id', ctype_digit($value) ? (int) $value : 0)
             ->orWhere('uuid', $value)
@@ -173,6 +202,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(Pricelist::class, PricelistPolicy::class);
         Gate::policy(PosDevice::class, PosDevicePolicy::class);
         Gate::policy(MediaFile::class, MediaPolicy::class);
+        Gate::policy(BarcodeNomenclature::class, BarcodeNomenclaturePolicy::class);
     }
 
     private function registerRateLimiters(): void
