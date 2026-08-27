@@ -172,6 +172,19 @@ export const routes = {
         rotateToken: (configUuid: string): string => `/self-order/${configUuid}/rotate-token`,
     },
 
+    barcodeNomenclatures: {
+        index: (): string => '/barcode-nomenclatures',
+        store: (): string => '/barcode-nomenclatures',
+        update: (id: number): string => `/barcode-nomenclatures/${id}`,
+        destroy: (id: number): string => `/barcode-nomenclatures/${id}`,
+    },
+    barcodeRules: {
+        store: (nomenclatureId: number): string => `/barcode-nomenclatures/${nomenclatureId}/rules`,
+        update: (nomenclatureId: number, ruleId: number): string =>
+            `/barcode-nomenclatures/${nomenclatureId}/rules/${ruleId}`,
+        destroy: (nomenclatureId: number, ruleId: number): string =>
+            `/barcode-nomenclatures/${nomenclatureId}/rules/${ruleId}`,
+    },
     media: {
         store: (): string => '/media',
         show: (id: number): string => `/media/${id}`,

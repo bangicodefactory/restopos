@@ -63,6 +63,12 @@ export const NAV: NavGroup[] = [
                 href: routes.printers.index(),
                 match: startsWith('/printers'),
             },
+            {
+                key: 'barcodes',
+                labelKey: 'nav.barcodes',
+                href: routes.barcodeNomenclatures.index(),
+                match: startsWith('/barcode-nomenclatures'),
+            },
             { key: 'customers', labelKey: 'nav.customers', href: null, disabledReasonKey: 'nav.unavailable' },
         ],
     },

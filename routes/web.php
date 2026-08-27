@@ -8,6 +8,7 @@ use App\Http\Controllers\Backoffice\AttributeValueController;
 use App\Http\Controllers\Backoffice\ProductAttributeLineController;
 use App\Http\Controllers\Backoffice\CategoryController;
 use App\Http\Controllers\Backoffice\DashboardController;
+use App\Http\Controllers\Backoffice\BarcodeNomenclatureController;
 use App\Http\Controllers\Backoffice\DeviceController;
 use App\Http\Controllers\Backoffice\MediaController;
 use App\Http\Controllers\Backoffice\EmployeeController;
@@ -182,6 +183,15 @@ Route::middleware(['auth'])->group(function (): void {
     Route::post('media', [MediaController::class, 'store'])->name('media.store');
     Route::get('media/{media:id}', [MediaController::class, 'show'])->name('media.show');
     Route::delete('media/{media:id}', [MediaController::class, 'destroy'])->name('media.destroy');
+
+    // Barcode nomenclatures and their rules (BOF-043, BAN-488).
+    Route::get('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'index'])->name('barcode-nomenclatures.index');
+    Route::post('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'store'])->name('barcode-nomenclatures.store');
+    Route::patch('barcode-nomenclatures/{nomenclature}', [BarcodeNomenclatureController::class, 'update'])->name('barcode-nomenclatures.update');
+    Route::delete('barcode-nomenclatures/{nomenclature}', [BarcodeNomenclatureController::class, 'destroy'])->name('barcode-nomenclatures.destroy');
+    Route::post('barcode-nomenclatures/{nomenclature}/rules', [BarcodeNomenclatureController::class, 'storeRule'])->name('barcode-rules.store');
+    Route::patch('barcode-nomenclatures/{nomenclature}/rules/{rule}', [BarcodeNomenclatureController::class, 'updateRule'])->name('barcode-rules.update');
+    Route::delete('barcode-nomenclatures/{nomenclature}/rules/{rule}', [BarcodeNomenclatureController::class, 'destroyRule'])->name('barcode-rules.destroy');
 
     Route::get('devices', [DeviceController::class, 'index'])->name('devices.index');
     Route::patch('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');

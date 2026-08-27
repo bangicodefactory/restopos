@@ -363,6 +363,11 @@ features:
   # PosDevicePolicy's docblock to explain what device management is *not* — which the gate reads as
   # a claim. Recorded as planned rather than reworded away: they are genuinely planned, with tickets.
   BOF-040: { status: shipped, surface: user, manual: back-office/register-settings.md#connect-the-hardware }
+  # Partial (BAN-488): BOF-043 is one row covering two unrelated things — barcode nomenclatures and
+  # the inventory/fulfilment group. The barcode half ships. The inventory half has no schema behind
+  # it at all: ship_later and picking_policy are documented as explicitly dropped, so there is
+  # nothing to expose and a settings group over nothing would be worse than the absence.
+  BOF-043: { status: partial, surface: user, manual: back-office/barcodes.md#barcodes }
   BOF-045: { status: planned, surface: user, manual: todo }   # sequences & numbering — BAN-488
   BOF-044: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-039: { status: shipped, surface: user, manual: back-office/register-preparation.md#notes-the-register-offers }

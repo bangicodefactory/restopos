@@ -7,6 +7,7 @@ namespace App\Http\Requests\Backoffice;
 use App\Enums\AccessLevel;
 use App\Enums\DefaultScreen;
 use App\Enums\TaxDisplay;
+use App\Models\Catalog\BarcodeNomenclature;
 use App\Models\Catalog\Product;
 use App\Models\Identity\MediaFile;
 use App\Models\Pos\Order;
@@ -150,6 +151,27 @@ final class PosConfigRequest extends FormRequest
 
                 if (! $ours) {
                     $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
+
+            // ── barcodes (BOF-043, BAN-488) ─────────────────────────────────────────────────
+            //
+            // Ours or shared: `barcode_nomenclatures.company_id` is nullable because the standard
+            // EAN-13 and UPC-A nomenclatures are the same everywhere and ship as global rows.
+            'fallback_barcode_nomenclature_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                $ours = BarcodeNomenclature::query()->whereKey((int) $value)->exists()
+                    || BarcodeNomenclature::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That nomenclature belongs to another venue, or no longer exists.');
                 }
             }],
 
