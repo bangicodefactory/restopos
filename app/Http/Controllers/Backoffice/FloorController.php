@@ -329,6 +329,10 @@ final class FloorController extends Controller
     /** Rotating a table token invalidates its printed QR — deliberate, explicit. */
     public function rotateTableToken(Request $request, RestaurantTable $table): RedirectResponse
     {
+        // The only write in this file without one. Rotating a table's token invalidates the
+        // QR code printed and stuck to that table.
+        Gate::authorize('update', $table->floor);
+
         $table->forceFill(['identifier' => Str::lower(Str::random(8))])->save();
 
         return back()->with('success', 'Table QR token rotated. Reprint the table QR code.');

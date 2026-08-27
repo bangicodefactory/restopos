@@ -9,6 +9,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Services\Device\DevicePairingService;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -26,8 +27,15 @@ final class DeviceController extends Controller
 
     public function index(): Response
     {
+        Gate::authorize('viewAny', PosDevice::class);
+
         return Inertia::render('Devices/Index', [
-            'devices' => PosDevice::query()->with('posConfig:id,name')->orderBy('pos_config_id')->orderBy('device_identifier')->get()
+            // Scoped through the register, because `pos_devices` has no `company_id` of its own
+            // and therefore no global scope. Unscoped, this listed every tenant's devices —
+            // their names, user agents and last-seen times.
+            'devices' => PosDevice::query()
+                ->whereIn('pos_config_id', PosConfig::query()->select('id'))
+                ->with('posConfig:id,name')->orderBy('pos_config_id')->orderBy('device_identifier')->get()
                 ->map(static fn (PosDevice $d): array => [
                     'id' => (int) $d->getKey(),
                     'uuid' => (string) $d->uuid,
@@ -47,6 +55,9 @@ final class DeviceController extends Controller
 
     public function destroy(PosDevice $device): RedirectResponse
     {
+        // Revoking someone else's device bricks their till mid-service.
+        Gate::authorize('delete', $device);
+
         $this->pairing->revoke($device);
 
         return back()->with('success', 'Device revoked. It will wipe its local data on next connection.');
