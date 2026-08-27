@@ -8,6 +8,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pricing\CashRounding;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\Pricelist;
+use App\Models\User;
 use App\Services\Pos\BootstrapService;
 use BackedEnum;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -150,6 +151,42 @@ it('refuses another company cash rounding rule', function (): void {
         ->assertSessionHasErrors('cash_rounding_id');
 
     expect(stored('cash_rounding_id'))->toBeNull();
+});
+
+it('refuses a foreign pricelist even to a super-admin', function (): void {
+    // The case the explicit `company_id` filter in `owned()` exists for, and the only one that
+    // reaches it. `CompanyScope` deliberately steps aside for a super-admin, so every other
+    // cross-company test here passes on the scope alone — a sabotage removing the filter went
+    // unnoticed until this test existed.
+    //
+    // Crossing companies is what the flag is for; pointing a register at another venue's pricelist
+    // is not an authorisation question. It prices this venue's sales wrongly whoever did it.
+    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+
+    $theirs = Pricelist::query()->create([
+        'company_id' => $this->other->company->getKey(),
+        'currency_id' => $this->other->currency->getKey(),
+        'name' => 'Their prices',
+    ]);
+
+    save(['pricelist_id' => $theirs->getKey()])->assertSessionHasErrors('pricelist_id');
+
+    expect(stored('pricelist_id'))->toBeNull();
+});
+
+it('still lets a super-admin set a pricelist that does belong to the register', function (): void {
+    // The negative half: the filter is about ownership, not about refusing super-admins.
+    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+
+    $ours = Pricelist::query()->create([
+        'company_id' => $this->fx->company->getKey(),
+        'currency_id' => $this->fx->currency->getKey(),
+        'name' => 'Ours',
+    ]);
+
+    save(['pricelist_id' => $ours->getKey()])->assertSessionHasNoErrors();
+
+    expect((int) stored('pricelist_id'))->toBe((int) $ours->getKey());
 });
 
 it('ships the chosen defaults to the till, which is where they decide a price', function (): void {
