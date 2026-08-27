@@ -52,6 +52,24 @@ it('does not let any signed-in user promote an employee to manager', function ()
         ->and(Employee::query()->whereKey($id)->value('pin_hash'))->not->toBe(hash('sha256', '9999'));
 });
 
+it('does not let a back-office viewer promote an employee either', function (): void {
+    // The case between "no permissions at all" and "may manage staff". A sabotage that downgraded
+    // the policy from `backoffice.manage_employees` to `backoffice.access` passed clean, because
+    // every other test here acts as a user holding neither — so nothing distinguished the two.
+    //
+    // It is the realistic attacker, too: a read-only back-office account is the one an ordinary
+    // employee is most likely to be given.
+    $this->actingAs($this->fx->userWith('backoffice.access'));
+
+    $id = $this->fx->cashier->getKey();
+
+    $this->patch("/employees/{$id}", ['default_role' => 'manager'])->assertForbidden();
+
+    $after = Employee::query()->whereKey($id)->value('default_role');
+
+    expect((string) ($after?->value ?? $after))->toBe('cashier');
+});
+
 it('still lets someone who manages staff do it', function (): void {
     // The negative half — the guard is about permission, not about freezing the field.
     $this->actingAs($this->fx->userWith('backoffice.access', 'backoffice.manage_employees'));
