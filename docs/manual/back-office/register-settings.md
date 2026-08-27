@@ -2,6 +2,7 @@
 title: Register settings
 audience: manager
 features:
+  - BOF-006
   - BOF-031
   - BOF-032
   - BOF-033
@@ -25,6 +26,40 @@ finishes that sale first, so you can save during service.
 
 Only an owner can change these. A manager can look at the page but not save it — the Save button
 stays greyed out with the reason.
+
+## Open a register
+
+**Back office → Registers → Open a register.** A name, a currency, and whether it is a restaurant.
+Everything else has a sensible default and is set afterwards on the settings screen, which is what
+the rest of this page is about.
+
+**The currency is the one field you cannot change later.** Once a register has taken a payment, every
+sale and every till count it recorded carries amounts with no currency of their own — they read as
+whatever the register says. Changing it afterwards would silently restate all of them. Pick it now.
+
+## Copy a register
+
+A second till in the same venue usually differs from the first in its name and almost nothing else,
+and this settings screen has eleven tabs. **Duplicate** copies all of it — the settings, the payment
+methods, the price lists, the floors, the staff, the kitchen screens — and gives the copy its own
+name, which you can change straight away.
+
+**Cash payment methods are not copied**, and the confirmation says so. A cash method belongs to
+exactly one register: two tills sharing one means two sessions counting the same drawer, so a float
+added on one register is expected in the other's count. Nobody notices until a drawer comes up short
+and the report blames a cashier. Add a separate cash method for the new till.
+
+## Archive a register
+
+**Archive** takes a register out of service. It stops appearing on any till and stops being offered
+for pairing.
+
+It is archived, never deleted. Every session, order and payment it took names it, and those records
+have to keep meaning something — a sales report from last year cannot point at a register that no
+longer exists.
+
+**A register with a session open cannot be archived.** Close the session first, or the drawer count
+in progress is stranded with nowhere to go.
 
 ## Choose the prices a register quotes
 

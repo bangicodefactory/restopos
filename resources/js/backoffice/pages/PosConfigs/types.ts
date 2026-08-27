@@ -24,6 +24,7 @@ export type PosConfigListRow = {
 
 export type PosConfigsIndexProps = {
     configs: PosConfigListRow[];
+    currencies: { id: number; code: string; name: string }[];
 };
 
 export type PosConfigRecord = {
