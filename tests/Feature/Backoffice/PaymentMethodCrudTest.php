@@ -56,7 +56,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(methodActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(methodActor($this->fx, ['backoffice.access', 'backoffice.manage_configs']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -223,7 +223,7 @@ it('refuses a user who may not configure the register', function (): void {
     addMethod($this->fx)->assertRedirect();
     $method = PaymentMethod::query()->where('name', 'Meal vouchers')->firstOrFail();
 
-    test()->actingAs(methodActor($this->fx, ['config.view']));
+    test()->actingAs(methodActor($this->fx, ['backoffice.access']));
 
     addMethod($this->fx, ['name' => 'Sneaky'])->assertForbidden();
     test()->deleteJson(route('payment-methods.destroy', $method->getKey()))->assertForbidden();

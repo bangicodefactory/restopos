@@ -20,22 +20,22 @@ final class ProductCategoryPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'catalog.view');
     }
 
     public function view(User $user, ProductCategory $category): bool
     {
-        return $this->sameCompany($user, $category->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $category->company_id) && $this->userCan($user, 'catalog.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'catalog.manage_categories');
     }
 
     public function update(User $user, ProductCategory $category): bool
     {
-        return $this->sameCompany($user, $category->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $category->company_id) && $this->userCan($user, 'catalog.manage_categories');
     }
 
     /**

@@ -50,7 +50,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(variantActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(variantActor($this->fx, ['catalog.view', 'catalog.manage_products']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -293,7 +293,7 @@ it('refuses a user who may not configure the register', function (): void {
     addVariant($this->fx->product)->assertRedirect();
     $variant = variantSuffixed('Large');
 
-    test()->actingAs(variantActor($this->fx, ['config.view']));
+    test()->actingAs(variantActor($this->fx, ['catalog.view']));
 
     addVariant($this->fx->product, ['name_suffix' => 'Sneaky'])->assertForbidden();
     saveVariant($this->fx->product, $variant, ['price_extra' => '99.00'])->assertForbidden();

@@ -220,7 +220,7 @@ it('refuses the download to a user from another company', function (): void {
     // opt-in scope, so route-model binding resolves any tenant's export from its uuid alone.
     $role = Role::query()->create(['name' => 'Accountant', 'slug' => 'accountant']);
     $permission = Permission::query()->firstOrCreate(
-        ['slug' => 'pos.accounting.export'],
+        ['slug' => 'backoffice.export_accounting'],
         ['group' => 'pos'],
     );
     $role->permissions()->syncWithoutDetaching([$permission->getKey()]);
@@ -377,7 +377,7 @@ it('carries a ledger code set through the back office, not only one written by h
         'is_system' => false,
     ]);
 
-    foreach (['config.view', 'config.manage'] as $slug) {
+    foreach (['backoffice.access', 'backoffice.manage_configs', 'catalog.view', 'catalog.manage_products', 'catalog.manage_categories', 'catalog.manage_taxes', 'restaurant.manage_floors', 'kitchen.view', 'kitchen.manage_displays'] as $slug) {
         $permission = Permission::query()->firstOrCreate(['slug' => $slug], ['group' => 'config']);
         DB::table('permission_role')->insertOrIgnore([
             'role_id' => $role->getKey(),

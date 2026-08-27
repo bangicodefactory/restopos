@@ -35,7 +35,7 @@ function tenantUser(int $companyId): User
         'is_system' => false,
     ]);
 
-    foreach (['config.view', 'config.manage'] as $slug) {
+    foreach (['backoffice.access', 'backoffice.manage_configs', 'catalog.view', 'catalog.manage_products', 'catalog.manage_categories', 'catalog.manage_taxes', 'restaurant.manage_floors', 'kitchen.view', 'kitchen.manage_displays'] as $slug) {
         $permission = Permission::query()
             ->firstOrCreate(['slug' => $slug], ['group' => 'config']);
         DB::table('permission_role')->insertOrIgnore([

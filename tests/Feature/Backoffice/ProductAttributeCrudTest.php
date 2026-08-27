@@ -52,7 +52,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(optionActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(optionActor($this->fx, ['catalog.view', 'catalog.manage_products']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -375,7 +375,7 @@ it('refuses a user who may not configure the register', function (): void {
     addAttribute()->assertRedirect();
     $attribute = attributeNamed('Size');
 
-    test()->actingAs(optionActor($this->fx, ['config.view']));
+    test()->actingAs(optionActor($this->fx, ['catalog.view']));
 
     addAttribute(['name' => 'Sneaky'])->assertForbidden();
     addValue($attribute)->assertForbidden();

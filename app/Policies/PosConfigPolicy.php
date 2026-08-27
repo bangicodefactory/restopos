@@ -20,22 +20,22 @@ final class PosConfigPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'pos.config.view');
+        return $this->userCan($user, 'backoffice.access');
     }
 
     public function view(User $user, PosConfig $config): bool
     {
-        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'pos.config.view');
+        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'backoffice.access');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'pos.config.manage');
+        return $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function update(User $user, PosConfig $config): bool
     {
-        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'pos.config.manage');
+        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function delete(User $user, PosConfig $config): bool
@@ -46,6 +46,6 @@ final class PosConfigPolicy
     /** Pairing a device is a manager-level act: it mints a long-lived token. */
     public function pairDevice(User $user, PosConfig $config): bool
     {
-        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'pos.device.manage');
+        return $this->sameCompany($user, $config->company_id) && $this->userCan($user, 'backoffice.manage_configs');
     }
 }

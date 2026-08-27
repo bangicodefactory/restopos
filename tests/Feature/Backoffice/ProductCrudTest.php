@@ -53,7 +53,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(menuActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(menuActor($this->fx, ['catalog.view', 'catalog.manage_products']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -359,7 +359,7 @@ it('refuses a user who may not configure the register', function (): void {
     addProduct()->assertRedirect();
     $product = productNamed('Soupe du jour');
 
-    test()->actingAs(menuActor($this->fx, ['config.view']));
+    test()->actingAs(menuActor($this->fx, ['catalog.view']));
 
     addProduct(['name' => 'Sneaky'])->assertForbidden();
     saveProduct($product, ['list_price' => '0.01'])->assertForbidden();

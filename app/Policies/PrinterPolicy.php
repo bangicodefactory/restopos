@@ -25,23 +25,23 @@ final class PrinterPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'pos.kitchen.view');
+        return $this->userCan($user, 'kitchen.view');
     }
 
     public function view(User $user, PosPrinter $printer): bool
     {
-        return $this->sameCompany($user, $printer->company_id) && $this->userCan($user, 'pos.kitchen.view');
+        return $this->sameCompany($user, $printer->company_id) && $this->userCan($user, 'kitchen.view');
     }
 
     /** Adding a printer is a configuration change, not a service action. */
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'pos.kitchen.manage');
+        return $this->userCan($user, 'kitchen.manage_displays');
     }
 
     public function update(User $user, PosPrinter $printer): bool
     {
-        return $this->view($user, $printer) && $this->userCan($user, 'pos.kitchen.manage');
+        return $this->view($user, $printer) && $this->userCan($user, 'kitchen.manage_displays');
     }
 
     /**

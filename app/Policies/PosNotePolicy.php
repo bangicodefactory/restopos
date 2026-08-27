@@ -19,22 +19,22 @@ final class PosNotePolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'backoffice.access');
     }
 
     public function view(User $user, PosNote $note): bool
     {
-        return $this->sameCompany($user, $note->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $note->company_id) && $this->userCan($user, 'backoffice.access');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function update(User $user, PosNote $note): bool
     {
-        return $this->sameCompany($user, $note->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $note->company_id) && $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function delete(User $user, PosNote $note): bool

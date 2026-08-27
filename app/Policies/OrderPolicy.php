@@ -15,12 +15,12 @@ final class OrderPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'pos.order.view');
+        return $this->userCan($user, 'backoffice.view_reports');
     }
 
     public function view(User $user, Order $order): bool
     {
-        return $this->sameCompany($user, $order->company_id) && $this->userCan($user, 'pos.order.view');
+        return $this->sameCompany($user, $order->company_id) && $this->userCan($user, 'backoffice.view_reports');
     }
 
     /** Only a draft may be edited from the back-office; settled orders are audit records. */
@@ -28,7 +28,7 @@ final class OrderPolicy
     {
         return $this->view($user, $order)
             && $order->state === OrderState::Draft
-            && $this->userCan($user, 'pos.order.manage');
+            && $this->userCan($user, 'pos.void_line');
     }
 
     /** Voiding a paid order is a manager act with a money consequence. */
@@ -39,6 +39,6 @@ final class OrderPolicy
 
     public function refund(User $user, Order $order): bool
     {
-        return $this->view($user, $order) && $this->userCan($user, 'pos.order.refund');
+        return $this->view($user, $order) && $this->userCan($user, 'pos.refund');
     }
 }

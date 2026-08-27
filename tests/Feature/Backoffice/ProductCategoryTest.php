@@ -49,7 +49,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(ledgerActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(ledgerActor($this->fx, ['catalog.view', 'catalog.manage_categories']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -247,7 +247,7 @@ it('refuses a user who may not configure the register', function (): void {
     addProductCategory()->assertRedirect();
     $category = ledgerCategory('Food');
 
-    test()->actingAs(ledgerActor($this->fx, ['config.view']));
+    test()->actingAs(ledgerActor($this->fx, ['catalog.view']));
 
     addProductCategory(['name' => 'Sneaky'])->assertForbidden();
     test()->patchJson(route('product-categories.update', $category->getKey()), ['ledger_code' => '9999'])

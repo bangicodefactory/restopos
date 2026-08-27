@@ -48,7 +48,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(noteActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(noteActor($this->fx, ['backoffice.access', 'backoffice.manage_configs']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -116,7 +116,7 @@ it('lets another company use the same name', function (): void {
 
     addNote()->assertRedirect();
 
-    test()->actingAs(noteActor($other, ['config.view', 'config.manage']));
+    test()->actingAs(noteActor($other, ['backoffice.access', 'backoffice.manage_configs']));
     addNote()->assertRedirect();
 
     expect(PosNote::query()->withoutGlobalScopes()->where('name', 'No ice')->count())->toBe(2);
@@ -164,7 +164,7 @@ it('refuses a user who may not configure the register', function (): void {
     addNote()->assertRedirect();
     $note = PosNote::query()->where('name', 'No ice')->firstOrFail();
 
-    test()->actingAs(noteActor($this->fx, ['config.view']));
+    test()->actingAs(noteActor($this->fx, ['backoffice.access']));
 
     addNote(['name' => 'Sneaky'])->assertForbidden();
     test()->delete(route('pos-notes.destroy', $note->getKey()))->assertForbidden();

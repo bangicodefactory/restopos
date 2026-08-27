@@ -55,7 +55,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make()->withSession()->withFloor();
-    $this->actingAs(floorActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(floorActor($this->fx, ['backoffice.access', 'restaurant.manage_floors']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -215,7 +215,7 @@ it('refuses a user who may not configure the venue', function (): void {
     addFloor()->assertRedirect();
     $floor = Floor::query()->where('name', 'Terrace')->firstOrFail();
 
-    test()->actingAs(floorActor($this->fx, ['config.view']));
+    test()->actingAs(floorActor($this->fx, ['backoffice.access']));
 
     addFloor(['name' => 'Sneaky'])->assertForbidden();
     test()->delete(route('floors.destroy', $floor->uuid))->assertForbidden();

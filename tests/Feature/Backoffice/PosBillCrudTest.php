@@ -51,7 +51,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(billActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(billActor($this->fx, ['backoffice.access', 'backoffice.manage_configs']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -156,7 +156,7 @@ it('refuses a user who may not configure the register', function (): void {
     addBill($this->fx)->assertRedirect();
     $bill = PosBill::query()->where('name', '20')->firstOrFail();
 
-    test()->actingAs(billActor($this->fx, ['config.view']));
+    test()->actingAs(billActor($this->fx, ['backoffice.access']));
 
     addBill($this->fx, ['name' => '100', 'value' => '100.00'])->assertForbidden();
     test()->delete(route('pos-bills.destroy', $bill->getKey()))->assertForbidden();

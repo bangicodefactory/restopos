@@ -20,22 +20,22 @@ final class PaymentMethodPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'backoffice.access');
     }
 
     public function view(User $user, PaymentMethod $method): bool
     {
-        return $this->sameCompany($user, $method->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $method->company_id) && $this->userCan($user, 'backoffice.access');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'backoffice.manage_configs');
     }
 
     public function update(User $user, PaymentMethod $method): bool
     {
-        return $this->sameCompany($user, $method->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $method->company_id) && $this->userCan($user, 'backoffice.manage_configs');
     }
 
     /**

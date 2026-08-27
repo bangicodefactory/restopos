@@ -49,7 +49,7 @@ beforeEach(function (): void {
     PosFixtures::make();
 
     $this->fx = PosFixtures::make();
-    $this->actingAs(treeActor($this->fx, ['config.view', 'config.manage']));
+    $this->actingAs(treeActor($this->fx, ['catalog.view', 'catalog.manage_categories']));
 });
 
 /** @param array<string, mixed> $payload */
@@ -321,7 +321,7 @@ it('refuses a user who may not configure the register', function (): void {
     addCategory(['name' => 'Drinks'])->assertRedirect();
     $drinks = categoryNamed('Drinks');
 
-    test()->actingAs(treeActor($this->fx, ['config.view']));
+    test()->actingAs(treeActor($this->fx, ['catalog.view']));
 
     addCategory(['name' => 'Sneaky'])->assertForbidden();
     test()->patchJson(route('categories.update', $drinks->getKey()), ['name' => 'Renamed'])

@@ -25,22 +25,22 @@ final class FloorPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->userCan($user, 'config.view');
+        return $this->userCan($user, 'backoffice.access');
     }
 
     public function view(User $user, Floor $floor): bool
     {
-        return $this->sameCompany($user, $floor->company_id) && $this->userCan($user, 'config.view');
+        return $this->sameCompany($user, $floor->company_id) && $this->userCan($user, 'backoffice.access');
     }
 
     public function create(User $user): bool
     {
-        return $this->userCan($user, 'config.manage');
+        return $this->userCan($user, 'restaurant.manage_floors');
     }
 
     public function update(User $user, Floor $floor): bool
     {
-        return $this->sameCompany($user, $floor->company_id) && $this->userCan($user, 'config.manage');
+        return $this->sameCompany($user, $floor->company_id) && $this->userCan($user, 'restaurant.manage_floors');
     }
 
     /**
