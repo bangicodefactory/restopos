@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadCatalogIndex } from './catalog-load';
-import type { PosDb } from './db';
+import type { PosDb } from '@shared/db';
 
 /** Every table answers `[]` unless this test cares about it. */
 function fakeDb(tables: Record<string, unknown[]>): PosDb {
