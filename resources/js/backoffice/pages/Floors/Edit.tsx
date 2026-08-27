@@ -28,7 +28,7 @@
 
 import { Head, router, useForm } from '@inertiajs/react';
 import { Button, FOCUS_RING, cn } from '@shared/ui';
-import { useCallback, useMemo, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 
 import { FloorCanvas, type CanvasTable } from '@shared/floor-plan/FloorCanvas';
 import {
@@ -68,7 +68,10 @@ import {
     type PlanTable,
 } from './types';
 
-/** New tables live only in the browser until a table write exists; negative ids never collide. */
+/**
+ * A table drawn on the canvas has no server id yet, so it gets a negative one. Negative ids never
+ * collide with real ones, and `syncTables` treats any id below zero as "create this".
+ */
 let nextLocalId = -1;
 
 export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Element {
@@ -87,6 +90,23 @@ export default function FloorEdit({ floor, tables }: FloorEditProps): JSX.Elemen
 
     const initialPlan = useMemo(() => tables.map(toPlanTable), [tables]);
     const [plan, setPlan] = useState<PlanTable[]>(initialPlan);
+
+    /*
+     * Adopt the server's ids after a save.
+     *
+     * `useState` reads its argument once, so without this the plan kept the negative ids it invented
+     * for newly drawn tables even after those tables had been created and given real ones. The next
+     * save then re-sent the same negative id — and `syncTables` reads a negative id as "create", while
+     * its deletion pass keeps only ids it can see in the payload.
+     *
+     * So the table created a moment ago was deleted and replaced by an identical new row. Probed: id
+     * 3 with QR token `t68og6ru` became id 4 with token `vpmk0i1n`. The identifier is the table's QR
+     * capability token, which means every save after adding a table silently invalidated the QR code
+     * already printed and stuck to that table — and nothing on screen said so.
+     */
+    useEffect(() => {
+        setPlan(initialPlan);
+    }, [initialPlan]);
     const [selectedId, setSelectedId] = useState<number | null>(initialPlan[0]?.id ?? null);
     const [snapEnabled, setSnapEnabled] = useState(true);
     const [grid, setGrid] = useState<number>(DEFAULT_GRID);

@@ -33,6 +33,18 @@ printed card in that room stops working. Confirm and it goes.
 
 An empty room is removed without a fuss.
 
+## Adding a table keeps its QR code
+
+A table you draw on the plan gets its QR code when you save. That code stays with the table from then
+on, including through later saves — move it, resize it, rename it, add three more tables, and the
+card on that table keeps working.
+
+This was not always true. Until recently, the first save created the table correctly and **every save
+after that quietly replaced it with a new one carrying a new QR code**, so the card already printed
+and stuck to the table stopped scanning. Nothing on screen said so; you would find out when a guest
+could not order. If you have printed table cards from a plan you have saved several times, it is
+worth re-checking that the codes on the tables still scan.
+
 ## Who can change this
 
 Adding or removing a room is a manager task, the same permission as rearranging one from the till.
