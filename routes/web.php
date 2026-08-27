@@ -9,6 +9,7 @@ use App\Http\Controllers\Backoffice\ProductAttributeLineController;
 use App\Http\Controllers\Backoffice\CategoryController;
 use App\Http\Controllers\Backoffice\DashboardController;
 use App\Http\Controllers\Backoffice\DeviceController;
+use App\Http\Controllers\Backoffice\MediaController;
 use App\Http\Controllers\Backoffice\EmployeeController;
 use App\Http\Controllers\Backoffice\FloorController;
 use App\Http\Controllers\Backoffice\OrderController;
@@ -174,6 +175,13 @@ Route::middleware(['auth'])->group(function (): void {
     Route::get('self-order/{config}/settings', [SelfOrderSettingsController::class, 'edit'])->name('self-order.settings');
     Route::patch('self-order/{config}/settings', [SelfOrderSettingsController::class, 'update'])->name('self-order.settings.update');
     Route::post('self-order/{config}/rotate-token', [SelfOrderSettingsController::class, 'rotateToken'])->name('self-order.rotate-token');
+
+    // Media (BAN-393). `store` answers JSON rather than redirecting, because the picker needs the
+    // id of the file it just uploaded; `show` exists because the only other serve route is
+    // device-authenticated and a signed-in manager holds no device token.
+    Route::post('media', [MediaController::class, 'store'])->name('media.store');
+    Route::get('media/{media:id}', [MediaController::class, 'show'])->name('media.show');
+    Route::delete('media/{media:id}', [MediaController::class, 'destroy'])->name('media.destroy');
 
     Route::get('devices', [DeviceController::class, 'index'])->name('devices.index');
     Route::patch('devices/{device}', [DeviceController::class, 'update'])->name('devices.update');

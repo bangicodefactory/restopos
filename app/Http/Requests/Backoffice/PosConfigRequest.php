@@ -8,10 +8,12 @@ use App\Enums\AccessLevel;
 use App\Enums\DefaultScreen;
 use App\Enums\TaxDisplay;
 use App\Models\Catalog\Product;
+use App\Models\Identity\MediaFile;
 use App\Models\Pos\Order;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\Pricelist;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -108,6 +110,47 @@ final class PosConfigRequest extends FormRequest
             // another company's rounding rule attached, 302, no complaint.
             'cash_rounding_id' => ['sometimes', 'nullable', 'integer', $this->owned($config, 'cashRounding')],
             'only_round_cash_payments' => ['sometimes', 'boolean'],
+
+            // The upload pipeline exists now (BAN-393). Scoped through the model rather than
+            // `Rule::exists`, because `media_files` carries a `company_id` and `Rule::exists` runs
+            // on the query builder — the one place `CompanyScope` cannot reach. A NULL company is a
+            // genuinely shared asset and stays allowed.
+            'receipt_logo_media_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                $ours = MediaFile::query()->whereKey((int) $value)->exists()
+                    || MediaFile::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
+            // The upload pipeline exists now (BAN-393). Scoped through the model rather than
+            // `Rule::exists`, because `media_files` carries a `company_id` and `Rule::exists` runs
+            // on the query builder — the one place `CompanyScope` cannot reach. A NULL company is a
+            // genuinely shared asset and stays allowed.
+            'customer_display_bg_media_id' => ['sometimes', 'nullable', 'integer', static function (string $attribute, mixed $value, callable $fail): void {
+                if ($value === null) {
+                    return;
+                }
+
+                $ours = MediaFile::query()->whereKey((int) $value)->exists()
+                    || MediaFile::query()
+                        ->withoutGlobalScope(CompanyScope::class)
+                        ->whereKey((int) $value)
+                        ->whereNull('company_id')
+                        ->exists();
+
+                if (! $ours) {
+                    $fail('That image belongs to another venue, or no longer exists.');
+                }
+            }],
 
             // ── receipts (BOF-038) ──────────────────────────────────────────────────────────
             'show_receipt_header_footer' => ['sometimes', 'boolean'],

@@ -101,6 +101,14 @@ export type PosConfigRecord = {
     epos_printer_ip: string | null;
     big_scrollbars: boolean;
     customer_display_bg_media_id: number | null;
+    /**
+     * The receipt's brand mark.
+     *
+     * `receipt.ts` has built its blob key as `logo:{receipt_logo_media_id}` since it was written and
+     * `build.ts` emits the image node — but this field was absent from the back-office wire
+     * entirely, so the column could never be set and every receipt printed without a logo.
+     */
+    receipt_logo_media_id: number | null;
 
     // barcode
     fallback_barcode_nomenclature_id: number | null;
@@ -238,6 +246,8 @@ export const WRITABLE_CONFIG_KEYS = [
     'limited_customer_count',
     'receipt_header',
     'receipt_footer',
+    'receipt_logo_media_id',
+    'customer_display_bg_media_id',
 
     // Widened in BAN-466, in step with `PosConfigRequest`. The default pricelist and default
     // fiscal position lead the list because they are the two fields that decide every price the

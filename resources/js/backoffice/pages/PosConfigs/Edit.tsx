@@ -24,6 +24,7 @@ import { Button, useToast } from '@shared/ui';
 import { useCallback, useMemo, useState, type JSX } from 'react';
 
 import {
+    MediaField,
     MultiSelectField,
     NumberField,
     SaveBar,
@@ -123,6 +124,7 @@ type ConfigForm = {
     order_edit_tracking: boolean;
     employee_access_levels: Record<string, string>;
     role_abilities: Record<string, string[]> | null;
+    receipt_logo_media_id: number | null;
 };
 
 /** The levels `pos_config_employee.access_level` accepts, in increasing capability. */
@@ -207,6 +209,7 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         order_edit_tracking: config.order_edit_tracking,
         employee_access_levels: config.employee_access_levels,
         role_abilities: config.role_abilities,
+        receipt_logo_media_id: config.receipt_logo_media_id,
     };
 }
 
@@ -695,6 +698,19 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     error={form.errors.receipt_header}
                                     onChange={(value) => form.setData('receipt_header', value)}
                                     rows={3}
+                                />
+
+                                {/*
+                                  * The till has known how to print this since `receipt.ts` was
+                                  * written — the column simply could never be set, so every receipt
+                                  * printed without a logo (BAN-393).
+                                  */}
+                                <MediaField
+                                    label={t('config.receiptLogo')}
+                                    collection="receipt_logo"
+                                    value={form.data.receipt_logo_media_id}
+                                    onChange={(id: number | null) => form.setData('receipt_logo_media_id', id)}
+                                    hint={t('config.receiptLogoHint')}
                                 />
                                 <TextareaField
                                     label="Pied du ticket"
