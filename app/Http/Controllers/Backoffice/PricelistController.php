@@ -9,6 +9,7 @@ use App\Models\Pricing\Pricelist;
 use App\Models\Pricing\PricelistItem;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,6 +25,8 @@ final class PricelistController extends Controller
 {
     public function index(): Response
     {
+        Gate::authorize('viewAny', Pricelist::class);
+
         return Inertia::render('Pricelists/Index', [
             'pricelists' => Pricelist::query()->withCount('items')->orderBy('name')->get()
                 ->map(static fn (Pricelist $p): array => [
@@ -39,6 +42,8 @@ final class PricelistController extends Controller
 
     public function edit(Pricelist $pricelist): Response
     {
+        Gate::authorize('view', $pricelist);
+
         return Inertia::render('Pricelists/Edit', [
             'pricelist' => $pricelist->attributesToArray(),
             'items' => PricelistItem::query()
@@ -53,6 +58,8 @@ final class PricelistController extends Controller
 
     public function update(Request $request, Pricelist $pricelist): RedirectResponse
     {
+        Gate::authorize('update', $pricelist);
+
         $pricelist->forceFill($request->validate([
             'name' => ['sometimes', 'string', 'max:96'],
             'currency_id' => ['sometimes', 'integer', 'exists:currencies,id'],

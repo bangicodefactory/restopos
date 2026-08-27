@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Identity\Employee;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,6 +25,8 @@ final class EmployeeController extends Controller
 {
     public function index(): Response
     {
+        Gate::authorize('viewAny', Employee::class);
+
         return Inertia::render('Employees/Index', [
             'employees' => Employee::query()->orderBy('name')->get()->map(static fn (Employee $e): array => [
                 'id' => (int) $e->getKey(),
@@ -43,6 +46,10 @@ final class EmployeeController extends Controller
 
     public function update(Request $request, Employee $employee): RedirectResponse
     {
+        // Probed on master with a user holding no roles at all: this returned 302, promoted a
+        // cashier to manager and set the caller's own PIN — which is the till credential.
+        Gate::authorize('update', $employee);
+
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:120'],
             'job_title' => ['sometimes', 'nullable', 'string', 'max:80'],

@@ -382,6 +382,20 @@ Two orthogonal axes, both required.
 
 The shipped roles are `owner`, `manager`, `cashier`, `waiter`, `kitchen`, and **`database/seeders/RoleSeeder.php` is the source of truth for the permission slugs** — `backoffice.*`, `catalog.*`, `restaurant.*`, `kitchen.*` and the `pos.*` register set. `User::hasPermission` is an exact string match against seeded rows, so a policy that asks for a slug the seeder does not create is not a strict check but a permanent denial, and `is_super_admin` hides it by short-circuiting the lookup. Adding a permission means adding it there first.
 
+**Every back-office write authorizes, and nothing outside the handler enforces it.** The back office
+sits behind a bare `auth` middleware with no permission middleware, so a `Gate::authorize` inside the
+method — or a FormRequest whose `authorize()` genuinely decides — is the only thing standing between
+a signed-in user and a write. Four controllers once had neither, which made
+`PATCH /employees/{id}` a one-request escalation to manager authority *at the till*: the role is what
+the register checks before a void or a price override, and the PIN is the till credential.
+`tests/Feature/Backoffice/AuthorizationCoverageTest.php` reads the router and fails the build on any
+write reachable without a check.
+
+**A device's type comes from the code, not from the client redeeming it.** A pairing code is minted
+for one device type and its abilities follow from that type. `DevicePairingService::pair` once let
+the redeeming client name its own type, so a customer-display code returned a full register token —
+and a lobby screen is both the lowest-trust device a venue pairs and the easiest to physically reach.
+
 **The two axes do not share a vocabulary.** `config.manage` below is an *employee* ability from `config/pos.php`; it is not an admin-app permission, and a policy must never reach for it. `tests/Feature/Backoffice/PolicyAbilityTest.php` fails the build if one does.
 
 **Axis 2 — Register (employees)**: an ability set evaluated *client-side while offline* and *server-side on ingest*. Same string constants, one source of truth:

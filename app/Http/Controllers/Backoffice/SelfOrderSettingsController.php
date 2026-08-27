@@ -12,6 +12,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\SelfOrder\CustomLink;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -26,6 +27,8 @@ final class SelfOrderSettingsController extends Controller
 {
     public function edit(PosConfig $config): Response
     {
+        Gate::authorize('view', $config);
+
         return Inertia::render('SelfOrder/Settings', [
             'config' => [
                 'id' => (int) $config->getKey(),
@@ -54,6 +57,8 @@ final class SelfOrderSettingsController extends Controller
 
     public function update(Request $request, PosConfig $config): RedirectResponse
     {
+        Gate::authorize('update', $config);
+
         $data = $request->validate([
             'self_ordering_mode' => ['sometimes', Rule::enum(SelfOrderMode::class)],
             'self_ordering_service_mode' => ['sometimes', Rule::enum(SelfOrderServiceMode::class)],
@@ -81,6 +86,9 @@ final class SelfOrderSettingsController extends Controller
     /** Rotating the token invalidates every printed QR code for this venue. */
     public function rotateToken(PosConfig $config): RedirectResponse
     {
+        // Rotating the token invalidates every printed table QR for this venue.
+        Gate::authorize('update', $config);
+
         $config->forceFill(['access_token' => PosConfig::newAccessToken()])->save();
         $config->bumpRevision();
 

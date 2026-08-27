@@ -83,8 +83,23 @@ final readonly class DevicePairingService
         $this->cache->forget($key);
 
         $config = PosConfig::query()->findOrFail($payload['pos_config_id']);
-        $kind = DeviceType::tryFrom((string) ($attributes['device_type'] ?? $payload['device_type']))
-            ?? DeviceType::from($payload['device_type']);
+        // The type is the one the code was MINTED for. It used to prefer the client's
+        // `$attributes['device_type']`, which meant a pairing code created for a customer display
+        // could be redeemed as a register — probed: a `customer_display` code returned a token
+        // carrying `pos:sync`, `pos:session`, `pos:print`, `pos:realtime` and `pos:restaurant`.
+        //
+        // A lobby screen is the lowest-trust thing a venue pairs and the easiest to physically
+        // reach, so its code is exactly the one an attacker would want to upgrade. The device type
+        // decides the ability set, so it has to come from the side that was authorised — the
+        // manager who minted the code — not from the side redeeming it.
+        $kind = DeviceType::from($payload['device_type']);
+
+        if (isset($attributes['device_type']) && (string) $attributes['device_type'] !== $kind->value) {
+            throw new RuntimeException(
+                'This pairing code was issued for a '.$kind->value.'. Ask for a code for the device'
+                .' you are actually pairing.',
+            );
+        }
 
         /** @var PosDevice $device */
         $device = $this->connection->transaction(function () use ($config, $kind, $attributes, $payload): PosDevice {
