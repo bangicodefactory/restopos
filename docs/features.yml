@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 140
+  manual_debt: 139
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -329,7 +329,8 @@ features:
   # Dashboard & registers (BOF-001 … BOF-029) — user
   BOF-001: { status: shipped, surface: user, manual: todo }
   BOF-005: { status: shipped, surface: user, manual: todo }
-  BOF-006: { status: shipped, surface: user, manual: todo }
+  # Recorded shipped before it was — create, duplicate and archive only landed in BAN-472.
+  BOF-006: { status: shipped, surface: user, manual: back-office/register-settings.md#open-a-register }
   BOF-008: { status: shipped, surface: user, manual: todo }
 
   # Stock ledger (REG-325 … REG-328) — planned, not built

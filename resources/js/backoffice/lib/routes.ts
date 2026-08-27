@@ -20,6 +20,9 @@ export const routes = {
 
     posConfigs: {
         index: (): string => '/pos-configs',
+        store: (): string => '/pos-configs',
+        duplicate: (uuid: string): string => `/pos-configs/${uuid}/duplicate`,
+        destroy: (uuid: string): string => `/pos-configs/${uuid}`,
         edit: (uuid: string): string => `/pos-configs/${uuid}/edit`,
         update: (uuid: string): string => `/pos-configs/${uuid}`,
         pairingCodes: (uuid: string): string => `/pos-configs/${uuid}/pairing-codes`,

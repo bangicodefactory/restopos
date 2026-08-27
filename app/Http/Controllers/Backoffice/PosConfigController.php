@@ -11,6 +11,7 @@ use App\Enums\PaymentMethodType;
 use App\Enums\SessionState;
 use App\Enums\SpecialKind;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Backoffice\CreatePosConfigRequest;
 use App\Http\Requests\Backoffice\PosConfigRequest;
 use App\Http\Requests\Device\CreatePairingCodeRequest;
 use App\Models\Catalog\PosCategory;
@@ -23,6 +24,7 @@ use App\Models\Pos\PosNote;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
 use App\Models\Pricing\CashRounding;
+use App\Models\Pricing\Currency;
 use App\Models\Pricing\FiscalPosition;
 use App\Models\Pricing\Pricelist;
 use App\Services\Audit\AuditRecorder;
@@ -33,6 +35,7 @@ use Illuminate\Database\ConnectionInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -48,6 +51,20 @@ use Inertia\Response;
  */
 final class PosConfigController extends Controller
 {
+    /**
+     * The pivots a duplicate carries over.
+     *
+     * `trustedConfigs` is deliberately absent: trust between registers is a statement about two
+     * specific tills, and copying it would silently grant a brand-new register the right to read
+     * another's orders.
+     *
+     * @var list<string>
+     */
+    private const DUPLICATED_PIVOTS = [
+        'paymentMethods', 'pricelists', 'fiscalPositions', 'presets', 'printers',
+        'limitedCategories', 'employees', 'floors', 'prepDisplays', 'notes', 'bills',
+    ];
+
     public function __construct(
         private readonly DevicePairingService $pairing,
         private readonly AuditRecorder $audit,
@@ -69,7 +86,141 @@ final class PosConfigController extends Controller
                 'currency_id' => (int) $c->currency_id,
                 'config_revision' => (int) $c->config_revision,
             ])->values()->all(),
+            // The create form needs these and `index()` never sent them. Global ISO reference data
+            // with no `company_id`, so there is nothing to scope.
+            'currencies' => Currency::query()->orderBy('code')->get(['id', 'code', 'name'])->all(),
         ]);
+    }
+
+    /**
+     * `POST /pos-configs` — open a register (BAN-472).
+     *
+     * A venue could not add a second till. The set of registers was whatever the seeder produced,
+     * which made onboarding a new shop impossible through the UI.
+     *
+     * Three fields, then straight to the settings screen. The other eighty columns all have
+     * defaults, and asking for them up front is how a create form becomes something people avoid.
+     */
+    public function store(CreatePosConfigRequest $request): RedirectResponse
+    {
+        $companyId = $request->companyId();
+
+        if ($companyId === null) {
+            throw ValidationException::withMessages([
+                'name' => 'Choose a company before opening a register.',
+            ]);
+        }
+
+        $config = PosConfig::query()->create([
+            ...$request->validated(),
+            'company_id' => $companyId,
+            'uuid' => (string) Str::uuid(),
+            // Never copied and never client-supplied: it is the broadcast channel name and the
+            // self-order entry token at once.
+            'access_token' => PosConfig::newAccessToken(),
+        ]);
+
+        return redirect()
+            ->route('pos-configs.edit', $config->uuid)
+            ->with('success', 'Register opened. Its settings are below.');
+    }
+
+    /**
+     * `POST /pos-configs/{config}/duplicate` — copy a register (BAN-472).
+     *
+     * The reason this exists rather than "create and configure it again": a second till in the same
+     * venue differs from the first in its name and almost nothing else, and the settings screen has
+     * eleven tabs. Reproducing them by hand is where a venue ends up with two registers that quietly
+     * disagree about tax display or cash rounding.
+     *
+     * Copies the scalar settings and every pivot **except** the cash payment methods. A cash method
+     * belongs to exactly one register (BOF-110): two tills sharing one means two sessions
+     * reconciling against the same drawer, and each computes its expected cash from that method — so
+     * a float on one is expected in the other's count, and nobody sees it until a drawer is short.
+     */
+    public function duplicate(PosConfig $config): RedirectResponse
+    {
+        Gate::authorize('create', PosConfig::class);
+        Gate::authorize('view', $config);
+
+        $copy = $this->connection->transaction(function () use ($config): PosConfig {
+            $attributes = $config->attributesToArray();
+
+            foreach (['id', 'uuid', 'access_token', 'config_revision', 'last_config_change_at', 'created_at', 'updated_at', 'deleted_at'] as $owned) {
+                unset($attributes[$owned]);
+            }
+
+            /** @var PosConfig $copy */
+            $copy = PosConfig::query()->create([
+                ...$attributes,
+                'company_id' => $config->company_id,
+                'name' => $this->availableName($config),
+                'uuid' => (string) Str::uuid(),
+                'access_token' => PosConfig::newAccessToken(),
+            ]);
+
+            foreach (self::DUPLICATED_PIVOTS as $relation) {
+                $ids = $config->{$relation}()->pluck($config->{$relation}()->getRelated()->getQualifiedKeyName())->all();
+
+                if ($relation === 'paymentMethods') {
+                    $ids = PaymentMethod::query()
+                        ->whereKey($ids)
+                        ->where('is_cash_count', false)
+                        ->pluck('id')
+                        ->all();
+                }
+
+                $copy->{$relation}()->sync($ids);
+            }
+
+            return $copy;
+        });
+
+        return redirect()
+            ->route('pos-configs.edit', $copy->uuid)
+            ->with('success', 'Register copied. Its cash payment methods were not copied — a cash method belongs to one register.');
+    }
+
+    /**
+     * `DELETE /pos-configs/{config}` — archive a register (BAN-472).
+     *
+     * Archived, never deleted. Every session, order and payment this register took names it, so the
+     * row has to stay for those to mean anything — and `pos_orders.pos_config_id` is
+     * `restrictOnDelete` besides, so a hard delete is a 500 with nothing naming the cause.
+     *
+     * Refused while a session is open: closing a register mid-service strands the drawer count.
+     */
+    public function destroy(PosConfig $config): RedirectResponse
+    {
+        Gate::authorize('delete', $config);
+
+        if ($this->hasOpenSession($config)) {
+            throw ValidationException::withMessages([
+                'config' => 'This register has a session open. Close it before archiving the register.',
+            ]);
+        }
+
+        $config->forceFill(['active' => false])->save();
+        $config->bumpRevision();
+
+        return back()->with('success', 'Register archived. It no longer appears on any till.');
+    }
+
+    /** A copy is named "Bar (2)", then "Bar (3)" — `name` has no unique index, but two identical rows in a list are useless. */
+    private function availableName(PosConfig $config): string
+    {
+        $taken = PosConfig::query()->pluck('name')->all();
+        $base = (string) $config->name;
+
+        for ($n = 2; $n < 100; $n++) {
+            $candidate = $base.' ('.$n.')';
+
+            if (! in_array($candidate, $taken, true)) {
+                return mb_substr($candidate, 0, 96);
+            }
+        }
+
+        return mb_substr($base.' ('.Str::lower(Str::random(4)).')', 0, 96);
     }
 
     public function edit(PosConfig $config): Response

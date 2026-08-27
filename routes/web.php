@@ -65,7 +65,10 @@ Route::middleware(['auth'])->group(function (): void {
 
     Route::get('pos-configs', [PosConfigController::class, 'index'])->name('pos-configs.index');
     Route::get('pos-configs/{config}/edit', [PosConfigController::class, 'edit'])->name('pos-configs.edit');
+    Route::post('pos-configs', [PosConfigController::class, 'store'])->name('pos-configs.store');
     Route::patch('pos-configs/{config}', [PosConfigController::class, 'update'])->name('pos-configs.update');
+    Route::post('pos-configs/{config}/duplicate', [PosConfigController::class, 'duplicate'])->name('pos-configs.duplicate');
+    Route::delete('pos-configs/{config}', [PosConfigController::class, 'destroy'])->name('pos-configs.destroy');
     Route::post('pos-configs/{config}/pairing-codes', [PosConfigController::class, 'pairingCode'])->name('pos-configs.pairing-codes');
 
     Route::get('products', [ProductController::class, 'index'])->name('products.index');
