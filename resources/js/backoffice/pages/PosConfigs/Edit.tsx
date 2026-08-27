@@ -121,7 +121,16 @@ type ConfigForm = {
     enable_bill_print: boolean;
     prep_auto_fire_first_course: boolean;
     order_edit_tracking: boolean;
+    employee_access_levels: Record<string, string>;
+    role_abilities: Record<string, string[]> | null;
 };
+
+/** The levels `pos_config_employee.access_level` accepts, in increasing capability. */
+const ACCESS_LEVELS = [
+    { value: 'minimal', label: 'Minimal' },
+    { value: 'basic', label: 'Standard' },
+    { value: 'advanced', label: 'Étendu' },
+] as const;
 
 /** The two enum columns the settings screen offers, spelled the way the operator reads them. */
 const TAX_DISPLAYS = [
@@ -196,6 +205,8 @@ function initialForm(config: PosConfigRecord): ConfigForm {
         enable_bill_print: config.enable_bill_print,
         prep_auto_fire_first_course: config.prep_auto_fire_first_course,
         order_edit_tracking: config.order_edit_tracking,
+        employee_access_levels: config.employee_access_levels,
+        role_abilities: config.role_abilities,
     };
 }
 
@@ -950,7 +961,153 @@ function Assignments({
                 options={options.payment_methods.map((row) => ({ value: String(row.id), label: row.name }))}
                 onChange={(values) => form.setData('payment_method_ids', values)}
             />
+
+            <div className="md:col-span-2 xl:col-span-3 space-y-4">
+                <AccessLevels form={form} options={options} />
+                <AbilityOverride form={form} options={options} />
+            </div>
         </div>
+    );
+}
+
+/**
+ * The level each attached employee holds **on this register** (BOF-122, BAN-446).
+ *
+ * `pos_config_employee.access_level` has existed since the table was written, with a CHECK
+ * constraint and a default of `basic`, and the pivot was synced as bare ids — so every employee on
+ * every register sat at the default, and "this cashier is advanced on till 2 only" could not be
+ * expressed at all.
+ */
+function AccessLevels({
+    form,
+    options,
+}: {
+    form: ReturnType<typeof useForm<ConfigForm>>;
+    options: PosConfigOptions;
+}): JSX.Element {
+    const t = useT();
+
+    const attached = options.employees.filter((row) => form.data.employee_ids.includes(row.id));
+
+    if (attached.length === 0) {
+        return <Notice tone="info">{t('config.accessLevelsEmpty')}</Notice>;
+    }
+
+    return (
+        <Card>
+            <CardHeader title={t('config.accessLevels')} description={t('config.accessLevelsHint')} />
+            <CardBody className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {attached.map((employee) => (
+                    <SelectField
+                        key={employee.id}
+                        label={employee.name}
+                        value={form.data.employee_access_levels[String(employee.id)] ?? 'basic'}
+                        options={ACCESS_LEVELS.map((level) => ({ value: level.value, label: level.label }))}
+                        onChange={(value) =>
+                            form.setData('employee_access_levels', {
+                                ...form.data.employee_access_levels,
+                                [String(employee.id)]: value,
+                            })
+                        }
+                    />
+                ))}
+            </CardBody>
+        </Card>
+    );
+}
+
+/**
+ * Per-register ability overrides (BOF-124, BAN-451).
+ *
+ * `EmployeeAuthService::abilitiesFor()` has read `role_abilities` off the config since it was
+ * written — and the column was never created, so it answered null on every register and the
+ * override had never once applied.
+ *
+ * Off by default, and switching it off restores `null` rather than `{}`: null means "use the venue
+ * defaults", an empty object means "this role gets nothing". Collapsing those two would make
+ * revoking every ability from a role silently give them all back.
+ */
+function AbilityOverride({
+    form,
+    options,
+}: {
+    form: ReturnType<typeof useForm<ConfigForm>>;
+    options: PosConfigOptions;
+}): JSX.Element {
+    const t = useT();
+    const defaults = options.ability_defaults;
+    const override = form.data.role_abilities;
+
+    const everyAbility = useMemo(
+        () => [...new Set(Object.values(defaults).flat())].sort(),
+        [defaults],
+    );
+
+    const toggle = (role: string, ability: string): void => {
+        const current = override?.[role] ?? defaults[role] ?? [];
+        const next = current.includes(ability)
+            ? current.filter((a) => a !== ability)
+            : [...current, ability];
+
+        form.setData('role_abilities', {
+            ...(override ?? defaults),
+            [role]: next,
+        });
+    };
+
+    return (
+        <Card>
+            <CardHeader
+                title={t('config.abilityOverride')}
+                description={t('config.abilityOverrideHint')}
+                actions={
+                    <ToggleField
+                        label={t('config.abilityOverrideOn')}
+                        checked={override !== null}
+                        onChange={(on) => form.setData('role_abilities', on ? { ...defaults } : null)}
+                    />
+                }
+            />
+            {override === null ? null : (
+                <CardBody className="overflow-x-auto p-0">
+                    <table className="w-full border-collapse text-sm">
+                        <caption className="sr-only">{t('config.abilityOverride')}</caption>
+                        <thead className="bg-slate-50">
+                            <tr>
+                                <th scope="col" className="px-4 py-2 text-start text-xs uppercase text-slate-600">
+                                    {t('employee.ability')}
+                                </th>
+                                {Object.keys(defaults).map((role) => (
+                                    <th key={role} scope="col" className="px-4 py-2 text-xs uppercase text-slate-600">
+                                        {role}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {everyAbility.map((ability) => (
+                                <tr key={ability} className="border-t border-slate-100">
+                                    <th scope="row" className="px-4 py-2 text-start font-normal text-slate-700">
+                                        {ability}
+                                    </th>
+                                    {Object.keys(defaults).map((role) => (
+                                        <td key={role} className="px-4 py-2 text-center">
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-slate-300"
+                                                aria-label={`${role} · ${ability}`}
+                                                checked={(override[role] ?? []).includes(ability)}
+                                                onChange={() => toggle(role, ability)}
+                                            />
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </CardBody>
+            )}
+        </Card>
     );
 }
 

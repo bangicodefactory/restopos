@@ -165,7 +165,29 @@ final readonly class AuditRecorder
             return (bool) $old === (bool) $new;
         }
 
+        // An array-cast column — `role_abilities` is the first one reachable from a settings save
+        // (BAN-451). `(string)` on an array is a fatal, the same way it was on a BackedEnum before
+        // `tax_display` became writable. Compared as JSON rather than with `==` so that reordering
+        // the keys of an override does not read as a settings change and fill the trail with rows
+        // recording that nothing happened.
+        if (is_array($old) || is_array($new)) {
+            return json_encode(self::sorted($old)) === json_encode(self::sorted($new));
+        }
+
         return (string) ($old ?? '') === (string) ($new ?? '');
+    }
+
+    /** Recursively key-sorted, so an array differs only when its *content* differs. */
+    private static function sorted(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        $sorted = array_map(self::sorted(...), $value);
+        ksort($sorted);
+
+        return $sorted;
     }
 
     /**

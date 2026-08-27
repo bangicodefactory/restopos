@@ -114,7 +114,9 @@ export const routes = {
 
     employees: {
         index: (): string => '/employees',
+        store: (): string => '/employees',
         update: (id: number): string => `/employees/${id}`,
+        destroy: (id: number): string => `/employees/${id}`,
     },
 
     floors: {

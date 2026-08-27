@@ -348,6 +348,16 @@ return new class extends Migration
             $table->foreignId('sms_template_id')->nullable()->constrained('notification_templates')->nullOnDelete();
             $table->foreignId('email_receipt_template_id')->nullable()->constrained('notification_templates')->nullOnDelete();
             $table->boolean('order_edit_tracking')->default(false);
+            // Per-register ability overrides, keyed by employee role (BOF-124, BAN-451).
+            //
+            // `EmployeeAuthService::abilitiesFor()` has read this since it was written — and the
+            // column was never created, so `getAttribute('role_abilities')` answered null on every
+            // register and the override has never once applied. `packages/domain/src/types.ts`
+            // declares it too, so the client has been typed for a field the wire never carried.
+            //
+            // Null means "use the defaults in config/pos.php", which is not the same as an empty
+            // object: `{}` is a deliberate override granting nothing.
+            $table->json('role_abilities')->nullable();
             $table->unsignedInteger('limited_product_count')->default(5000);
             $table->unsignedInteger('limited_customer_count')->default(100);
             $table->timestamps();
