@@ -7,6 +7,7 @@ namespace Tests\Feature\Backoffice\EmployeeCrud;
 use App\Enums\EmployeeRole;
 use App\Models\Identity\Employee;
 use App\Models\Pos\PosConfig;
+use App\Models\User;
 use App\Services\Identity\EmployeeAuthService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -221,6 +222,45 @@ it('treats an empty override as deliberate rather than as absent', function (): 
     $stored = PosConfig::query()->whereKey($this->fx->config->getKey())->value('role_abilities');
 
     expect($stored)->toBe(['cashier' => []])->not->toBeNull();
+});
+
+it('gives a role nothing when the override says nothing, rather than the defaults', function (): void {
+    // The case that makes null and an empty list different, and the only one where it bites. A
+    // sabotage collapsing the two passed clean until this existed: the storage test covered the
+    // empty list and nothing asked what the till then did with it.
+    //
+    // `abilitiesFor` uses `??`, so a present-but-empty list wins over the defaults. `?:` would treat
+    // it as absent and hand back every default ability — revoking everything would grant everything.
+    test()->patch("/pos-configs/{$this->fx->config->uuid}", [
+        'role_abilities' => ['cashier' => []],
+    ])->assertRedirect();
+
+    $abilities = app(EmployeeAuthService::class)
+        ->abilitiesFor(EmployeeRole::Cashier, $this->fx->config->fresh());
+
+    expect($abilities)->toBe([]);
+});
+
+it('scopes PIN uniqueness per venue even for a super-admin', function (): void {
+    // `Employee::query()` carries CompanyScope, which already hides another venue's staff — so the
+    // explicit company filter in the rule looks redundant and a sabotage removing it passed clean.
+    // It is not redundant: the scope steps aside for a super-admin, and without the filter a
+    // platform operator hiring into one venue would be refused a PIN because an unrelated
+    // restaurant happens to use it.
+    // Through `update`, not `store`: a super-admin belongs to no company, so `ActingCompany::id()`
+    // answers UNRESTRICTED and hiring is refused outright — there is no venue to hire into. Editing
+    // an existing record is the path where they do reach this rule, because the record names its own
+    // company.
+    $this->actingAs(User::factory()->create(['is_super_admin' => true]));
+
+    DB::table('employees')->where('id', $this->other->cashier->getKey())
+        ->update(['pin_hash' => hash('sha256', '4817')]);
+
+    $ours = $this->fx->cashier->getKey();
+
+    test()->patch("/employees/{$ours}", ['pin' => '4817'])->assertSessionHasNoErrors();
+
+    expect(Employee::query()->whereKey($ours)->value('pin_hash'))->toBe(hash('sha256', '4817'));
 });
 
 it('reaches the till, which is the only place an ability means anything', function (): void {
