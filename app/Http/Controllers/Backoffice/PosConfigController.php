@@ -10,6 +10,7 @@ use App\Enums\DeviceType;
 use App\Enums\PaymentMethodType;
 use App\Enums\SessionState;
 use App\Enums\SpecialKind;
+use App\Http\Controllers\Backoffice\Concerns\DetectsRealChanges;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Backoffice\CreatePosConfigRequest;
 use App\Http\Requests\Backoffice\PosConfigRequest;
@@ -51,6 +52,8 @@ use Inertia\Response;
  */
 final class PosConfigController extends Controller
 {
+    use DetectsRealChanges;
+
     /**
      * The pivots a duplicate carries over.
      *
@@ -232,6 +235,10 @@ final class PosConfigController extends Controller
         return Inertia::render('PosConfigs/Edit', [
             'config' => $config->attributesToArray() + [
                 'access_token' => (string) $config->access_token,
+                // So the editor can lock the four frozen fields with a reason rather than letting
+                // the operator change them, press save, and be refused (BAN-469). A greyed control
+                // that says why is the whole convention on this screen.
+                'has_open_session' => $this->hasOpenSession($config),
                 'payment_method_ids' => $config->paymentMethods->pluck('id')->all(),
                 'pricelist_ids' => $config->pricelists->pluck('id')->all(),
                 'fiscal_position_ids' => $config->fiscalPositions->pluck('id')->all(),
@@ -344,6 +351,8 @@ final class PosConfigController extends Controller
             $this->assertCashMethodsUnshared($config, array_map(intval(...), (array) $data['payment_method_ids']));
         }
 
+        $this->assertNotFrozen($config, $data);
+
         // BOF-039 — the notes a register offers are frozen while it has a session open.
         //
         // The list is not decoration: a predefined note is the wording the kitchen reads and, for
@@ -451,6 +460,62 @@ final class PosConfigController extends Controller
         $config->bumpRevision();
 
         return back()->with('success', 'Register settings saved.');
+    }
+
+    /**
+     * The fields Odoo calls `_get_forbidden_change_fields` (BOF-030, BAN-469).
+     *
+     * Each one corrupts an open session rather than merely inconveniencing it, and probed on master
+     * all four went through with a 302 while a session was running:
+     *
+     *  - **`active`** — archiving strands the session. `destroy()` refuses this, and BAN-466 made
+     *    `active` writable through `update`, so the guard had a door beside it.
+     *  - **`is_restaurant`** — turns off floors, tables and course firing on a register that has
+     *    seated orders. The floor screen disappears with bills still open on it.
+     *  - **`payment_method_ids`** — an open order tendered against a method that has just been
+     *    removed cannot be settled, and the session's expected-cash figure was computed from a set
+     *    of methods that no longer matches the one it will be reconciled against.
+     *  - **`floor_ids`** — seated orders point at tables this register no longer serves, so the
+     *    bills exist and no screen can reach them.
+     *
+     * **Keyed off what actually moves, not off what the request mentions.** The settings screen is
+     * one `useForm` posting every field on every save, so a presence check would refuse a save whose
+     * only edit was a receipt footer — which is the mistake `DetectsRealChanges` was written for
+     * after the same thing made the `sequence` exemption dead on payment methods (review of #85).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertNotFrozen(PosConfig $config, array $data): void
+    {
+        $moved = $this->realChanges($config, $data, ['active', 'is_restaurant']);
+
+        foreach (['payment_method_ids' => 'paymentMethods', 'floor_ids' => 'floors'] as $key => $relation) {
+            if (array_key_exists($key, $data) && $this->selectionMoves($config, $relation, (array) $data[$key])) {
+                $moved[] = $key;
+            }
+        }
+
+        if ($moved === [] || ! $this->hasOpenSession($config)) {
+            return;
+        }
+
+        // Named individually rather than as one blanket message: an operator who changed four
+        // settings and had the save refused needs to know which one to put back, and a message
+        // saying "some of these are locked" makes them undo all four.
+        $reasons = [
+            'active' => 'archiving it would strand the session that is running on it',
+            'is_restaurant' => 'turning restaurant mode off takes away the floor screen while bills are open on it',
+            'payment_method_ids' => 'an order already tendered against a method removed now could not be settled, and the drawer would be counted against a different set of methods than it was opened with',
+            'floor_ids' => 'seated orders would point at tables this register no longer serves, so the bills would exist with no screen able to reach them',
+        ];
+
+        throw ValidationException::withMessages(
+            array_map(
+                static fn (string $reason): string => 'This register has a session open — '.$reason
+                    .'. It can be changed once the session closes.',
+                array_intersect_key($reasons, array_flip($moved)),
+            ),
+        );
     }
 
     /**

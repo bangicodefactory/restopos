@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 138
+  manual_debt: 137
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -348,10 +348,11 @@ features:
   REG-328: { status: planned, surface: user, manual: todo }
 
   # Register settings (BOF-030 … BOF-079) — user
-  BOF-030: { status: shipped, surface: user, manual: todo }
   # The register settings screen. BAN-466 widened the write surface from 29 keys to the whole
   # screen; before it, most of these controls rendered locked because Laravel drops what a rule
   # set omits, so the switch flipped, saved "successfully" and came back unchanged.
+  # The settings shell, including the session-open lock on the fields Odoo protects (BAN-469).
+  BOF-030: { status: shipped, surface: user, manual: back-office/register-settings.md#four-settings-lock-while-a-session-is-open }
   BOF-031: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-032: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-033: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }

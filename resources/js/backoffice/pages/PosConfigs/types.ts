@@ -33,6 +33,14 @@ export type PosConfigRecord = {
     company_id: number;
     name: string;
     access_token: string;
+    /**
+     * Whether a session is running on this register right now.
+     *
+     * Four settings are frozen while one is (BOF-030): archiving, restaurant mode, the payment
+     * methods and the floors. Each corrupts the open session rather than merely inconveniencing it,
+     * so they are locked with the reason rather than refused after the operator presses save.
+     */
+    has_open_session: boolean;
     currency_id: number;
     cash_rounding_id: number | null;
     use_cash_rounding: boolean;
