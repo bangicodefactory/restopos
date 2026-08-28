@@ -319,8 +319,24 @@ final readonly class SequenceService
         return $number;
     }
 
+    /**
+     * The prefix order and session numbers carry.
+     *
+     * The register's own setting when it has one, and otherwise derived from its name as it always
+     * was (BOF-045, BAN-488). Deriving it from the name meant renaming a register renumbered every
+     * document after the rename, which is exactly what a sequence must not do — and a venue whose
+     * accountant expects `T1/` on till one could not say so.
+     *
+     * Existing rows are null and keep the derived value, so nothing changes on migration.
+     */
     private function prefixFor(PosConfig $config): string
     {
+        $chosen = preg_replace('/[^A-Za-z0-9]/', '', (string) $config->sequence_prefix) ?? '';
+
+        if ($chosen !== '') {
+            return substr($chosen, 0, 8);
+        }
+
         $name = preg_replace('/[^A-Za-z0-9]/', '', (string) $config->name) ?? '';
 
         return $name === '' ? 'POS' : substr($name, 0, 8);

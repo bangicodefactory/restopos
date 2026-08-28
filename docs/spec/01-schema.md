@@ -1123,6 +1123,7 @@ onboarding scenario loaders.
 | uuid | char(36) **unique** | stable id across restores |
 | company_id | FK→companies.id, cascade | |
 | name | string(96), index | |
+| sequence_prefix | string(8) nullable | what order and session numbers are prefixed with (BOF-045). Null derives it from `name`, which is what `SequenceService::prefixFor()` always did — and why renaming a register used to renumber every document after the rename. Letters and digits only: it is glued onto the number with a slash. |
 | access_token | char(32) **unique** | public capability token: self-order URL, customer display, **broadcast channel name** |
 | currency_id | FK→currencies.id, restrict | register currency; pricelists/payment methods must match |
 | cash_rounding_id | FK→cash_roundings.id nullable, restrict | |

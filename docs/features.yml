@@ -374,7 +374,7 @@ features:
   # it at all: ship_later and picking_policy are documented as explicitly dropped, so there is
   # nothing to expose and a settings group over nothing would be worse than the absence.
   BOF-043: { status: partial, surface: user, manual: back-office/barcodes.md#barcodes }
-  BOF-045: { status: planned, surface: user, manual: todo }   # sequences & numbering — BAN-488
+  BOF-045: { status: shipped, surface: user, manual: back-office/register-settings.md#numbering }
   BOF-044: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-039: { status: shipped, surface: user, manual: back-office/register-preparation.md#notes-the-register-offers }
 

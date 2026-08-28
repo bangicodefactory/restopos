@@ -24,6 +24,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosNote;
 use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
+use App\Models\Pos\Sequence;
 use App\Models\Pricing\CashRounding;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\FiscalPosition;
@@ -285,6 +286,29 @@ final class PosConfigController extends Controller
                 'notes' => PosNote::query()->orderBy('sequence')->get(['id', 'name', 'note_scope'])->all(),
                 'bills' => PosBill::query()->orderBy('currency_id')->orderBy('sequence')
                     ->get(['id', 'name', 'value', 'currency_id'])->all(),
+                /*
+                 * The numbers this register has already issued (BOF-045, BAN-488).
+                 *
+                 * Read-only, and that is the point rather than a limitation: these are legally
+                 * sequential document numbers allocated under a row lock, and a settings screen that
+                 * could set `next_value` would let someone reissue a receipt number that has already
+                 * been given to a customer. Showing them answers the question an audit actually asks
+                 * — "what number comes next, and where did this one come from" — without offering a
+                 * way to make the answer wrong.
+                 */
+                'sequences' => Sequence::query()
+                    ->where('pos_config_id', $config->getKey())
+                    ->orderBy('purpose')
+                    ->orderBy('period_key')
+                    ->get(['id', 'purpose', 'period_key', 'prefix', 'padding', 'next_value'])
+                    ->map(static fn (Sequence $s): array => [
+                        'id' => (int) $s->getKey(),
+                        'purpose' => $s->purpose instanceof \BackedEnum ? (string) $s->purpose->value : (string) $s->purpose,
+                        'period_key' => $s->period_key,
+                        'prefix' => $s->prefix,
+                        'padding' => (int) $s->padding,
+                        'next_value' => (int) $s->next_value,
+                    ])->values()->all(),
             ]),
             'devices' => Inertia::defer(fn (): array => $config->devices()->orderBy('device_identifier')->get()
                 ->map(static fn ($d): array => [

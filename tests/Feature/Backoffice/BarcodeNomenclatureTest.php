@@ -246,3 +246,111 @@ it('does not let a rule be moved between nomenclatures by URL', function (): voi
 
     expect(BarcodeRule::query()->whereKey($rule->getKey())->exists())->toBeTrue();
 });
+
+// ───────────────────────────────────────── the back office's half of the contract
+
+it('ships a rule authored here in the shape the parser reads', function (): void {
+    // The join the ticket names: a rule an operator authors must reach the till in a shape
+    // `packages/domain/src/barcode` understands. The parser lives once and both the register and the
+    // back-office rule tester call it, so what has never been asserted is not the parsing — it is
+    // that the *fields* survive the trip.
+    //
+    // `tests/fixtures/barcode/nomenclature-parity.json` holds both halves. This authors its rules
+    // through the real endpoint and asserts the bootstrap payload matches field for field;
+    // `packages/domain/test/barcode/nomenclature.parity.test.ts` asserts what the parser then makes
+    // of them. Either side drifting fails one of the two.
+    $fixture = json_decode(
+        (string) file_get_contents(base_path('tests/fixtures/barcode/nomenclature-parity.json')),
+        true,
+    );
+
+    expect($fixture['rules'])->not->toBeEmpty('the shared fixture corpus must be readable');
+
+    addNomenclature([
+        'name' => $fixture['nomenclature']['name'],
+        'upc_ean_conv' => $fixture['nomenclature']['upc_ean_conv'],
+        'is_gs1' => $fixture['nomenclature']['is_gs1'],
+    ])->assertSessionHasNoErrors();
+
+    $nomenclature = BarcodeNomenclature::query()
+        ->where('name', $fixture['nomenclature']['name'])
+        ->firstOrFail();
+
+    foreach ($fixture['rules'] as $rule) {
+        test()->post("/barcode-nomenclatures/{$nomenclature->getKey()}/rules", [
+            'name' => $rule['name'],
+            'rule_type' => $rule['rule_type'],
+            'pattern' => $rule['pattern'],
+            'encoding' => $rule['encoding'],
+            'alias' => $rule['alias'],
+            'sequence' => $rule['sequence'],
+        ])->assertSessionHasNoErrors();
+    }
+
+    // Authoring is not selecting. Only the nomenclature a company or a register points at is
+    // shipped, so a rule set left unattached reaches no till at all — see the test below.
+    $this->fx->config->forceFill(['fallback_barcode_nomenclature_id' => $nomenclature->getKey()])->save();
+
+    $payload = test()->withHeaders($this->fx->headers())
+        ->getJson('/api/pos/bootstrap')->assertOk()->json();
+
+    $shipped = collect($payload['data']['barcode_rules'] ?? [])
+        ->where('barcode_nomenclature_id', $nomenclature->getKey())
+        ->sortBy('sequence')
+        ->values();
+
+    expect($shipped)->toHaveCount(count($fixture['rules']));
+
+    // Both sides in resolution order. The fixture lists its rules in the order they read best; the
+    // parser walks them by `sequence`, and so does the assertion — comparing declaration order
+    // against resolution order would fail on a fixture that is perfectly correct.
+    $expectedRules = collect($fixture['rules'])->sortBy('sequence')->values();
+
+    foreach ($expectedRules as $i => $expected) {
+        // Every field the parser reads. `id` and `barcode_nomenclature_id` are the venue's own and
+        // are deliberately not compared — the fixture numbers them 1..3 for the TypeScript side,
+        // and asserting them here would be asserting the autoincrement.
+        foreach (['name', 'rule_type', 'pattern', 'encoding', 'alias', 'sequence'] as $field) {
+            expect($shipped[$i][$field] ?? null)->toBe(
+                $expected[$field],
+                "rule {$i} field {$field} must reach the till unchanged",
+            );
+        }
+    }
+});
+
+it('ships the nomenclature fields the parser gates on', function (): void {
+    // `upc_ean_conv` decides which alternative codes are worth trying and `is_gs1` decides whether a
+    // scan is read as a GS1 composite before any rule is consulted. A rule set that arrives without
+    // them parses differently from the one the operator authored.
+    addNomenclature(['name' => 'Rayon pesée', 'upc_ean_conv' => 'always', 'is_gs1' => false])
+        ->assertSessionHasNoErrors();
+
+    $this->fx->config->forceFill([
+        'fallback_barcode_nomenclature_id' => BarcodeNomenclature::query()
+            ->where('name', 'Rayon pesée')->value('id'),
+    ])->save();
+
+    $payload = test()->withHeaders($this->fx->headers())
+        ->getJson('/api/pos/bootstrap')->assertOk()->json();
+
+    $shipped = collect($payload['data']['barcode_nomenclatures'] ?? [])
+        ->firstWhere('name', 'Rayon pesée');
+
+    expect($shipped)->not->toBeNull()
+        ->and($shipped['upc_ean_conv'])->toBe('always')
+        ->and((bool) $shipped['is_gs1'])->toBeFalse();
+});
+
+it('does not ship a nomenclature no register was pointed at', function (): void {
+    // The other half, and the trap: authoring a rule set is not selecting one. A venue that writes
+    // its weight rules and never attaches them scans exactly as it did before, with a screen full of
+    // correct-looking rules to explain why it should have worked.
+    addNomenclature(['name' => 'Jamais choisie'])->assertSessionHasNoErrors();
+
+    $payload = test()->withHeaders($this->fx->headers())
+        ->getJson('/api/pos/bootstrap')->assertOk()->json();
+
+    expect(collect($payload['data']['barcode_nomenclatures'] ?? [])->pluck('name'))
+        ->not->toContain('Jamais choisie');
+});

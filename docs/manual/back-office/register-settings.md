@@ -5,6 +5,7 @@ features:
   - BOF-006
   - BOF-030
   - BOF-040
+  - BOF-045
   - BOF-031
   - BOF-032
   - BOF-033
@@ -161,6 +162,32 @@ in this screen — would quietly point every till on this register somewhere els
 appear to work.
 
 **Customer display background.** The picture shown between sales on the screen facing the customer.
+
+## Numbering
+
+Every order, session and receipt this register issues carries a number, and the **Numbering** tab is
+where you set what those numbers start with and check what has already been issued.
+
+### The prefix
+
+By default the prefix is worked out from the register's **name** — strip the spaces and accents, take
+the first eight characters. "Bar à vins" numbers its orders `Bavins/00412`.
+
+That has one bad consequence: **renaming the register changes the numbering**, and the documents
+issued before the rename keep the old prefix. Set a prefix explicitly and it stops moving. Letters and
+digits only, up to eight — a slash or a dash would read as a second field in the number.
+
+Leave the box empty to go back to deriving it from the name. The hint under the box tells you what
+that would be.
+
+### Numbers already issued
+
+Underneath, the register lists each kind of document it has issued, the next number in line, and an
+example of what that number will look like.
+
+**This list is read-only, deliberately.** These numbers are allocated one at a time and must never
+repeat: a receipt number a customer already holds cannot be given to a second sale. If a counter
+looks wrong, it is a question for whoever keeps your books, not a field to correct.
 
 ## Track who changes an order
 

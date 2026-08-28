@@ -245,6 +245,17 @@ return new class extends Migration
             $table->char('uuid', 36)->unique();
             $table->foreignId('company_id')->constrained()->cascadeOnDelete();
             $table->string('name', 96)->index();
+            /*
+             * What order and session numbers are prefixed with (BOF-045, BAN-488).
+             *
+             * `SequenceService::prefixFor()` derived this from the register's *name* — strip the
+             * non-alphanumerics, take eight characters — so "Bar à vins" numbered orders `Bavins/00412`
+             * and renaming the register silently renumbered everything after it. A venue whose
+             * accountant expects one prefix per till had no way to say so.
+             *
+             * Null keeps the derived behaviour, which is what every existing register does.
+             */
+            $table->string('sequence_prefix', 8)->nullable();
             $table->char('access_token', 32)->unique();
             $table->foreignId('currency_id')->constrained()->restrictOnDelete();
             $table->foreignId('cash_rounding_id')->nullable()->constrained('cash_roundings')->restrictOnDelete();
