@@ -1,25 +1,27 @@
 /**
  * `Pricelists/Edit` — `GET /pricelists/{pricelist}/edit` (BOF-090).
  *
- * The header (name, sequence, currency, active) is editable; the rules are not, because
- * `PATCH /pricelists/{pricelist}` validates only those four keys and the contract exposes no
- * write for `pricelist_items`. Rather than pretend, the rule editor is a **read-only explorer**
- * built around the thing operators actually need: understanding *which* rule wins.
+ * The header (name, sequence, currency, active) is editable, and since BAN-401 so are the rules:
+ * `POST/PATCH/DELETE /pricelists/{pricelist}/items` exist, so happy hour or a category markdown can
+ * be set up here instead of in a shell. Before that this screen was a read-only explorer, because
+ * the contract exposed no write for `pricelist_items` at all.
  *
- * So the rules are ordered by real resolution order — applied-on specificity first
+ * What the explorer got right is kept: the thing operators actually need from this table is
+ * understanding *which* rule wins. So the rules are ordered by real resolution order — applied-on specificity first
  * (variant → product → category → global), sequence as the tie-break — and each row shows its
  * compute mode, its base and whether its date window is currently in force. "Why is this price
  * not applying" is answerable from this screen without opening a shell.
  */
 
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
+import { Button } from '@shared/ui';
 import { useMemo, useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
 import { NumberField, SaveBar, TextField, ToggleField, useDirtyGuard } from '../../components/form';
-import { FormSection } from '../../components/form/fields';
+import { DateField, FormSection, MoneyField, NumberField as QtyField, SelectField } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
-import { Badge, Card, CardBody, CardHeader, Notice } from '../../components/ui/primitives';
+import { Badge, Card, CardBody, CardHeader } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
 import { date } from '../../lib/format';
 import { EUR, money, percent, quantity } from '../../lib/money';
@@ -35,7 +37,12 @@ import {
     type PricelistItemRecord,
 } from './types';
 
-export default function PricelistEdit({ pricelist, items }: PricelistEditProps): JSX.Element {
+export default function PricelistEdit({
+    pricelist,
+    items,
+    products,
+    categories,
+}: PricelistEditProps): JSX.Element {
     const t = useT();
     const [search, setSearch] = useState('');
 
@@ -115,6 +122,24 @@ export default function PricelistEdit({ pricelist, items }: PricelistEditProps):
             cell: (row) => <span className="tabular-nums">{quantity(row.min_quantity)}</span>,
             sortValue: (row) => Number(row.min_quantity),
             exportValue: (row) => row.min_quantity,
+        },
+        {
+            id: 'remove',
+            header: '',
+            exportValue: () => '',
+            cell: (row) => (
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                        router.delete(routes.pricelistItems.destroy(pricelist.id, row.id), {
+                            preserveScroll: true,
+                        })
+                    }
+                >
+                    {t('action.delete')}
+                </Button>
+            ),
         },
         {
             id: 'window',
@@ -200,7 +225,12 @@ export default function PricelistEdit({ pricelist, items }: PricelistEditProps):
                 </Card>
 
                 <div className="space-y-3">
-                    <Notice tone="warn">{t('pricelist.itemsReadOnly')}</Notice>
+                    {/*
+                      * The rules were a read-only explorer and there was no endpoint behind them —
+                      * "change a price rule" is the most common back-office task in a restaurant and
+                      * it could not be done here at all (BAN-401).
+                      */}
+                    <AddRule pricelist={pricelist} products={products} categories={categories} />
 
                     <DataTable
                         columns={columns}
@@ -237,4 +267,170 @@ function computeSummary(item: PricelistItemRecord): string {
     if (Number(item.price_min_margin) !== 0) parts.push(`marge min ${money(item.price_min_margin, EUR)}`);
     if (Number(item.price_max_margin) !== 0) parts.push(`marge max ${money(item.price_max_margin, EUR)}`);
     return parts.join(' ');
+}
+
+/**
+ * Adding one price rule (BOF-037, BAN-401).
+ *
+ * The two selects at the top are the ones that matter, and they are separate questions: **what the
+ * rule covers** and **how the price is worked out**. The fields below each follow from its choice
+ * rather than all being shown at once — a rule form with twenty inputs visible is a form nobody
+ * fills in correctly.
+ *
+ * The empty "computed from" case is the one the server refuses loudest, because a formula rule with
+ * no base saves cleanly and prices from the wrong thing.
+ */
+function AddRule({
+    pricelist,
+    products,
+    categories,
+}: {
+    pricelist: PricelistEditProps['pricelist'];
+    products: PricelistEditProps['products'];
+    categories: PricelistEditProps['categories'];
+}): JSX.Element {
+    const t = useT();
+    const [open, setOpen] = useState(false);
+
+    const form = useForm<{
+        applied_on: string;
+        product_id: number | null;
+        pos_category_id: number | null;
+        compute_price: string;
+        fixed_price: string;
+        percent_price: string;
+        min_quantity: number | null;
+        date_start: string;
+        date_end: string;
+    }>({
+        applied_on: 'global',
+        product_id: null,
+        pos_category_id: null,
+        compute_price: 'percentage',
+        fixed_price: '0',
+        percent_price: '10',
+        min_quantity: 1,
+        date_start: '',
+        date_end: '',
+    });
+
+    if (!open) {
+        return (
+            <Button variant="ghost" onClick={() => setOpen(true)}>
+                {t('pricelist.addRule')}
+            </Button>
+        );
+    }
+
+    return (
+        <Card>
+            <CardHeader title={t('pricelist.addRule')} description={t('pricelist.addRuleHint')} />
+            <CardBody className="space-y-4">
+                <FormSection>
+                    <SelectField
+                        label={t('pricelist.appliesTo')}
+                        value={form.data.applied_on}
+                        error={form.errors.applied_on}
+                        options={[
+                            { value: 'global', label: t('pricelist.scopeGlobal') },
+                            { value: 'pos_category', label: t('pricelist.scopeCategory') },
+                            { value: 'product', label: t('pricelist.scopeProduct') },
+                        ]}
+                        onChange={(value) => form.setData('applied_on', value)}
+                    />
+
+                    {form.data.applied_on === 'product' ? (
+                        <SelectField
+                            label={t('pricelist.product')}
+                            value={form.data.product_id === null ? '' : String(form.data.product_id)}
+                            error={form.errors.product_id}
+                            options={products.map((p) => ({ value: String(p.id), label: p.name }))}
+                            onChange={(value) => form.setData('product_id', value === '' ? null : Number(value))}
+                        />
+                    ) : null}
+
+                    {form.data.applied_on === 'pos_category' ? (
+                        <SelectField
+                            label={t('pricelist.category')}
+                            value={form.data.pos_category_id === null ? '' : String(form.data.pos_category_id)}
+                            error={form.errors.pos_category_id}
+                            options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+                            onChange={(value) =>
+                                form.setData('pos_category_id', value === '' ? null : Number(value))
+                            }
+                        />
+                    ) : null}
+
+                    <SelectField
+                        label={t('pricelist.howPriced')}
+                        value={form.data.compute_price}
+                        error={form.errors.compute_price}
+                        options={[
+                            { value: 'percentage', label: t('pricelist.computePercentage') },
+                            { value: 'fixed', label: t('pricelist.computeFixed') },
+                        ]}
+                        onChange={(value) => form.setData('compute_price', value)}
+                    />
+
+                    {form.data.compute_price === 'percentage' ? (
+                        <TextField
+                            label={t('pricelist.percent')}
+                            value={form.data.percent_price}
+                            error={form.errors.percent_price}
+                            onChange={(value) => form.setData('percent_price', value)}
+                        />
+                    ) : (
+                        <MoneyField
+                            label={t('pricelist.fixedPrice')}
+                            value={form.data.fixed_price}
+                            error={form.errors.fixed_price}
+                            onChange={(value) => form.setData('fixed_price', value)}
+                        />
+                    )}
+                </FormSection>
+
+                <FormSection title={t('pricelist.whenItApplies')} description={t('pricelist.whenItAppliesHint')}>
+                    <QtyField
+                        label={t('pricelist.minQty')}
+                        value={form.data.min_quantity}
+                        error={form.errors.min_quantity}
+                        min={0}
+                        onChange={(value) => form.setData('min_quantity', value)}
+                    />
+                    <DateField
+                        label={t('pricelist.from')}
+                        value={form.data.date_start}
+                        error={form.errors.date_start}
+                        onChange={(value) => form.setData('date_start', value)}
+                    />
+                    <DateField
+                        label={t('pricelist.until')}
+                        value={form.data.date_end}
+                        error={form.errors.date_end}
+                        onChange={(value) => form.setData('date_end', value)}
+                    />
+                </FormSection>
+
+                <div className="flex gap-2">
+                    <Button
+                        loading={form.processing}
+                        onClick={() =>
+                            form.post(routes.pricelistItems.store(pricelist.id), {
+                                preserveScroll: true,
+                                onSuccess: () => {
+                                    form.reset();
+                                    setOpen(false);
+                                },
+                            })
+                        }
+                    >
+                        {t('action.save')}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setOpen(false)}>
+                        {t('action.cancel')}
+                    </Button>
+                </div>
+            </CardBody>
+        </Card>
+    );
 }
