@@ -264,6 +264,67 @@ it('sets the kiosk brand image, which needed the upload pipeline first', functio
     expect((int) storedSelfOrder('self_ordering_brand_media_id'))->toBe($id);
 });
 
+it('refuses a kiosk that expects to be paid at the end', function (): void {
+    // SLF-005. Odoo forces these combinations and the reason is physical: "pay at the end" means
+    // somebody comes back to the customer, and a kiosk customer walks away the moment they have
+    // ordered. Accepting it produces a till waiting for a settlement nobody will ask for, and
+    // orders that stay open until somebody notices at close.
+    saveSelfOrder([
+        'self_ordering_mode' => 'kiosk',
+        'self_ordering_pay_after' => 'meal',
+    ])->assertSessionHasErrors('self_ordering_pay_after');
+});
+
+it('refuses counter service that expects to be paid at the end', function (): void {
+    // Same reasoning, different geometry: a counter customer is standing at the counter, so a tab
+    // has nowhere to be settled.
+    saveSelfOrder([
+        'self_ordering_mode' => 'mobile',
+        'self_ordering_service_mode' => 'counter',
+        'self_ordering_pay_after' => 'meal',
+    ])->assertSessionHasErrors('self_ordering_pay_after');
+});
+
+it('refuses pay-at-the-end on a register that is not doing table service at all', function (): void {
+    PosConfig::query()->whereKey($this->fx->config->getKey())->update(['is_restaurant' => false]);
+
+    saveSelfOrder([
+        'self_ordering_mode' => 'mobile',
+        'self_ordering_service_mode' => 'table',
+        'self_ordering_pay_after' => 'meal',
+    ])->assertSessionHasErrors('self_ordering_pay_after');
+});
+
+it('accepts pay-at-the-end where somebody can actually come back to the table', function (): void {
+    // The negative half. A rule that refuses every combination is not a rule.
+    PosConfig::query()->whereKey($this->fx->config->getKey())->update(['is_restaurant' => true]);
+
+    saveSelfOrder([
+        'self_ordering_mode' => 'mobile',
+        'self_ordering_service_mode' => 'table',
+        'self_ordering_pay_after' => 'meal',
+    ])->assertSessionHasNoErrors();
+
+    expect((string) storedSelfOrder('self_ordering_pay_after')->value)->toBe('meal');
+});
+
+it('judges the triple being saved, not the one already stored', function (): void {
+    // This screen edits all three at once. Judging against the stored values would refuse a save
+    // that is coherent in itself — switching from kiosk to table service *and* to pay-at-the-end in
+    // one submit is exactly what an operator changing their service model does.
+    PosConfig::query()->whereKey($this->fx->config->getKey())->update([
+        'is_restaurant' => true,
+        'self_ordering_mode' => 'kiosk',
+        'self_ordering_pay_after' => 'each',
+    ]);
+
+    saveSelfOrder([
+        'self_ordering_mode' => 'mobile',
+        'self_ordering_service_mode' => 'table',
+        'self_ordering_pay_after' => 'meal',
+    ])->assertSessionHasNoErrors();
+});
+
 it('bumps the revision so the kiosk picks the change up', function (): void {
     $before = (int) storedSelfOrder('config_revision');
 
