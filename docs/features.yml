@@ -323,6 +323,8 @@ features:
   SLF-095: { status: shipped, surface: user, manual: todo }
   # Per-table QR generation (BAN-479). The page could not see the register's tables at all and asked
   # the operator to paste capability tokens into a textarea.
+  # The mode / service-mode / pay-after combinations Odoo forces (BAN-479 follow-up).
+  SLF-005: { status: shipped, surface: user, manual: back-office/self-order.md#choose-how-customers-pay }
   SLF-011: { status: shipped, surface: user, manual: back-office/self-order.md#print-the-qr-codes-for-your-tables }
   SLF-098: { status: shipped, surface: user, manual: back-office/self-order.md#branding }
 
