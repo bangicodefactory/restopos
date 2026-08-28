@@ -172,6 +172,17 @@ export const routes = {
         rotateToken: (configUuid: string): string => `/self-order/${configUuid}/rotate-token`,
     },
 
+    fiscalPositions: {
+        index: (): string => '/fiscal-positions',
+        store: (): string => '/fiscal-positions',
+        update: (id: number): string => `/fiscal-positions/${id}`,
+        destroy: (id: number): string => `/fiscal-positions/${id}`,
+    },
+    fiscalPositionMappings: {
+        store: (positionId: number): string => `/fiscal-positions/${positionId}/mappings`,
+        destroy: (positionId: number, mappingId: number): string =>
+            `/fiscal-positions/${positionId}/mappings/${mappingId}`,
+    },
     barcodeNomenclatures: {
         index: (): string => '/barcode-nomenclatures',
         store: (): string => '/barcode-nomenclatures',

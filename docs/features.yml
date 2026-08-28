@@ -358,7 +358,7 @@ features:
   BOF-033: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-034: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   BOF-035: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
-  BOF-036: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
+  BOF-036: { status: shipped, surface: user, manual: back-office/tax-positions.md#tax-positions }
   BOF-037: { status: shipped, surface: user, manual: back-office/register-settings.md#register-settings }
   # Partial: `auto_print_receipt`, `skip_receipt_screen` and `basic_receipt` are settable here, but
   # the ticket's "ticket QR" and "unique ticket code" are `receipt_ticket_url_display_mode` and

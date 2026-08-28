@@ -22,6 +22,7 @@ use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosNote;
 use App\Models\Pos\PosPrinter;
 use App\Models\Pos\PosSession;
+use App\Models\Pricing\FiscalPosition;
 use App\Models\Pricing\Pricelist;
 use App\Models\Pricing\PricelistItem;
 use App\Models\Pricing\Tax;
@@ -31,6 +32,7 @@ use App\Models\Restaurant\Table as RestaurantTable;
 use App\Models\Scopes\CompanyScope;
 use App\Policies\BarcodeNomenclaturePolicy;
 use App\Policies\EmployeePolicy;
+use App\Policies\FiscalPositionPolicy;
 use App\Policies\FloorPolicy;
 use App\Policies\MediaPolicy;
 use App\Policies\OrderPolicy;
@@ -203,6 +205,7 @@ final class PosServiceProvider extends ServiceProvider
         Gate::policy(PosDevice::class, PosDevicePolicy::class);
         Gate::policy(MediaFile::class, MediaPolicy::class);
         Gate::policy(BarcodeNomenclature::class, BarcodeNomenclaturePolicy::class);
+        Gate::policy(FiscalPosition::class, FiscalPositionPolicy::class);
     }
 
     private function registerRateLimiters(): void

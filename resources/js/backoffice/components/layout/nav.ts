@@ -69,6 +69,12 @@ export const NAV: NavGroup[] = [
                 href: routes.barcodeNomenclatures.index(),
                 match: startsWith('/barcode-nomenclatures'),
             },
+            {
+                key: 'fiscalPositions',
+                labelKey: 'nav.fiscalPositions',
+                href: routes.fiscalPositions.index(),
+                match: startsWith('/fiscal-positions'),
+            },
             { key: 'customers', labelKey: 'nav.customers', href: null, disabledReasonKey: 'nav.unavailable' },
         ],
     },

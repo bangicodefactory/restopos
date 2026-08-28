@@ -183,12 +183,21 @@ export type FiscalPositionRow = {
     sequence: number;
 };
 
+/**
+ * One tax-mapping row, named as the database names it.
+ *
+ * This type said `source_tax_id` / `dest_tax_id`; the columns are `tax_src_id` / `tax_dest_id`, and
+ * the bootstrap ships `attributesToArray()`. So every mapping arrived on the client as `{}` — both
+ * ids `undefined` — `FiscalPositionMapper` never matched a source, and **no fiscal position has
+ * ever rewritten a tax at the till**. The engine was right and tested the whole time; the wire into
+ * it was never connected (BAN-398).
+ */
 export type FiscalPositionTaxRow = {
     id: number;
     fiscal_position_id: number;
-    source_tax_id: number;
+    tax_src_id: number;
     /** `null` ⇒ the source tax is removed entirely. */
-    dest_tax_id: number | null;
+    tax_dest_id: number | null;
 };
 
 export type CashRoundingRow = {
