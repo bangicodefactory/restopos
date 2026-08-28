@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Backoffice\ComboController;
 use App\Http\Controllers\Backoffice\CustomerController;
 use App\Http\Controllers\Backoffice\AttributeController;
 use App\Http\Controllers\Backoffice\AttributeValueController;
@@ -200,6 +201,18 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
     Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
     Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
+    // Set menus and their courses (BOF-088, BAN-416).
+    Route::get('combos', [ComboController::class, 'index'])->name('combos.index');
+    Route::post('combos', [ComboController::class, 'store'])->name('combos.store');
+    Route::get('combos/{combo}/edit', [ComboController::class, 'edit'])->name('combos.edit');
+    Route::patch('combos/{combo}', [ComboController::class, 'update'])->name('combos.update');
+    Route::delete('combos/{combo}', [ComboController::class, 'destroy'])->name('combos.destroy');
+    Route::post('combos/{combo}/items', [ComboController::class, 'storeItem'])->name('combo-items.store');
+    Route::patch('combos/{combo}/items/{item}', [ComboController::class, 'updateItem'])->name('combo-items.update');
+    Route::delete('combos/{combo}/items/{item}', [ComboController::class, 'destroyItem'])->name('combo-items.destroy');
+    Route::post('combos/{combo}/menus', [ComboController::class, 'attachMenu'])->name('combo-menus.attach');
+    Route::delete('combos/{combo}/menus', [ComboController::class, 'detachMenu'])->name('combo-menus.detach');
 
     // The customer base (BOF-119, BAN-453). Model-bound by uuid — `Customer` uses `HasUuid`.
     Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');

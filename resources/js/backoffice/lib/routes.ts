@@ -56,6 +56,25 @@ export const routes = {
         destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
+    combos: {
+        index: (): string => '/combos',
+        store: (): string => '/combos',
+        edit: (id: number): string => `/combos/${id}/edit`,
+        update: (id: number): string => `/combos/${id}`,
+        destroy: (id: number): string => `/combos/${id}`,
+    },
+
+    comboItems: {
+        store: (comboId: number): string => `/combos/${comboId}/items`,
+        update: (comboId: number, id: number): string => `/combos/${comboId}/items/${id}`,
+        destroy: (comboId: number, id: number): string => `/combos/${comboId}/items/${id}`,
+    },
+
+    comboMenus: {
+        attach: (comboId: number): string => `/combos/${comboId}/menus`,
+        detach: (comboId: number): string => `/combos/${comboId}/menus`,
+    },
+
     customers: {
         index: (): string => '/customers',
         store: (): string => '/customers',
