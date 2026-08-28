@@ -8,6 +8,7 @@ use App\Models\Pos\PosConfig;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\Pricelist;
 use App\Models\Pricing\PricelistItem;
+use App\Services\Pos\PricingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -312,6 +313,9 @@ it('accepts exactly what the rule form posts', function (): void {
         'compute_price' => 'percentage',
         'fixed_price' => '0',
         'percent_price' => '10',
+        'min_quantity' => 1,
+        'date_start' => '',
+        'date_end' => '',
     ])->assertSessionHasNoErrors();
 
     expect(PricelistItem::query()->where('pricelist_id', $list->getKey())->count())->toBe(1);
@@ -328,4 +332,74 @@ it('refuses to remove a list a register defaults to', function (): void {
     test()->delete("/pricelists/{$list->getKey()}")->assertSessionHasErrors('pricelist');
 
     expect(Pricelist::query()->whereKey($list->getKey())->exists())->toBeTrue();
+});
+
+it('prices a till order with the rule that was just added', function (): void {
+    // The point of the whole screen. A rule that validates, saves and then does not reach
+    // `PricingService` is the same dead end as no editor: nothing between the form and the till is
+    // asserted anywhere else.
+    $list = ourList();
+    $variant = $this->fx->variant;
+
+    $before = app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey());
+
+    addRule($list, ['compute_price' => 'percentage', 'percent_price' => '25'])
+        ->assertSessionHasNoErrors();
+
+    $after = app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey());
+
+    expect((float) $after)->toBeLessThan((float) $before)
+        ->and(round((float) $after, 2))->toBe(round((float) $before * 0.75, 2));
+});
+
+it('does not price with a rule whose window has closed', function (): void {
+    // The window is on the form, so it has to actually gate the price — a rule that reads as expired
+    // on the screen and still discounts at the till is worse than no window at all.
+    $list = ourList();
+    $variant = $this->fx->variant;
+
+    $before = app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey());
+
+    addRule($list, [
+        'compute_price' => 'percentage',
+        'percent_price' => '25',
+        'date_start' => '2020-01-01 00:00:00',
+        'date_end' => '2020-01-02 00:00:00',
+    ])->assertSessionHasNoErrors();
+
+    $after = app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey());
+    expect($after)->toBe($before);
+});
+
+it('holds a happy hour to its own hours on the same day', function (): void {
+    // The window comparison is a string comparison, and the two ends were spelled differently: rows
+    // come off the query builder as `2026-08-28 18:00:00`, a Carbon instance stringifies with a `T`,
+    // and `' ' < 'T'`. Comparing across years still gave the right answer, so only a window measured
+    // in hours exposes it — which is the only kind happy hour ever uses.
+    $list = ourList();
+    $variant = $this->fx->variant;
+
+    $before = app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey());
+
+    addRule($list, [
+        'compute_price' => 'percentage',
+        'percent_price' => '25',
+        'date_start' => now()->setTime(18, 0)->format('Y-m-d H:i:s'),
+        'date_end' => now()->setTime(22, 0)->format('Y-m-d H:i:s'),
+    ])->assertSessionHasNoErrors();
+
+    $this->travelTo(now()->setTime(11, 0));
+    expect(app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey()))
+        ->toBe($before);
+
+    $this->travelTo(now()->setTime(19, 0));
+    expect((float) app(PricingService::class)
+        ->priceFor($this->fx->config, (int) $variant->getKey(), $list->getKey()))
+        ->toBeLessThan((float) $before);
 });

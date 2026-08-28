@@ -10,6 +10,7 @@ use App\Support\Pricing\Dto\PricelistContext;
 use App\Support\Pricing\Dto\PricelistItem as PricelistItemDto;
 use App\Support\Pricing\PricelistResolver;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Support\Carbon;
 
 /**
  * Server-side pricelist resolution (spec 03 §4.4).
@@ -70,6 +71,12 @@ final class PricingService
             categoryAncestry: $variant->pos_category_id === null ? [] : $this->ancestryFor((int) $variant->pos_category_id),
             standardPrice: (string) ($variant->variant_cost ?: $variant->product_cost),
             priceExtra: (string) $variant->price_extra,
+            // Without this, `PricelistResolver` skips its window check entirely (it is guarded on a
+            // non-null date) and **every dated rule applied forever on the server**: last winter's
+            // happy hour still discounting in August. The register passes `date: nowIso()`, so the
+            // two disagreed — and on sync the server price wins (`OrderSyncService`), which means the
+            // till charged full price, printed full price, and the order was recorded discounted.
+            date: self::moment(now()),
         );
 
         return $this->resolver($config)->resolve($pricelistId, $context);
@@ -104,6 +111,20 @@ final class PricingService
         return $config->pricelist_id === null ? null : (int) $config->pricelist_id;
     }
 
+    /**
+     * One comparable spelling of an instant.
+     *
+     * The window comparison in `PricelistResolver` is a **string** comparison, and the two ends
+     * arrived spelled differently: the rows come off the query builder as `2026-08-28 18:00:00`
+     * while a Carbon instance stringifies with a `T`. `' ' < 'T'`, so a rule opening at 18:00 today
+     * would have compared as already open at 04:00 — right for a different year, wrong within a day,
+     * which is exactly the granularity happy hour uses.
+     */
+    private static function moment(mixed $value): ?string
+    {
+        return $value === null ? null : Carbon::parse((string) $value)->format('Y-m-d H:i:s');
+    }
+
     private function resolver(PosConfig $config): PricelistResolver
     {
         $companyId = (int) $config->company_id;
@@ -122,8 +143,8 @@ final class PricingService
                 productId: $row->product_id === null ? null : (int) $row->product_id,
                 posCategoryId: $row->pos_category_id === null ? null : (int) $row->pos_category_id,
                 minQuantity: (string) $row->min_quantity,
-                dateStart: $row->date_start === null ? null : (string) $row->date_start,
-                dateEnd: $row->date_end === null ? null : (string) $row->date_end,
+                dateStart: self::moment($row->date_start),
+                dateEnd: self::moment($row->date_end),
                 computePrice: (string) $row->compute_price,
                 fixedPrice: (string) $row->fixed_price,
                 percentPrice: (string) $row->percent_price,

@@ -393,6 +393,10 @@ export const boFr = {
     'pricelist.howPriced': 'Calcul du prix',
     'pricelist.computePercentage': 'Remise en pourcentage',
     'pricelist.computeFixed': 'Prix fixe',
+    'pricelist.whenItApplies': 'Quand elle s’applique',
+    'pricelist.whenItAppliesHint': 'Sans dates, la règle s’applique en permanence.',
+    'pricelist.from': 'À partir du',
+    'pricelist.until': 'Jusqu’au',
     'pricelist.percent': 'Remise (%)',
     'pricelist.fixedPrice': 'Prix fixé',
 
@@ -1272,6 +1276,10 @@ export const boEn: BoDictionary = {
     'pricelist.howPriced': 'How the price is worked out',
     'pricelist.computePercentage': 'Percentage off',
     'pricelist.computeFixed': 'Fixed price',
+    'pricelist.whenItApplies': 'When it applies',
+    'pricelist.whenItAppliesHint': 'With no dates the rule applies at all times.',
+    'pricelist.from': 'From',
+    'pricelist.until': 'Until',
     'pricelist.percent': 'Discount (%)',
     'pricelist.fixedPrice': 'Price charged',
 

@@ -19,7 +19,7 @@ import { useMemo, useState, type JSX } from 'react';
 
 import { DataTable, type Column } from '../../components/data-table/DataTable';
 import { NumberField, SaveBar, TextField, ToggleField, useDirtyGuard } from '../../components/form';
-import { FormSection, MoneyField, SelectField } from '../../components/form/fields';
+import { DateField, FormSection, MoneyField, NumberField as QtyField, SelectField } from '../../components/form/fields';
 import { AppLayout } from '../../components/layout/AppLayout';
 import { Badge, Card, CardBody, CardHeader } from '../../components/ui/primitives';
 import { useT } from '../../i18n';
@@ -299,6 +299,9 @@ function AddRule({
         compute_price: string;
         fixed_price: string;
         percent_price: string;
+        min_quantity: number | null;
+        date_start: string;
+        date_end: string;
     }>({
         applied_on: 'global',
         product_id: null,
@@ -306,6 +309,9 @@ function AddRule({
         compute_price: 'percentage',
         fixed_price: '0',
         percent_price: '10',
+        min_quantity: 1,
+        date_start: '',
+        date_end: '',
     });
 
     if (!open) {
@@ -381,6 +387,28 @@ function AddRule({
                             onChange={(value) => form.setData('fixed_price', value)}
                         />
                     )}
+                </FormSection>
+
+                <FormSection title={t('pricelist.whenItApplies')} description={t('pricelist.whenItAppliesHint')}>
+                    <QtyField
+                        label={t('pricelist.minQty')}
+                        value={form.data.min_quantity}
+                        error={form.errors.min_quantity}
+                        min={0}
+                        onChange={(value) => form.setData('min_quantity', value)}
+                    />
+                    <DateField
+                        label={t('pricelist.from')}
+                        value={form.data.date_start}
+                        error={form.errors.date_start}
+                        onChange={(value) => form.setData('date_start', value)}
+                    />
+                    <DateField
+                        label={t('pricelist.until')}
+                        value={form.data.date_end}
+                        error={form.errors.date_end}
+                        onChange={(value) => form.setData('date_end', value)}
+                    />
                 </FormSection>
 
                 <div className="flex gap-2">
