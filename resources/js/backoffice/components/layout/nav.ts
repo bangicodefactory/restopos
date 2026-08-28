@@ -144,7 +144,12 @@ export const NAV: NavGroup[] = [
                 href: routes.posConfigs.index(),
                 match: startsWith('/pos-configs'),
             },
-            { key: 'presets', labelKey: 'nav.presets', href: null, disabledReasonKey: 'nav.unavailable' },
+            {
+                key: 'presets',
+                labelKey: 'nav.presets',
+                href: routes.presets.index(),
+                match: startsWith('/presets'),
+            },
             {
                 key: 'payment-methods',
                 labelKey: 'nav.paymentMethods',
