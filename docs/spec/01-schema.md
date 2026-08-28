@@ -1417,12 +1417,32 @@ the customer-receipt printer of a kiosk.
 | printer_ip | string(128) nullable | Epson/network address (required unless `iot`/`browser`) |
 | printer_port | unsignedSmallInteger nullable | |
 | serial_number | string(64) nullable | used to derive the Epson certified domain |
+| profile | string(32) nullable | ESC/POS dialect (`generic`, `epson-tm-t20`, `epson-tm-t88`, `star-tsp100`, `bixolon-srp350`); null ⇒ `generic` |
+| epos_device_id | string(32) nullable | Epson ePOS `devid`; null ⇒ `local_printer`. A multi-port TM-i exposes `local_printer2` and up |
 | is_receipt_printer | boolean default false | prints customer receipts, not prep tickets |
 | print_all_categories | boolean default false | true ⇒ ignore the category pivot, print everything |
 | characters_per_line | unsignedTinyInteger default 42 | ticket layout |
 | copies | unsignedTinyInteger default 1 | |
+| sequence | unsignedSmallInteger default 0 | display and print order |
 | active | boolean default true, index | |
 | timestamps | | |
+
+**Register payload (BAN-426).** `PosPrinter::toPosRow()` renames and derives these columns into the
+field names `packages/domain` `PosPrinterRow` declares, because the two shapes had never met: the
+row shipped `printer_ip` / `is_receipt_printer` and the register read `address` / `print_receipt`,
+so every field it read was `undefined` — a receipt printer was classified `prep`, `categoryIds` was
+`undefined`, and prep routing threw a `TypeError` on the first course of the shift.
+
+| Shipped as | Derived from | Note |
+|---|---|---|
+| `address` | `proxy_ip` (iot) \| `printer_ip[:printer_port]` (epson/network) \| null (browser) | one address per transport; the source columns are **not** shipped |
+| `print_receipt` | `is_receipt_printer` | decides `role`: `receipt` or `prep` |
+| `pos_category_ids` | `pos_category_pos_printer` pivot | appended off an eager load; prep routing has nothing to match on without it |
+| `print_all_categories` | as-is | **not** the same as an empty `pos_category_ids`, which marks the "everything else" fallback used only when nothing matched |
+
+Asserted on both sides against `tests/fixtures/printing/printer-binding.json` —
+`BootstrapContractTest` (h) for the payload, `resources/js/register/domain/printing.test.ts` for the
+binding and the routing.
 
 ### `pos_category_pos_printer` (pivot)
 Category routing. `pos_printer_id` FK cascade U, `pos_category_id` FK cascade U.

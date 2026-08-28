@@ -21,6 +21,15 @@ use Illuminate\Validation\Rule;
  */
 final class PrinterRequest extends FormRequest
 {
+    /**
+     * ESC/POS dialects the shared renderer implements
+     * ({@see packages/domain/src/escpos/profiles.ts} `PRINTER_PROFILES`). Adding one there without
+     * adding it here makes it unselectable; the reverse makes it silently `generic`.
+     *
+     * @var list<string>
+     */
+    public const PROFILES = ['generic', 'epson-tm-t20', 'epson-tm-t88', 'star-tsp100', 'bixolon-srp350'];
+
     /** @return array<string, mixed> */
     public function rules(): array
     {
@@ -36,10 +45,20 @@ final class PrinterRequest extends FormRequest
             'printer_ip' => ['sometimes', 'nullable', 'string', 'max:128'],
             'printer_port' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:65535'],
             'serial_number' => ['sometimes', 'nullable', 'string', 'max:64'],
+            // The ESC/POS dialect. Unset means `generic`, which is a working printer with the
+            // wrong cut and drawer-kick sequences on a model that needs its own.
+            // Enum-shaped rather than free text: `resolveProfile()` silently falls back to
+            // `generic` on an unknown id, so a typo here would be a printer that keeps working
+            // and quietly stops cutting.
+            'profile' => ['sometimes', 'nullable', Rule::in(self::PROFILES)],
+            // Epson ePOS `devid`. A multi-port TM-i exposes `local_printer2` and up; leaving this
+            // unset points every port of the unit at the first roll.
+            'epos_device_id' => ['sometimes', 'nullable', 'string', 'max:32'],
             'is_receipt_printer' => ['sometimes', 'boolean'],
             'print_all_categories' => ['sometimes', 'boolean'],
             'characters_per_line' => ['sometimes', 'integer', 'min:24', 'max:96'],
             'copies' => ['sometimes', 'integer', 'min:1', 'max:5'],
+            'sequence' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'active' => ['sometimes', 'boolean'],
 
             'category_ids' => ['sometimes', 'array'],

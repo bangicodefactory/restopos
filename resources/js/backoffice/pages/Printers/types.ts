@@ -14,10 +14,14 @@ export type PrinterRow = {
     proxy_ip: string | null;
     printer_ip: string | null;
     printer_port: number | null;
+    serial_number: string | null;
+    profile: string | null;
+    epos_device_id: string | null;
     is_receipt_printer: boolean;
     print_all_categories: boolean;
     characters_per_line: number;
     copies: number;
+    sequence: number;
     active: boolean;
     category_ids: number[];
 };
@@ -59,13 +63,31 @@ export const WRITABLE_PRINTER_KEYS = [
     'proxy_ip',
     'printer_ip',
     'printer_port',
+    // BAN-426 — both are declared on the register's `PosPrinterRow` and read by its transports:
+    // `profile` picks the ESC/POS dialect, `epos_device_id` picks the port on a multi-port TM-i.
+    // Neither had a column, so both could only ever be null on the wire.
+    'profile',
+    'epos_device_id',
     'is_receipt_printer',
     'print_all_categories',
     'characters_per_line',
     'copies',
+    'sequence',
     'active',
     'category_ids',
 ] as const;
+
+/**
+ * ESC/POS dialects the shared renderer knows ({@link packages/domain/src/escpos/profiles.ts}).
+ * An empty value means `generic`, which prints but may cut and kick the drawer wrongly.
+ */
+export const PRINTER_PROFILE_OPTIONS: { value: string; label: string }[] = [
+    { value: '', label: 'Générique' },
+    { value: 'epson-tm-t20', label: 'Epson TM-T20' },
+    { value: 'epson-tm-t88', label: 'Epson TM-T88' },
+    { value: 'star-tsp100', label: 'Star TSP100' },
+    { value: 'bixolon-srp350', label: 'Bixolon SRP-350' },
+];
 
 export const PRINTER_TYPE_LABEL: Record<string, string> = {
     iot: 'Boîtier IoT',
@@ -100,10 +122,14 @@ export type PrinterForm = {
     proxy_ip: string;
     printer_ip: string;
     printer_port: number | null;
+    serial_number: string;
+    profile: string;
+    epos_device_id: string;
     is_receipt_printer: boolean;
     print_all_categories: boolean;
     characters_per_line: number | null;
     copies: number | null;
+    sequence: number | null;
     active: boolean;
     category_ids: number[];
 };
@@ -115,10 +141,14 @@ export function toForm(printer: PrinterRow): PrinterForm {
         proxy_ip: printer.proxy_ip ?? '',
         printer_ip: printer.printer_ip ?? '',
         printer_port: printer.printer_port,
+        serial_number: printer.serial_number ?? '',
+        profile: printer.profile ?? '',
+        epos_device_id: printer.epos_device_id ?? '',
         is_receipt_printer: printer.is_receipt_printer,
         print_all_categories: printer.print_all_categories,
         characters_per_line: printer.characters_per_line,
         copies: printer.copies,
+        sequence: printer.sequence,
         active: printer.active,
         category_ids: printer.category_ids,
     };

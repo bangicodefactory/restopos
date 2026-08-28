@@ -93,7 +93,8 @@ export class PrinterRouter {
      *
      * Rules, in order:
      *   1. An explicit `printerId` wins.
-     *   2. `prep` jobs go to every enabled prep printer whose `categoryIds` intersect the job's.
+     *   2. `prep` jobs go to every enabled prep printer set to `allCategories`, plus every one
+     *      whose `categoryIds` intersect the job's.
      *   3. A prep job matching no printer falls back to any prep printer with an empty category
      *      list (the "everything else" printer), then to the receipt printer. Never nowhere.
      *   4. `report` jobs go to a report printer if one is bound, otherwise to the receipt printer.
@@ -110,9 +111,15 @@ export class PrinterRouter {
         if (job.role === 'prep') {
             const categories = job.categoryIds ?? [];
             const prep = enabled.filter((b) => b.role === 'prep');
-            const matched = prep.filter((b) => b.categoryIds.some((id) => categories.includes(id)));
+            const matched = prep.filter(
+                (b) => b.allCategories === true || b.categoryIds.some((id) => categories.includes(id)),
+            );
             if (matched.length > 0) return matched;
 
+            // No `allCategories` guard here on purpose: this branch is only reached when
+            // `matched` is empty, and a print-all printer always matches — so one can never arrive
+            // at this filter. Excluding it again would be unreachable code implying a distinction
+            // that cannot arise. (Sabotaging that clause changed no test, which is what exposed it.)
             const catchAll = prep.filter((b) => b.categoryIds.length === 0);
             if (catchAll.length > 0) return catchAll;
 

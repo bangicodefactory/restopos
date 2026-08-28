@@ -32,9 +32,25 @@ export type PrinterBinding = {
     role: PrinterRole;
     /** Prep routing: which POS categories this printer is responsible for. */
     categoryIds: number[];
+    /**
+     * Routes every category regardless of `categoryIds`.
+     *
+     * Distinct from `categoryIds: []`, which marks the "everything else" fallback that only fires
+     * when nothing else matched. The server has always drawn this distinction
+     * ({@link app/Models/Pos/PosPrinter.php} `handlesCategory`); the client had no way to say it,
+     * so a printer set to print all categories was demoted to a fallback and printed nothing
+     * whenever a more specific printer existed.
+     */
+    allCategories?: boolean;
     transport: TransportKind;
     /** ip[:port] | usb device signature | agent printer id. */
     address: string;
+    /**
+     * Epson ePOS `devid`. A single TM-i answers on `local_printer`; a multi-port unit exposes
+     * `local_printer2` and up, and addressing all of them as the first one prints every ticket on
+     * the same roll. Null falls back to `local_printer`, which is right for the common case.
+     */
+    eposDeviceId?: string | null;
     profile: PrinterProfileId;
     enabled: boolean;
     status: PrinterStatus;

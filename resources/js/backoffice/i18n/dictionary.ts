@@ -684,6 +684,16 @@ export const boFr = {
     'printer.lastError': 'Dernière erreur',
     'printer.charsPerLine': 'Caractères par ligne',
     'printer.copies': 'Copies',
+    'printer.profile': 'Modèle',
+    'printer.profileHint':
+        'Le jeu de commandes ESC/POS. « Générique » imprime sur presque tout, mais la coupe et l’ouverture du tiroir peuvent être ignorées sur un modèle qui attend les siennes.',
+    'printer.eposDeviceId': 'Identifiant ePOS',
+    'printer.eposDeviceIdHint':
+        'Le paramètre « devid ». Un TM-i simple répond sur local_printer ; une unité multi-port expose local_printer2 et suivants. Vide = local_printer.',
+    'printer.serialNumber': 'Numéro de série',
+    'printer.serialNumberHint': 'Sert à joindre l’imprimante par son domaine Epson certifié quand la page est en HTTPS.',
+    'printer.sequence': 'Ordre',
+    'printer.sequenceHint': 'Ordre d’affichage et de tirage quand plusieurs imprimantes reçoivent le même bon.',
 
     'display.title': 'Écrans cuisine',
     'display.stages': 'Étapes',
@@ -1770,6 +1780,16 @@ export const boEn: BoDictionary = {
     'printer.lastError': 'Last error',
     'printer.charsPerLine': 'Characters per line',
     'printer.copies': 'Copies',
+    'printer.profile': 'Model',
+    'printer.profileHint':
+        'The ESC/POS command set. “Generic” prints on almost anything, but the cut and drawer kick may be ignored on a model that expects its own.',
+    'printer.eposDeviceId': 'ePOS device id',
+    'printer.eposDeviceIdHint':
+        'The “devid” parameter. A single TM-i answers on local_printer; a multi-port unit exposes local_printer2 and up. Empty means local_printer.',
+    'printer.serialNumber': 'Serial number',
+    'printer.serialNumberHint': 'Used to reach the printer by its Epson certified domain when the page is served over HTTPS.',
+    'printer.sequence': 'Order',
+    'printer.sequenceHint': 'Display and print order when more than one printer receives the same ticket.',
 
     'display.title': 'Kitchen displays',
     'display.stages': 'Stages',

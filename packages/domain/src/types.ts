@@ -516,6 +516,13 @@ export type PosPrinterRow = {
     epos_device_id: string | null;
     profile: string | null;
     pos_category_ids: number[];
+    /**
+     * Routes every category, which is NOT the same as an empty `pos_category_ids` — that means
+     * "the everything-else printer", a fallback used only when no other printer matched. A venue
+     * with a bar printer on Drinks and a pass printer set to print all expects the pass to see the
+     * drinks too.
+     */
+    print_all_categories: boolean;
     print_receipt: boolean;
     sequence: number;
 };

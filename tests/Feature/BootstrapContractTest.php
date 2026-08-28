@@ -247,3 +247,93 @@ it('lets a nested terminal object win over the flat card fields on overlap', fun
     expect($payment->card_brand)->toBe('amex')
         ->and($payment->auth_code)->toBe('FLAT01');
 });
+
+// ── (h) printers — the register reads a shape the bootstrap had never sent (BAN-426) ──
+//
+// The eighth instance of exactly the failure this file was opened for, and the worst of them,
+// because it was not a dropped value but a crash. `PosPrinterRow` declared `address`,
+// `print_receipt` and `pos_category_ids`; `pos_printers` has `printer_ip`, `is_receipt_printer`
+// and a pivot; `posLoadFields()` returned `['*']`. So every printer arrived with every field the
+// client reads undefined: the receipt printer was classified `prep`, `categoryIds` was undefined,
+// and `resolveTargets` threw a TypeError on the first course sent to the kitchen.
+//
+// Nothing caught it. `bindingsFromCatalog` had no test, and the printer objects elsewhere in the
+// tree were hand-written to the declared type — both sides internally consistent, and disagreeing
+// with each other. The register's half of this contract is
+// resources/js/register/domain/printing.test.ts, over the same fixture.
+
+/** @return array<int, array<string, mixed>> */
+function bootstrapPrinters(): array
+{
+    /** @var PosFixtures $fx */
+    $fx = test()->fx;
+
+    return test()->withHeaders($fx->headers())->getJson('/api/pos/bootstrap')
+        ->assertOk()
+        ->json('data.pos_printers');
+}
+
+it('ships every printer field the register reads, and no column it does not', function (): void {
+    $this->fx->withPrinters();
+
+    /** @var array<string, mixed> $contract */
+    $contract = json_decode(
+        (string) file_get_contents(base_path('tests/fixtures/printing/printer-binding.json')),
+        true,
+        flags: JSON_THROW_ON_ERROR,
+    )['printers'][0];
+
+    $expected = array_values(array_diff(array_keys($contract), ['_why']));
+    $rows = bootstrapPrinters();
+
+    expect($rows)->toHaveCount(4);
+
+    foreach ($rows as $row) {
+        expect(array_keys($row))->toEqualCanonicalizing($expected);
+
+        // The addressing columns are reassembled into `address`; shipping them too would give the
+        // register two sources for one fact, which is how they drifted apart in the first place.
+        expect($row)->not->toHaveKey('printer_ip')
+            ->and($row)->not->toHaveKey('printer_port')
+            ->and($row)->not->toHaveKey('proxy_ip')
+            ->and($row)->not->toHaveKey('is_receipt_printer');
+    }
+});
+
+it('derives one address per transport from the columns the back office edits', function (): void {
+    $this->fx->withPrinters();
+
+    $rows = collect(bootstrapPrinters())->keyBy('name');
+    $s = $this->fx->suffix;
+
+    expect($rows['Caisse'.$s]['address'])->toBe('192.168.1.51')            // ePOS, no port
+        ->and($rows['Cuisine'.$s]['address'])->toBe('192.168.1.52:9100')   // network ESC/POS, port joined
+        ->and($rows['Agent'.$s]['address'])->toBe('192.168.1.10');         // IoT/agent, the proxy host
+});
+
+it('names the receipt printer as one, so the register does not invent a placeholder', function (): void {
+    $this->fx->withPrinters();
+
+    $rows = collect(bootstrapPrinters())->keyBy('name');
+
+    expect($rows['Caisse'.$this->fx->suffix]['print_receipt'])->toBeTrue()
+        ->and($rows['Cuisine'.$this->fx->suffix]['print_receipt'])->toBeFalse();
+});
+
+it('materialises the category pivot, and keeps print-all distinct from an empty list', function (): void {
+    $this->fx->withPrinters();
+
+    $rows = collect(bootstrapPrinters())->keyBy('name');
+    $s = $this->fx->suffix;
+
+    // Routed by category: the pivot has to arrive as ids, or prep routing has nothing to match on.
+    expect($rows['Cuisine'.$s]['pos_category_ids'])->toBe([$this->fx->category->getKey()])
+        ->and($rows['Agent'.$s]['pos_category_ids'])->toBe([$this->fx->barCategory->getKey()]);
+
+    // The pass prints everything. An empty `pos_category_ids` would make it the *fallback*
+    // printer instead — used only when nothing else matched — so a drink the bar already prints
+    // would never reach the pass. The two must stay separately expressible.
+    expect($rows['Passe'.$s]['print_all_categories'])->toBeTrue()
+        ->and($rows['Passe'.$s]['pos_category_ids'])->toBe([])
+        ->and($rows['Cuisine'.$s]['print_all_categories'])->toBeFalse();
+});

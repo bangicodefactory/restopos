@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Enums\DeviceType;
 use App\Enums\PrepStageType;
+use App\Enums\PrinterType;
 use App\Enums\SessionState;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\Catalog\PosCategory;
@@ -21,6 +22,7 @@ use App\Models\Kitchen\PrepDisplay;
 use App\Models\Pos\PaymentMethod;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
+use App\Models\Pos\PosPrinter;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\Tax;
@@ -54,6 +56,8 @@ final class PosFixtures
     public Tax $tax;
 
     public PosCategory $category;
+
+    public PosCategory $barCategory;
 
     public Product $product;
 
@@ -362,6 +366,61 @@ final class PosFixtures
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+        }
+
+        return $this;
+    }
+
+    /**
+     * A venue with real printers: a receipt printer, a prep printer routed by category, and a
+     * "print everything" pass printer.
+     *
+     * The three shapes matter separately. `print_receipt` decides the role, `pos_category_ids`
+     * decides prep routing, and `print_all_categories` is a third thing that neither of the other
+     * two can express — a printer that must receive a course the category-routed printer is
+     * already receiving.
+     *
+     * @var list<int>
+     */
+    public array $printerIds = [];
+
+    public function withPrinters(): self
+    {
+        $bar = PosCategory::query()->create([
+            'company_id' => $this->company->getKey(),
+            'name' => 'Drinks'.$this->suffix,
+            'path' => '/', 'depth' => 0, 'sequence' => 20,
+        ]);
+        $bar->forceFill(['path' => '/'.$bar->getKey().'/'])->save();
+        $this->barCategory = $bar;
+
+        $rows = [
+            // name, type, receipt, all categories, proxy ip, printer ip, port, categories
+            ['Caisse'.$this->suffix, PrinterType::EpsonEpos, true, false, null, '192.168.1.51', null, []],
+            ['Cuisine'.$this->suffix, PrinterType::NetworkEscpos, false, false, null, '192.168.1.52', 9100, [$this->category->getKey()]],
+            ['Passe'.$this->suffix, PrinterType::EpsonEpos, false, true, null, '192.168.1.54', null, []],
+            ['Agent'.$this->suffix, PrinterType::Iot, false, false, '192.168.1.10', null, null, [$bar->getKey()]],
+        ];
+
+        foreach ($rows as $index => [$name, $type, $receipt, $all, $proxy, $ip, $port, $categoryIds]) {
+            $printer = PosPrinter::query()->create([
+                'company_id' => $this->company->getKey(),
+                'name' => $name,
+                'printer_type' => $type->value,
+                'proxy_ip' => $proxy,
+                'printer_ip' => $ip,
+                'printer_port' => $port,
+                'is_receipt_printer' => $receipt,
+                'print_all_categories' => $all,
+                'characters_per_line' => 42,
+                'copies' => 1,
+                'sequence' => $index * 10,
+                'active' => true,
+            ]);
+
+            $printer->categories()->sync($categoryIds);
+            $this->config->printers()->syncWithoutDetaching([$printer->getKey()]);
+            $this->printerIds[] = $printer->getKey();
         }
 
         return $this;
