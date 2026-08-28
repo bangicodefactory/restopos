@@ -177,14 +177,17 @@ function ChromeButton({
 export type FilterBarProps = {
     categories: Array<{ id: number; name: string }>;
     courses: number[];
+    /** Service modes present on the board right now — "Takeaway", "Delivery" (KDS-012). */
+    presets: string[];
     filter: BoardFilter;
     onChange: (patch: Partial<BoardFilter>) => void;
 };
 
-export function FilterBar({ categories, courses, filter, onChange }: FilterBarProps): JSX.Element | null {
+export function FilterBar({ categories, courses, presets, filter, onChange }: FilterBarProps): JSX.Element | null {
     const t = useT();
-    const hasFilters = filter.categoryIds.length > 0 || filter.lateOnly || filter.courseIndex !== null;
-    if (categories.length === 0 && courses.length === 0) return null;
+    const hasFilters =
+        filter.categoryIds.length > 0 || filter.lateOnly || filter.courseIndex !== null || filter.presets.length > 0;
+    if (categories.length === 0 && courses.length === 0 && presets.length === 0) return null;
 
     const toggleCategory = (id: number): void => {
         const next = filter.categoryIds.includes(id)
@@ -195,7 +198,10 @@ export function FilterBar({ categories, courses, filter, onChange }: FilterBarPr
 
     return (
         <div className="pos-scroll flex items-center gap-2 border-b border-kitchen-border bg-kitchen-bg px-3 py-2">
-            <Chip active={!hasFilters} onClick={() => onChange({ categoryIds: [], lateOnly: false, courseIndex: null })}>
+            <Chip
+                active={!hasFilters}
+                onClick={() => onChange({ categoryIds: [], lateOnly: false, courseIndex: null, presets: [] })}
+            >
                 {t('kds.filter.all')}
             </Chip>
 
@@ -216,6 +222,22 @@ export function FilterBar({ categories, courses, filter, onChange }: FilterBarPr
                     onClick={() => onChange({ courseIndex: filter.courseIndex === index ? null : index })}
                 >
                     {t('kds.filter.course')} {index}
+                </Chip>
+            ))}
+
+            {presets.map((preset) => (
+                <Chip
+                    key={`preset-${preset}`}
+                    active={filter.presets.includes(preset)}
+                    onClick={() =>
+                        onChange({
+                            presets: filter.presets.includes(preset)
+                                ? filter.presets.filter((value) => value !== preset)
+                                : [...filter.presets, preset],
+                        })
+                    }
+                >
+                    {preset}
                 </Chip>
             ))}
 

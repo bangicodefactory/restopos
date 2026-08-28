@@ -4,6 +4,7 @@ import type { JSX, ReactNode } from 'react';
 import { useT } from '../i18n';
 import {
     effectiveStageId,
+    groupCombos,
     groupLinesByCourse,
     isCardComplete,
     isLineCancelled,
@@ -145,10 +146,11 @@ export function TicketCard({
                             </h3>
                         )}
                         <ul>
-                            {group.lines.map((line) => (
+                            {groupCombos(group.lines).map(({ line, depth }) => (
                                 <TicketLineRow
                                     key={line.id || line.uuid}
                                     line={line}
+                                    depth={depth}
                                     onToggle={() => onToggleLine(order.id, line.id)}
                                 />
                             ))}
@@ -218,7 +220,16 @@ function Badge({
 }
 
 /** One item row. Its own tap target, its own state, ≥ 64 px tall (KDS-006, KDS-010). */
-function TicketLineRow({ line, onToggle }: { line: KitchenLine; onToggle: () => void }): JSX.Element {
+function TicketLineRow({
+    line,
+    depth,
+    onToggle,
+}: {
+    line: KitchenLine;
+    /** 1 = a component of the line above — indented, so a set menu reads as one thing. */
+    depth: number;
+    onToggle: () => void;
+}): JSX.Element {
     const t = useT();
     const cancelled = isLineCancelled(line);
     const changed = isLineChanged(line);
@@ -238,6 +249,10 @@ function TicketLineRow({ line, onToggle }: { line: KitchenLine; onToggle: () => 
                     cancelled && 'bg-kitchen-late/15 ring-1 ring-inset ring-kitchen-late/50',
                     changed && !cancelled && 'bg-kitchen-cooking/10',
                     line.state === 'in_progress' && 'bg-kitchen-cooking/10',
+                    // A component of the line above. Indented *and* rule-marked rather than
+                    // indented alone: a pass is read at a glance, across a room, often through
+                    // steam, and indentation on its own disappears at that distance.
+                    depth > 0 && 'ms-3 border-s-4 border-kitchen-border ps-2',
                 )}
             >
                 <span
