@@ -11,6 +11,7 @@ use App\Models\Catalog\Product;
 use App\Models\Catalog\ProductAttribute;
 use App\Models\Catalog\ProductCategory;
 use App\Models\Catalog\ProductVariant;
+use App\Models\Identity\Customer;
 use App\Models\Identity\Employee;
 use App\Models\Identity\MediaFile;
 use App\Models\Kitchen\PrepDisplay;
@@ -32,6 +33,7 @@ use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Models\Scopes\CompanyScope;
 use App\Policies\BarcodeNomenclaturePolicy;
+use App\Policies\CustomerPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FiscalPositionPolicy;
 use App\Policies\FloorPolicy;
@@ -203,6 +205,7 @@ final class PosServiceProvider extends ServiceProvider
         // Registered explicitly: auto-discovery does not reach App\Models\Identity,
         // App\Models\Pricing or App\Models\Pos, and a policy nothing registers fails open.
         Gate::policy(Employee::class, EmployeePolicy::class);
+        Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(PosPreset::class, PosPresetPolicy::class);
         Gate::policy(Pricelist::class, PricelistPolicy::class);
         Gate::policy(PosDevice::class, PosDevicePolicy::class);

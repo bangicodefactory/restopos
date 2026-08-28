@@ -64,6 +64,7 @@ class RoleSeeder extends Seeder
             'backoffice.manage_company' => 'Modifier les informations de la société',
             'backoffice.export_accounting' => 'Exporter vers la comptabilité',
             'backoffice.manage_media' => 'Téléverser des images (logos, photos produits)',
+            'backoffice.manage_customers' => 'Gérer les clients (fiche, fusion, archivage)',
         ],
     ];
 
@@ -88,7 +89,7 @@ class RoleSeeder extends Seeder
                 'catalog.manage_pricelists',
                 'loyalty.view', 'loyalty.manage_programs', 'loyalty.issue_gift_card',
                 'backoffice.access', 'backoffice.view_reports', 'backoffice.manage_employees',
-                'backoffice.manage_media',
+                'backoffice.manage_media', 'backoffice.manage_customers',
             ],
         ],
         'cashier' => [

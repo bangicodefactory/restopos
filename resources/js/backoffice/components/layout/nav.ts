@@ -75,7 +75,12 @@ export const NAV: NavGroup[] = [
                 href: routes.fiscalPositions.index(),
                 match: startsWith('/fiscal-positions'),
             },
-            { key: 'customers', labelKey: 'nav.customers', href: null, disabledReasonKey: 'nav.unavailable' },
+            {
+                key: 'customers',
+                labelKey: 'nav.customers',
+                href: routes.customers.index(),
+                match: startsWith('/customers'),
+            },
         ],
     },
     {

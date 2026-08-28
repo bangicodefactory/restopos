@@ -56,6 +56,15 @@ export const routes = {
         destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
+    customers: {
+        index: (): string => '/customers',
+        store: (): string => '/customers',
+        edit: (uuid: string): string => `/customers/${uuid}/edit`,
+        update: (uuid: string): string => `/customers/${uuid}`,
+        destroy: (uuid: string): string => `/customers/${uuid}`,
+        merge: (uuid: string): string => `/customers/${uuid}/merge`,
+    },
+
     presets: {
         index: (): string => '/presets',
         store: (): string => '/presets',
