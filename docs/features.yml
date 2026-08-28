@@ -394,6 +394,7 @@ features:
   BOF-090: { status: shipped, surface: user, manual: back-office/price-lists.md#price-lists }
   BOF-091: { status: shipped, surface: user, manual: back-office/taxes.md#taxes }
   BOF-092: { status: shipped, surface: user, manual: todo }
+  BOF-093: { status: partial, surface: user, manual: back-office/importing.md#importing-a-catalogue, note: "Products, POS categories, customers and taxes. Variants and pricelist items are not importable: a variant needs its attribute combination resolved and a pricelist item needs a rule scope, neither of which a flat CSV expresses." }
   BOF-094: { status: shipped, surface: user, manual: back-office/products.md#taking-a-dish-off-the-menu }
 
   # Operational configuration (BOF-110 … BOF-129) — user

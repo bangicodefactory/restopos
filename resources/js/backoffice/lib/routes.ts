@@ -56,6 +56,13 @@ export const routes = {
         destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
+    catalogImport: {
+        index: (): string => '/catalog-import',
+        preview: (): string => '/catalog-import/preview',
+        store: (): string => '/catalog-import',
+        template: (entity: string): string => `/catalog-import/${entity}/template`,
+    },
+
     combos: {
         index: (): string => '/combos',
         store: (): string => '/combos',
