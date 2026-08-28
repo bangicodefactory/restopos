@@ -29,6 +29,7 @@ use App\Models\Restaurant\Floor;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Models\User;
 use App\Services\Device\DeviceTokenService;
+use App\Support\Auth\EmployeeAbilities;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -134,6 +135,11 @@ final class PosFixtures
             'timezone' => 'UTC',
         ]);
 
+        // Every real venue gets these from `TillRoleSeeder` (BAN-451). Seeded here for the same
+        // reason: a company with no till roles is one where no employee can be given a role, so a
+        // fixture without them would be testing a state no venue is ever in.
+        $this->seedTillRoles();
+
         $group = TaxGroup::query()->create([
             'company_id' => $this->company->getKey(), 'name' => 'VAT'.$this->suffix, 'sequence' => 10,
         ]);
@@ -226,6 +232,28 @@ final class PosFixtures
     }
 
     /** @return array{0: Product, 1: ProductVariant} */
+    /** The three roles the product ships with, from the same config the seeder reads. */
+    private function seedTillRoles(): void
+    {
+        $sequence = 10;
+
+        foreach ((array) config('pos.role_abilities', []) as $slug => $abilities) {
+            DB::table('till_roles')->insert([
+                'company_id' => $this->company->getKey(),
+                'slug' => (string) $slug,
+                'name' => ucfirst((string) $slug),
+                'abilities' => json_encode(EmployeeAbilities::only((array) $abilities)),
+                'is_system' => true,
+                'sequence' => $sequence,
+                'active' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $sequence += 10;
+        }
+    }
+
     private function product(string $name, string $price, int $uomId): array
     {
         $product = Product::query()->create([

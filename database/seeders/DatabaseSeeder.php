@@ -26,6 +26,7 @@ class DatabaseSeeder extends Seeder
         TaxSeeder::class,
         // Access control, then the people.
         RoleSeeder::class,
+        TillRoleSeeder::class,
         EmployeeSeeder::class,
         // The menu (needs taxes + units of measure).
         CatalogSeeder::class,

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Backoffice\TillRoleController;
 use App\Http\Controllers\Backoffice\CatalogImportController;
 use App\Http\Controllers\Backoffice\ComboController;
 use App\Http\Controllers\Backoffice\CustomerController;
@@ -202,6 +203,11 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
     Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
     Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
+    // What a till employee may do — axis 2 (BOF-118, BAN-451).
+    Route::post('till-roles', [TillRoleController::class, 'store'])->name('till-roles.store');
+    Route::patch('till-roles/{role}', [TillRoleController::class, 'update'])->name('till-roles.update');
+    Route::delete('till-roles/{role}', [TillRoleController::class, 'destroy'])->name('till-roles.destroy');
 
     // Bringing a catalogue in from a spreadsheet (BOF-093, BAN-491).
     Route::get('catalog-import', [CatalogImportController::class, 'index'])->name('catalog-import.index');

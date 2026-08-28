@@ -463,6 +463,18 @@ return new class extends Migration
             $table->foreignId('pos_config_id')->constrained('pos_configs')->cascadeOnDelete();
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
             $table->string('access_level', 16)->default(AccessLevel::Basic->value);
+            /*
+             * A custom role for this employee on this register (BAN-451).
+             *
+             * `access_level` has three values and maps onto the three system roles, so it cannot
+             * name "Shift lead". It also always has a value once an employee is attached, which
+             * means `roleFor()` never reached `employees.default_role` for an attached employee —
+             * so without this column a custom role would have applied to exactly the employees no
+             * register had been given.
+             *
+             * Null means "use `access_level`", which is every row that exists today.
+             */
+            $table->string('role_slug', 32)->nullable();
             $table->timestamps();
 
             $table->unique(['pos_config_id', 'employee_id']);
