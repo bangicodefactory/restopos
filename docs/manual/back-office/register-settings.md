@@ -3,6 +3,7 @@ title: Register settings
 audience: manager
 features:
   - BOF-006
+  - BOF-030
   - BOF-040
   - BOF-031
   - BOF-032
@@ -166,6 +167,25 @@ appear to work.
 On the **Accounting** tab, **track order edits** records each change to an order that has already
 been sent — what changed, who changed it, when. Turn this on if you ever need to answer "who took
 that item off the bill".
+
+## Four settings lock while a session is open
+
+While a register has a session running, four things on this page grey out with a note saying why:
+
+- **Active** — archiving it would strand the session that is running on it.
+- **Restaurant mode** — turning it off takes away the floor screen while bills are still open on it.
+- **Payment methods** — an order already tendered against a method you remove now could not be
+  settled, and the drawer would be counted against a different set of methods than it was opened
+  with.
+- **Rooms** — seated orders would point at tables the register no longer serves, so the bills would
+  exist with no screen able to reach them.
+
+Everything else on the page stays editable. Fixing a typo in your receipt footer mid-service works
+exactly as it always did.
+
+The lock lifts the moment the session closes. If you need one of these four changed now, close the
+session first — which is the same thing you would have to do afterwards anyway, only without the
+damage in between.
 
 ## What you cannot change here
 

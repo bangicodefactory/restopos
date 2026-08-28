@@ -237,6 +237,14 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
     const form = useForm<ConfigForm>(initialForm(config));
     const locked = t('config.readOnly');
 
+    /*
+     * Four settings are frozen while a session is running (BOF-030, BAN-469): archiving, restaurant
+     * mode, the payment methods and the floors. Each corrupts the open session rather than merely
+     * inconveniencing it — the server refuses all four, and this is the half that stops an operator
+     * finding out only after pressing save.
+     */
+    const frozen = config.has_open_session ? t('config.frozenWhileOpen') : undefined;
+
     useDirtyGuard(form.isDirty, t('confirm.leave'));
 
     const dirtyCount = useMemo(() => {
@@ -298,12 +306,16 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                 <ToggleField
                                     label={t('state.active')}
                                     checked={form.data.active}
+                                    disabled={config.has_open_session}
+                                    lockedReason={frozen}
                                     onChange={(checked) => form.setData('active', checked)}
                                     hint="Archiver un point de vente est refusé tant qu’une session est ouverte (BOF-006)."
                                 />
                                 <ToggleField
                                     label={t('dashboard.restaurant')}
                                     checked={form.data.is_restaurant}
+                                    disabled={config.has_open_session}
+                                    lockedReason={frozen}
                                     onChange={(checked) => form.setData('is_restaurant', checked)}
                                     description="Active les salles, les tables, les services et l’envoi en cuisine."
                                 />
@@ -958,7 +970,7 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                         {tab === 'assignments' ? (
                             <div className="space-y-6">
                                 <DeferredRegion value={options} label={t('config.group.assignments')} rows={4}>
-                                    {(value) => <Assignments form={form} options={value} />}
+                                    {(value) => <Assignments form={form} options={value} frozen={frozen} />}
                                 </DeferredRegion>
 
                                 <Notice tone="warn">
@@ -992,9 +1004,12 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
 function Assignments({
     form,
     options,
+    frozen,
 }: {
     form: ReturnType<typeof useForm<ConfigForm>>;
     options: PosConfigOptions;
+    /** Set while a session is running — the payment methods are frozen then (BAN-469). */
+    frozen: string | undefined;
 }): JSX.Element {
     const t = useT();
     return (
@@ -1043,6 +1058,8 @@ function Assignments({
             />
             <MultiSelectField
                 label={t('payment.title')}
+                disabled={frozen !== undefined}
+                lockedReason={frozen}
                 values={form.data.payment_method_ids}
                 options={options.payment_methods.map((row) => ({ value: String(row.id), label: row.name }))}
                 onChange={(values) => form.setData('payment_method_ids', values)}
