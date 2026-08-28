@@ -31,7 +31,6 @@ import {
     SaveBar,
     SelectField,
     TextField,
-    TextareaField,
     useDirtyGuard,
 } from '../../components/form';
 import { FormSection } from '../../components/form/fields';
@@ -47,14 +46,17 @@ import { absoluteUrl, routes } from '../../lib/routes';
 import {
     PAY_AFTER_HINT,
     capabilitiesOf,
-    parseTableTokens,
     selfOrderUrl,
     toForm,
+    type SelfOrderFloor,
     type SelfOrderSettingsProps,
+    type SelfOrderTable,
 } from './types';
 
 export default function SelfOrderSettings({
     config,
+    tables,
+    floors,
     modes,
     serviceModes,
     payAfterModes,
@@ -248,7 +250,13 @@ export default function SelfOrderSettings({
                         ) : null}
 
                         {tab === 'qr' ? (
-                            <QrPanel accessToken={config.access_token} venueUrl={venueUrl} configUuid={config.uuid} />
+                            <QrPanel
+                                accessToken={config.access_token}
+                                venueUrl={venueUrl}
+                                configUuid={config.uuid}
+                                tables={tables}
+                                floors={floors}
+                            />
                         ) : null}
                     </Tabs>
 
@@ -312,16 +320,32 @@ function QrPanel({
     accessToken,
     venueUrl,
     configUuid,
+    tables,
+    floors,
 }: {
     accessToken: string;
     venueUrl: string;
     configUuid: string;
+    tables: SelfOrderTable[];
+    floors: SelfOrderFloor[];
 }): JSX.Element {
     const t = useT();
-    const [raw, setRaw] = useState('');
     const [size, setSize] = useState(180);
+    const [floorId, setFloorId] = useState<number | null>(null);
 
-    const tokens = useMemo(() => parseTableTokens(raw), [raw]);
+    /*
+     * The tables come from the server now (BAN-479).
+     *
+     * This panel used to ask the operator to paste table tokens into a textarea, and the page's own
+     * docblock called that a contract gap surfaced rather than faked. It was worse than untidy: a
+     * table token is the capability that lets a diner order at that table, and copying one by hand
+     * between two screens means a QR stuck to table 6 that opens table 9's order — with nothing on
+     * any screen saying so, and the mistake already printed and glued down.
+     */
+    const shown = useMemo(
+        () => (floorId === null ? tables : tables.filter((table) => table.floor_id === floorId)),
+        [tables, floorId],
+    );
 
     return (
         <div className="space-y-6">
@@ -369,7 +393,7 @@ function QrPanel({
                             <Button
                                 variant="secondary"
                                 size="md"
-                                disabled={tokens.length === 0}
+                                disabled={shown.length === 0}
                                 onClick={() => globalThis.print()}
                             >
                                 {t('self.printSheet')}
@@ -378,19 +402,23 @@ function QrPanel({
                     }
                 />
                 <CardBody className="space-y-4">
-                    <div className="print:hidden">
-                        <TextareaField
-                            label={t('self.tableTokens')}
-                            hint={t('self.tableTokensHint')}
-                            rows={3}
-                            value={raw}
-                            onChange={setRaw}
-                            placeholder="a1b2c3d4, e5f6g7h8"
-                        />
-                    </div>
+                    {floors.length > 1 ? (
+                        <div className="print:hidden">
+                            <SelectField
+                                label={t('self.qrFloor')}
+                                value={floorId === null ? '' : String(floorId)}
+                                placeholder={t('self.qrAllFloors')}
+                                options={floors.map((floor) => ({
+                                    value: String(floor.id),
+                                    label: floor.name,
+                                }))}
+                                onChange={(value) => setFloorId(value === '' ? null : Number(value))}
+                            />
+                        </div>
+                    ) : null}
 
-                    {tokens.length === 0 ? (
-                        <p className="text-sm text-slate-500">{t('self.tableTokensEmpty')}</p>
+                    {shown.length === 0 ? (
+                        <p className="text-sm text-slate-500">{t('self.qrNoTables')}</p>
                     ) : (
                         <ul
                             aria-label={t('self.qrTables')}
@@ -399,15 +427,19 @@ function QrPanel({
                                 'print:grid-cols-2 print:gap-6',
                             )}
                         >
-                            {tokens.map((token) => {
-                                const url = selfOrderUrl(venueUrl, token);
+                            {shown.map((table) => {
+                                const url = selfOrderUrl(venueUrl, table.identifier);
+                                // The table's own number, large. A printed card is read across a
+                                // room by someone checking they have stuck the right one down.
+                                const label = table.name ?? String(table.table_number);
+
                                 return (
                                     <li
-                                        key={token}
+                                        key={table.id}
                                         className="flex break-inside-avoid flex-col items-center gap-2 rounded-pos-lg bg-white p-4 text-center ring-1 ring-slate-200"
                                     >
+                                        <span className="text-lg font-semibold text-slate-900">{label}</span>
                                         <QrCode value={url} size={size} label={url} />
-                                        <span className="font-mono text-xs text-slate-600">{token}</span>
                                     </li>
                                 );
                             })}

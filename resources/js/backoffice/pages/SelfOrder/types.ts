@@ -19,6 +19,7 @@ export type SelfOrderConfig = {
     self_ordering_primary_color: string | null;
     self_ordering_text_color: string | null;
     self_ordering_default_language_id: number | null;
+    self_ordering_brand_media_id: number | null;
     self_order_online_payment_method_id: number | null;
     kiosk_idle_seconds: number;
     kiosk_confirmation_seconds: number;
@@ -40,7 +41,21 @@ export type SelfOrderPaymentMethod = {
     method_type: string;
 };
 
+/** A table this register serves, with the capability token its QR encodes. */
+export type SelfOrderTable = {
+    id: number;
+    floor_id: number;
+    table_number: number;
+    name: string | null;
+    identifier: string;
+};
+
+export type SelfOrderFloor = { id: number; name: string };
+
 export type SelfOrderSettingsProps = {
+    tables: SelfOrderTable[];
+    floors: SelfOrderFloor[];
+    languages: { id: number; code: string; name: string }[];
     config: SelfOrderConfig;
     modes: EnumOption[];
     serviceModes: EnumOption[];
@@ -127,16 +142,4 @@ export function selfOrderUrl(base: string, tableToken?: string | null): string {
     return tableToken && tableToken.trim() !== ''
         ? `${base}?tt=${encodeURIComponent(tableToken.trim())}`
         : base;
-}
-
-/** Split a pasted list of table tokens: newlines, commas, semicolons or spaces all work. */
-export function parseTableTokens(raw: string): string[] {
-    return [
-        ...new Set(
-            raw
-                .split(/[\s,;]+/)
-                .map((token) => token.trim())
-                .filter((token) => token !== ''),
-        ),
-    ];
 }
