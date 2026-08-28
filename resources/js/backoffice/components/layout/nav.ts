@@ -100,7 +100,12 @@ export const NAV: NavGroup[] = [
                 href: routes.productAttributes.index(),
                 match: startsWith('/product-attributes'),
             },
-            { key: 'combos', labelKey: 'nav.combos', href: null, disabledReasonKey: 'nav.unavailable' },
+            {
+                key: 'combos',
+                labelKey: 'nav.combos',
+                href: routes.combos.index(),
+                match: startsWith('/combos'),
+            },
             {
                 key: 'pricelists',
                 labelKey: 'nav.pricelists',

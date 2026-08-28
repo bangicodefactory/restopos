@@ -389,6 +389,7 @@ features:
   # product_attribute_exclusions, so the table is empty on every install (BAN-412 carve-out).
   BOF-086: { status: planned, surface: user, manual: todo }
   BOF-087: { status: shipped, surface: user, manual: back-office/products.md#variants }
+  BOF-088: { status: shipped, surface: user, manual: back-office/set-menus.md#set-menus }
   BOF-089: { status: planned, surface: user, manual: todo }
   BOF-090: { status: shipped, surface: user, manual: back-office/price-lists.md#price-lists }
   BOF-091: { status: shipped, surface: user, manual: back-office/taxes.md#taxes }
