@@ -3,10 +3,11 @@ import { Button, Sheet } from '@shared/ui';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { syncNow } from '../boot';
+import { reloadData, syncNow } from '../boot';
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
 import { useSyncStore } from '../state/boot-store';
+import { unsyncedCount, useOrderStore } from '../state/order-store';
 import { useUiStore } from '../state/ui-store';
 
 /**
@@ -25,6 +26,7 @@ export function SyncDrawer(): JSX.Element | null {
     const stats = useSyncStore((state) => state.stats);
     const [entries, setEntries] = useState<OutboxEntry[]>([]);
     const [busy, setBusy] = useState(false);
+    const [repairing, setRepairing] = useState(false);
 
     const open = dialog?.kind === 'syncPanel';
 
@@ -76,6 +78,41 @@ export function SyncDrawer(): JSX.Element | null {
                     >
                         {t('reg.sync.retryAll')}
                     </Button>
+                </div>
+
+                {/*
+                  * Repair local data (XCT-014, BAN-405).
+                  *
+                  * Lives here rather than on the boot screen because the case it is for is a till
+                  * that *starts* fine and shows something wrong — a stale catalogue, a price that
+                  * will not update. The boot screen only appears when the register failed to start,
+                  * which is the one time this is not the problem.
+                  *
+                  * Refuses while sales are unsynced. "Repair" is what a cashier reaches for exactly
+                  * when things already look wrong, and that is precisely when a full re-hydrate
+                  * against a server that has never seen those sales would lose them quietly.
+                  */}
+                <div className="rounded-pos border border-slate-200 p-3">
+                    <Button
+                        variant="secondary"
+                        loading={repairing}
+                        onClick={async () => {
+                            const pending = unsyncedCount(useOrderStore.getState());
+                            if (pending > 0) {
+                                globalThis.alert?.(t('reg.repair.blocked', { count: pending }));
+                                return;
+                            }
+
+                            setRepairing(true);
+                            const result = await reloadData();
+                            setRepairing(false);
+                            globalThis.alert?.(result.ok ? t('reg.repair.done') : t('reg.repair.failed'));
+                            await refresh();
+                        }}
+                    >
+                        {t('reg.repair.action')}
+                    </Button>
+                    <p className="mt-1 text-xs text-slate-500">{t('reg.repair.hint')}</p>
                 </div>
 
                 {problems.length === 0 ? (

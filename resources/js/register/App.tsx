@@ -25,6 +25,7 @@ import { BootScreen } from './screens/BootScreen';
 import { FloorEditorScreen } from './screens/FloorEditorScreen';
 import { FloorScreen } from './screens/FloorScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { SecondTabScreen } from './screens/SecondTabScreen';
 import { PairingScreen } from './screens/PairingScreen';
 import { PaymentScreen } from './screens/PaymentScreen';
 import { ProductScreen } from './screens/ProductScreen';
@@ -37,6 +38,7 @@ import { useBootStore, useSyncStore } from './state/boot-store';
 import { linesOf, unsyncedCount, useOrderStore } from './state/order-store';
 import { usePosSessionStore } from './state/session-store';
 import { useUiStore } from './state/ui-store';
+import { useTabRole } from './state/use-tab-role';
 
 /**
  * The shell: chrome, routing and the cross-cutting behaviours that have nowhere else to live.
@@ -84,6 +86,13 @@ export function App(): JSX.Element {
         visibility: 'private',
         events: sessionEvents,
     });
+
+    /**
+     * One writer per register (REG-374). Placed with the other shell-level state because the
+     * follower state is a whole-screen condition, not a per-button one: a second tab must not be a
+     * till with some buttons disabled, or a cashier will find the one that still works.
+     */
+    const tabRole = useTabRole(catalog.config?.id ?? null);
 
     const [locked, setLocked] = useState(false);
     const [sessionPane, setSessionPane] = useState<'open' | 'close' | null>(null);
@@ -271,6 +280,10 @@ export function App(): JSX.Element {
     if (phase === 'starting' || phase === 'bootstrapping' || phase === 'error' || phase === 'reloading') {
         return <BootScreen />;
     }
+    // Before the login gate on purpose: an accidental second tab should say why immediately,
+    // rather than asking for a PIN and only then refusing to sell.
+    if (tabRole === 'follower') return <SecondTabScreen />;
+
     if (cashier === null) return <LoginScreen onDone={() => setLocked(false)} />;
     if (locked) return <LoginScreen mode="lock" onDone={() => setLocked(false)} />;
 
