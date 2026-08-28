@@ -112,6 +112,8 @@ final class SelfOrderSettingsController extends Controller
             'custom_link_ids.*' => ['integer'],
         ]);
 
+        $this->assertCoherentTriple($config, $data);
+
         if (array_key_exists('custom_link_ids', $data)) {
             // Resolved through the scoped model, never synced straight from the request. `sync()`
             // writes whatever ids it is handed, and these links render on the venue's own kiosk —
@@ -137,6 +139,55 @@ final class SelfOrderSettingsController extends Controller
         $config->bumpRevision();
 
         return back()->with('success', 'Self-order settings saved.');
+    }
+
+    /**
+     * The mode, the service mode and the pay-after policy have to agree (SLF-005).
+     *
+     * Odoo forces these combinations, and the reason is physical rather than arbitrary: "pay at the
+     * end" means somebody comes back to the customer, and that only exists where the customer is
+     * sitting at a table. A kiosk customer walks away the moment they have ordered; a counter
+     * customer is standing at the counter. Accepting `meal` on either produces a venue whose tills
+     * are waiting for a settlement that will never be asked for, and orders that stay open until
+     * somebody notices at close.
+     *
+     * Judged against the triple being *saved*, not the stored one — this screen edits all three, and
+     * a save that changes two of them must be judged on its own result rather than on what was there
+     * before.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertCoherentTriple(PosConfig $config, array $data): void
+    {
+        $mode = SelfOrderMode::from((string) ($data['self_ordering_mode'] ?? $config->self_ordering_mode->value));
+        $service = SelfOrderServiceMode::from((string) ($data['self_ordering_service_mode'] ?? $config->self_ordering_service_mode->value));
+        $payAfter = SelfOrderPayAfter::from((string) ($data['self_ordering_pay_after'] ?? $config->self_ordering_pay_after->value));
+
+        if ($payAfter !== SelfOrderPayAfter::Meal) {
+            return;
+        }
+
+        if ($mode === SelfOrderMode::Kiosk) {
+            throw ValidationException::withMessages([
+                'self_ordering_pay_after' => 'A kiosk customer orders and leaves, so there is nobody'
+                    .' to come back to for payment. Kiosk ordering is paid for each order.',
+            ]);
+        }
+
+        if ($service === SelfOrderServiceMode::Counter) {
+            throw ValidationException::withMessages([
+                'self_ordering_pay_after' => 'A counter customer is standing at the counter, not sitting'
+                    .' at a table, so a tab has nowhere to be settled. Counter service is paid for'
+                    .' each order — or switch this register to table service.',
+            ]);
+        }
+
+        if (! $config->is_restaurant) {
+            throw ValidationException::withMessages([
+                'self_ordering_pay_after' => 'Paying at the end needs table service, and this register'
+                    .' is not in restaurant mode. Turn that on first, in the register settings.',
+            ]);
+        }
     }
 
     /**
