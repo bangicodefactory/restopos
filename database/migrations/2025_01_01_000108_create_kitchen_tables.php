@@ -183,13 +183,26 @@ return new class extends Migration
             $table->text('rendered_text')->nullable();
             $table->unsignedTinyInteger('copies')->default(1);
             $table->string('state', 16)->default(PrintJobState::Queued->value)->index();
+            // Render attempts. Incremented on success as well as failure, so it answers "how many
+            // times did we try to turn this payload into text" and nothing else.
             $table->unsignedTinyInteger('attempts')->default(0);
+            // Delivery attempts, deliberately a separate counter. A ticket that failed to render
+            // twice and then printed first time is not a ticket that was printed three times, and
+            // one column cannot cap two different failure modes.
+            $table->unsignedTinyInteger('print_attempts')->default(0);
+            // Who holds the job, and until when. The lease is what stops two agents on one config
+            // printing the same ticket twice: the claim is a conditional write, so the loser of the
+            // race sees the row already taken instead of a second copy on the pass.
+            $table->string('leased_by', 64)->nullable();
+            $table->timestamp('leased_until', 3)->nullable();
             $table->string('last_error', 255)->nullable();
             $table->timestamp('queued_at', 3)->index();
             $table->timestamp('printed_at', 3)->nullable();
             $table->timestamps();
 
             $table->index(['pos_printer_id', 'state', 'queued_at'], 'print_jobs_poll_index');
+            // Reclaiming an expired lease scans by state + expiry, not by printer.
+            $table->index(['state', 'leased_until'], 'print_jobs_lease_index');
         });
 
         $this->applyChecks('preparation_print_jobs', [

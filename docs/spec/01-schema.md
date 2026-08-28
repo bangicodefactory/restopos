@@ -2364,7 +2364,7 @@ fire-and-forget from the browser and offered a Retry popup).
 | Column | Type | Notes |
 |---|---|---|
 | id | id | |
-| uuid | char(36) **unique** | client-generated ⇒ retries never double-print |
+| uuid | char(36) **unique** | server-generated (`Str::uuid()` in `PreparationService`). It does *not* make retries safe — that is the lease below, not this column |
 | company_id | FK→companies.id, cascade | |
 | pos_config_id | FK→pos_configs.id, cascade, index | |
 | pos_printer_id | FK→pos_printers.id nullable, set null, index | null ⇒ "any printer of this config" |
@@ -2374,13 +2374,40 @@ fire-and-forget from the browser and offered a Retry popup).
 | payload | json | rendered ticket model (lines, groups, header/footer) — printable without re-querying |
 | rendered_text | text nullable | pre-rendered ESC/POS or plain text |
 | copies | unsignedTinyInteger default 1 | |
-| state | enum('queued','printing','printed','failed','skipped') default 'queued', index | |
-| attempts | unsignedTinyInteger default 0 | |
+| state | enum('queued','printing','printed','failed','skipped') default 'queued', index | `printing` = claimed by an agent and not yet acked |
+| attempts | unsignedTinyInteger default 0 | **render** attempts; incremented on success as well as failure |
+| print_attempts | unsignedTinyInteger default 0 | **delivery** attempts, incremented on claim |
+| leased_by | string(64) nullable | uuid of the device holding the job |
+| leased_until | timestamp(3) nullable | claim expiry; past ⇒ reclaimable |
 | last_error | string(255) nullable | |
 | queued_at | timestamp(3), index | |
 | printed_at | timestamp(3) nullable | |
 | timestamps | | |
 | index | (pos_printer_id, state, queued_at) | printer poll query |
+| index | (state, leased_until) | expired-lease reclaim |
+
+**The lease (BAN-411).** `GET /api/kitchen/print-jobs` *claims* what it returns. A job is claimable
+when it is `queued`, or `printing` with `leased_until` in the past; claiming sets `printing`, stamps
+`leased_by`/`leased_until` and increments `print_attempts`.
+
+The claim is a **compare-and-set**: the shortlisting select is only a shortlist, and the claimable
+condition is re-stated inside the per-row update, so `affected === 1` is proof this caller won
+rather than an assumption the shortlist still holds. It deliberately does not rely on
+`lockForUpdate`, which is a no-op on the SQLite the tests run against.
+
+An expiring lease rather than a permanent flag because an agent killed mid-job cannot release
+anything — without expiry that ticket is lost until someone notices a table never got its food.
+`pos:expire-print-jobs` therefore reaps `queued` rows **and** `printing` rows whose lease has
+expired, but never one whose lease is still live: a long ticket on a slow thermal printer is not an
+abandoned one.
+
+Acking is idempotent-by-refusal: a job that is no longer pending returns **409**, so a duplicate
+`failed` ack from a retrying agent cannot reopen a ticket already on the pass. `failed` re-queues
+until `pos.kitchen.print_delivery_max_attempts`, then parks the row as `failed` with its last error.
+Two counters, not one: a ticket that failed to render twice and printed first time is not a ticket
+printed three times, and one column cannot cap two different failure modes.
+
+Asserted by `tests/Feature/Kitchen/PrintJobLeaseTest.php`.
 
 ---
 

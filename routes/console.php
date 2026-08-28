@@ -37,11 +37,27 @@ Artisan::command('pos:prune-sync-requests {--days=}', function (): void {
 Artisan::command('pos:expire-print-jobs {--hours=6}', function (): void {
     $hours = (int) $this->option('hours');
 
+    // Both the never-claimed and the claimed-then-abandoned (BAN-411). Filtering on `queued` alone
+    // used to be the whole rule, and with a lease that would quietly exempt every job an agent had
+    // taken and died on — the one kind that most deserves expiring, since nothing else will ever
+    // look at it again.
     $expired = DB::table('preparation_print_jobs')
-        ->where('state', PrintJobState::Queued->value)
+        ->where(function ($query): void {
+            // Never claimed, or claimed by an agent that has since stopped answering. An agent
+            // still holding a live lease is left alone: a long ticket on a slow thermal printer is
+            // not an abandoned one, and reaping it mid-flight would be this command causing the
+            // very failure it exists to clean up after.
+            $query->where('state', PrintJobState::Queued->value)
+                ->orWhere(function ($q): void {
+                    $q->where('state', PrintJobState::Printing->value)
+                        ->where('leased_until', '<', now());
+                });
+        })
         ->where('queued_at', '<', now()->subHours($hours))
         ->update([
             'state' => PrintJobState::Skipped->value,
+            'leased_by' => null,
+            'leased_until' => null,
             'last_error' => "Expired after {$hours}h without being claimed by a printer agent.",
             'updated_at' => now(),
         ]);

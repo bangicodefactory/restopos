@@ -46,6 +46,9 @@ class PrintJob extends Model
         'copies',
         'state',
         'attempts',
+        'print_attempts',
+        'leased_by',
+        'leased_until',
         'last_error',
         'queued_at',
         'printed_at',
@@ -59,6 +62,8 @@ class PrintJob extends Model
             'copies' => 'integer',
             'state' => PrintJobState::class,
             'attempts' => 'integer',
+            'print_attempts' => 'integer',
+            'leased_until' => 'datetime',
             'queued_at' => 'datetime',
             'printed_at' => 'datetime',
         ];

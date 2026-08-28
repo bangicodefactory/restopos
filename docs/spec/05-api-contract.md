@@ -1011,16 +1011,27 @@ Auth: device + `pos:print`. Query: `printer_id`, `limit` (default 20).
 { "jobs": [ { "id": 12, "uuid": "…", "pos_printer_id": 1, "pos_order_id": 55123,
               "job_type": "prep_new",          // prep_new | prep_cancelled | prep_note_update | prep_fire_course | bill | receipt | tip_slip | cash_report | test
               "payload": { … }, "rendered_text": "        KITCHEN PRINTER\n=====…",
-              "copies": 1, "state": "queued", "attempts": 0, "last_error": null,
+              "copies": 1, "state": "printing", "attempts": 0, "print_attempts": 1,
+              "leased_by": "3f2a…", "leased_until": "…", "last_error": null,
               "queued_at": "…", "printed_at": null } ],
   "server_time": "…" }
 ```
 
 Printers are **polled**, not pushed: a LAN thermal printer behind a station agent cannot hold a websocket, and Chrome's private-network rules make direct browser→printer calls unreliable. `rendered_text` is fixed-width plain text ready for an ESC/POS `TEXT` block; `payload` is the document IR if you want to render it yourself.
 
+**This endpoint claims what it returns** (BAN-411). Every job in the response is now leased to the calling device: `state` is `printing`, `leased_by` is your device uuid, and `print_attempts` has been incremented. Another agent polling the same config will not be offered it. Jobs whose `rendered_text` is not ready yet are *not* returned and *not* claimed — poll again.
+
+Hold the lease only as long as you are printing. If you stop acking, `leased_until` passes and another agent reclaims the job, which is what makes a killed agent's ticket print exactly once on restart rather than never. `pos.kitchen.print_lease_seconds` (default 90) sets the window.
+
 ### `POST /api/kitchen/print-jobs/{job}/ack`
 
 `{ "state": "printed" | "failed" | "skipped", "error": null }` → `204`. Acknowledge per job so a retry never re-prints the ones that already succeeded.
+
+- `printed` — records `printed_at` and releases the lease.
+- `failed` — releases the lease and **re-queues** the job until `pos.kitchen.print_delivery_max_attempts` (default 3) is reached, then parks it as `failed` with your `error` attached, visible in the back-office queue.
+- `skipped` — settles the job without retrying.
+
+**`409` if the job is already settled.** Delivery is at-least-once, so a duplicate ack is ordinary traffic; answering `204` would let a retrying agent reopen a ticket already sitting on the pass. Treat a `409` as "someone already recorded this" and move on. `404` if the job is not yours.
 
 ---
 

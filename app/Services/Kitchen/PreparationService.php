@@ -14,6 +14,7 @@ use App\Enums\PrintJobType;
 use App\Enums\SyncConflictType;
 use App\Enums\SyncResolution;
 use App\Events\Kitchen\KitchenTicketCreated;
+use App\Jobs\RenderPreparationTicket;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\PosConfig;
@@ -942,6 +943,13 @@ final readonly class PreparationService
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+
+                // Render now, off the request path (BAN-411). Rendering used to happen inside the
+                // agent's poll, which meant the first poll for every ticket did the work inline and
+                // came back a render slower; doing it at queue time means the text is already there
+                // when an agent arrives. `index` keeps a lazy fallback for a row whose render job
+                // was lost, so a dropped worker delays a ticket instead of losing it.
+                RenderPreparationTicket::dispatch((int) $jobs[array_key_last($jobs)]);
             }
         }
 
