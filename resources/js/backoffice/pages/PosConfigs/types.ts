@@ -153,6 +153,8 @@ export type PosConfigRecord = {
      * thing — it is a deliberate override granting that role nothing.
      */
     role_abilities: Record<string, string[]> | null;
+    /** Null derives it from the register's name, which is what every register does today. */
+    sequence_prefix: string | null;
     limited_product_count: number;
     limited_customer_count: number;
 
@@ -194,6 +196,20 @@ export type PosConfigOptions = {
     ability_defaults: Record<string, string[]>;
     notes: { id: number; name: string; note_scope: string }[];
     bills: { id: number; name: string; value: string; currency_id: number }[];
+    /**
+     * The document numbers this register has already issued (BOF-045).
+     *
+     * Read-only by design: they are allocated under a row lock, and a screen that could set
+     * `next_value` would let someone reissue a receipt number a customer already holds.
+     */
+    sequences: {
+        id: number;
+        purpose: string;
+        period_key: string | null;
+        prefix: string | null;
+        padding: number;
+        next_value: number;
+    }[];
 };
 
 export type PairedDevice = {
@@ -232,6 +248,7 @@ export type PairingCodeResponse = {
  * tab that would refuse it for the rest of the register's life.
  */
 export const WRITABLE_CONFIG_KEYS = [
+    'sequence_prefix',
     'name',
     'active',
     'is_restaurant',

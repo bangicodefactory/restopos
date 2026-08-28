@@ -1,0 +1,121 @@
+{
+    "_comment": [
+        "Cross-language contract for barcode nomenclatures (BOF-043, BAN-488).",
+        "",
+        "The parser lives once, in packages/domain/src/barcode, and both the register and the",
+        "back-office rule tester call it. What has never been asserted is the join: that a rule an",
+        "operator authors in the back office reaches the till in a shape that parser understands.",
+        "",
+        "So `rules` below is what the back office must ship — BarcodeNomenclatureTest authors these",
+        "through the real endpoint and asserts the bootstrap payload matches, field for field — and",
+        "`cases` is what the parser must then make of them, asserted by",
+        "packages/domain/test/barcode/nomenclature.parity.test.ts.",
+        "",
+        "Either side drifting fails one of the two. Changing the expectations here is a deliberate",
+        "act that fails both until both are updated, which is the point.",
+        "",
+        "Every `scan` carries a real EAN-13 check digit. The pattern match does not verify one — it",
+        "recomputes the base code's — so an invalid barcode would parse identically and the fixture",
+        "would be describing something no printer produces."
+    ],
+    "nomenclature": {
+        "id": 1,
+        "name": "Rayon pesée",
+        "upc_ean_conv": "always",
+        "is_gs1": false
+    },
+    "rules": [
+        {
+            "id": 1,
+            "barcode_nomenclature_id": 1,
+            "name": "Produit pesé",
+            "rule_type": "weight",
+            "pattern": "21.....{NNDDD}",
+            "encoding": "ean13",
+            "alias": null,
+            "sequence": 10
+        },
+        {
+            "id": 2,
+            "barcode_nomenclature_id": 1,
+            "name": "Produit au prix imprimé",
+            "rule_type": "price",
+            "pattern": "22.....{NNDDD}",
+            "encoding": "ean13",
+            "alias": null,
+            "sequence": 20
+        },
+        {
+            "_comment": "Sequence 5, so it is tried first. Its pattern matches the weight rule's codes too — only the encoding gate keeps it from swallowing them, which is what makes the gate testable at all.",
+            "id": 4,
+            "barcode_nomenclature_id": 1,
+            "name": "Étiquette courte",
+            "rule_type": "alias",
+            "pattern": "21",
+            "encoding": "ean8",
+            "alias": "COURTE",
+            "sequence": 5
+        },
+        {
+            "id": 3,
+            "barcode_nomenclature_id": 1,
+            "name": "Carte employé",
+            "rule_type": "alias",
+            "pattern": "041",
+            "encoding": "any",
+            "alias": "BADGE",
+            "sequence": 30
+        }
+    ],
+    "cases": [
+        {
+            "why": "A weighed item: prefix 21, five digits of product code, then 2 integer and 3 decimal digits of weight. 01500 is 1.5 kg.",
+            "scan": "2100001015008",
+            "kind": "weight",
+            "value": 1.5,
+            "ruleId": 1
+        },
+        {
+            "why": "The same rule with a whole number of kilograms, which is where a naive decimal shift shows up as 2000 rather than 2.",
+            "scan": "2100001020002",
+            "kind": "weight",
+            "value": 2,
+            "ruleId": 1
+        },
+        {
+            "why": "A price-embedded label. Same shape, different meaning — and the field is 2 integer digits then 3 decimals, so 4.50 is written 04500, not 00450.",
+            "scan": "2200002045001",
+            "kind": "price",
+            "value": 4.5,
+            "ruleId": 2
+        },
+        {
+            "why": "An alias rule reports the code it aliases to, not the code that was scanned.",
+            "scan": "0410000000007",
+            "kind": "alias",
+            "value": 0,
+            "ruleId": 3
+        },
+        {
+            "why": "An ordinary EAN-13 matches no rule and is still a perfectly good product lookup — the common case, and the one a too-greedy pattern would break.",
+            "scan": "3017620422003",
+            "kind": "product",
+            "value": 0,
+            "ruleId": null
+        },
+        {
+            "why": "The weight rule still wins on a 13-digit code even though an earlier rule's pattern also matches it — that rule is declared for EAN-8, and the encoding gate refuses it before the pattern is tried. Without the gate the scan would alias instead of weighing, and a weighed item would ring up as a badge.",
+            "scan": "2100001015008",
+            "kind": "weight",
+            "value": 1.5,
+            "ruleId": 1
+        },
+        {
+            "why": "The same earlier rule does fire on an 8-digit code, which is what it is for.",
+            "scan": "21000010",
+            "kind": "alias",
+            "value": 0,
+            "ruleId": 4
+        }
+    ]
+}

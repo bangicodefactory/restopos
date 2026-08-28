@@ -154,6 +154,18 @@ final class PosConfigRequest extends FormRequest
                 }
             }],
 
+            // ── numbering (BOF-045, BAN-488) ────────────────────────────────────────────────
+            //
+            // Letters and digits only, because it is glued straight onto a document number with a
+            // slash: a prefix carrying one would produce `T1/2/00412`, which reads as two fields and
+            // is what an accountant would have to unpick.
+            //
+            // Null restores the derived behaviour and is different from `''`, which would store a
+            // value and number documents `/00412`. A text input cannot send null — Laravel's global
+            // `ConvertEmptyStringsToNull` middleware turns the empty box into one before this rule
+            // sees it, which is why there is no normalisation of our own here.
+            'sequence_prefix' => ['sometimes', 'nullable', 'string', 'max:8', 'regex:/^[A-Za-z0-9]+$/'],
+
             // ── barcodes (BOF-043, BAN-488) ─────────────────────────────────────────────────
             //
             // Ours or shared: `barcode_nomenclatures.company_id` is nullable because the standard

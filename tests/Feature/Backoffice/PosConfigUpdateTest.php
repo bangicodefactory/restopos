@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Backoffice\PosConfigUpdate;
 
+use App\Enums\SequencePurpose;
 use App\Models\Pos\PosConfig;
 use App\Models\Pricing\CashRounding;
 use App\Models\Pricing\Currency;
 use App\Models\Pricing\Pricelist;
 use App\Models\User;
 use App\Services\Pos\BootstrapService;
+use App\Services\Pos\SequenceService;
 use BackedEnum;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
@@ -382,4 +385,94 @@ it('bumps the revision so tills discard their cache', function (): void {
     save(['show_product_images' => false])->assertRedirect();
 
     expect((int) stored('config_revision'))->toBeGreaterThan($before);
+});
+
+// ───────────────────────────────────────────── numbering (BOF-045, BAN-488)
+
+it('prefixes document numbers with the register setting', function (): void {
+    // `SequenceService::prefixFor()` derived this from the register's *name*, so renaming a register
+    // renumbered every document after the rename — which is the one thing a legally sequential
+    // number must not do — and a venue whose accountant expects `T1/` on till one could not say so.
+    $config = $this->fx->config;
+
+    test()->patch("/pos-configs/{$config->uuid}", ['sequence_prefix' => 'T1'])
+        ->assertSessionHasNoErrors();
+
+    expect(app(SequenceService::class)->orderName($config->fresh(), 412))->toStartWith('T1/');
+});
+
+it('derives the prefix from the name when the box is left empty', function (): void {
+    // Null and empty are different: null restores the derived behaviour every register has today,
+    // while `''` would store a value and number documents `/00412`. A text input cannot send null,
+    // so the request normalises it.
+    $config = $this->fx->config;
+    $config->forceFill(['sequence_prefix' => 'T1'])->save();
+
+    test()->patch("/pos-configs/{$config->uuid}", ['sequence_prefix' => ''])
+        ->assertSessionHasNoErrors();
+
+    expect(PosConfig::query()->whereKey($config->getKey())->value('sequence_prefix'))->toBeNull()
+        ->and(app(SequenceService::class)->orderName($config->fresh(), 412))->not->toStartWith('/');
+});
+
+it('refuses a prefix that would read as two fields', function (): void {
+    // It is glued straight onto the number with a slash, so a prefix carrying one produces
+    // `T1/2/00412` — two fields where the format promises one, and an accountant unpicking it.
+    test()->patch("/pos-configs/{$this->fx->config->uuid}", ['sequence_prefix' => 'T1/2'])
+        ->assertSessionHasErrors('sequence_prefix');
+});
+
+it('shows the numbers this register has already issued', function (): void {
+    // Read-only, and that is the point: these are allocated under a row lock, and a field that could
+    // set `next_value` would let someone reissue a receipt number a customer already holds.
+    test()->withoutVite();
+
+    app(SequenceService::class)->allocate($this->fx->config, SequencePurpose::Order);
+
+    // `options` is deferred, so it is absent from the first response by design — the settings page
+    // asks for it separately. Requesting it the way the page does is the only way to assert what
+    // the operator will actually be shown.
+    $response = test()->withHeaders([
+        'X-Inertia' => 'true',
+        'X-Inertia-Version' => PosFixtures::inertiaVersion(),
+        'X-Inertia-Partial-Component' => 'PosConfigs/Edit',
+        'X-Inertia-Partial-Data' => 'options',
+    ])->get("/pos-configs/{$this->fx->config->uuid}/edit")->assertOk();
+
+    $sequences = json_decode((string) $response->getContent(), true)['props']['options']['sequences'] ?? [];
+
+    expect($sequences)->not->toBeEmpty()
+        ->and(collect($sequences)->pluck('purpose'))->toContain('order')
+        ->and(collect($sequences)->first())->toHaveKeys(['purpose', 'prefix', 'padding', 'next_value']);
+});
+
+it('shows only this register numbers, not the ones next to it', function (): void {
+    // Two registers in a venue each number their own documents, and the point of the list is to say
+    // what *this* one will issue next. Showing the neighbour's counters would read as this
+    // register's, which is worse than showing nothing during an audit.
+    test()->withoutVite();
+
+    $second = $this->fx->config->replicate(['uuid', 'access_token']);
+    $second->forceFill([
+        'uuid' => (string) Str::uuid(),
+        'name' => 'Terrasse',
+        'access_token' => Str::random(32),
+    ])->save();
+
+    app(SequenceService::class)->allocate($this->fx->config, SequencePurpose::Order);
+    app(SequenceService::class)->allocate($second, SequencePurpose::Invoice);
+
+    $response = test()->withHeaders([
+        'X-Inertia' => 'true',
+        'X-Inertia-Version' => PosFixtures::inertiaVersion(),
+        'X-Inertia-Partial-Component' => 'PosConfigs/Edit',
+        'X-Inertia-Partial-Data' => 'options',
+    ])->get("/pos-configs/{$this->fx->config->uuid}/edit")->assertOk();
+
+    $purposes = collect(
+        json_decode((string) $response->getContent(), true)['props']['options']['sequences'] ?? []
+    )->pluck('purpose');
+
+    expect($purposes)->toContain('order')
+        ->and($purposes)->not->toContain('invoice');
 });
