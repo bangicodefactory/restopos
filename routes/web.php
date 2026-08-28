@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Backoffice\CustomerController;
 use App\Http\Controllers\Backoffice\AttributeController;
 use App\Http\Controllers\Backoffice\AttributeValueController;
 use App\Http\Controllers\Backoffice\ProductAttributeLineController;
@@ -199,6 +200,14 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
     Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
     Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
+    // The customer base (BOF-119, BAN-453). Model-bound by uuid — `Customer` uses `HasUuid`.
+    Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
+    Route::post('customers', [CustomerController::class, 'store'])->name('customers.store');
+    Route::get('customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
+    Route::patch('customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
+    Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
+    Route::post('customers/{customer}/merge', [CustomerController::class, 'merge'])->name('customers.merge');
 
     // Service modes and their opening hours (BOF-113, BAN-429).
     Route::get('presets', [PresetController::class, 'index'])->name('presets.index');
