@@ -116,7 +116,11 @@ export class PrinterRouter {
             );
             if (matched.length > 0) return matched;
 
-            const catchAll = prep.filter((b) => b.allCategories !== true && b.categoryIds.length === 0);
+            // No `allCategories` guard here on purpose: this branch is only reached when
+            // `matched` is empty, and a print-all printer always matches — so one can never arrive
+            // at this filter. Excluding it again would be unreachable code implying a distinction
+            // that cannot arise. (Sabotaging that clause changed no test, which is what exposed it.)
+            const catchAll = prep.filter((b) => b.categoryIds.length === 0);
             if (catchAll.length > 0) return catchAll;
 
             const receipt = enabled.filter((b) => b.role === 'receipt');
