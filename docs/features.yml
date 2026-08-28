@@ -186,8 +186,8 @@ features:
   REG-372: { status: shipped, surface: user, manual: register/orders.md#when-the-server-disagrees-with-your-till }
   RST-057: { status: shipped, surface: user, manual: register/orders.md#moving-an-order-to-a-table }
   RST-058: { status: shipped, surface: user, manual: register/orders.md#two-people-opening-the-same-table }
-  REG-374: { status: shipped, surface: user, manual: register/orders.md#bills-from-another-till }
-  REG-373: { status: shipped, surface: user, manual: register/orders.md#bills-from-another-till }
+  REG-374: { status: shipped, surface: user, manual: register/orders.md#the-register-is-open-in-another-tab }
+  REG-373: { status: shipped, surface: user, manual: register/orders.md#when-the-server-disagrees-with-your-till }
   RST-059: { status: shipped, surface: user, manual: register/floor-plan.md#holding-a-table-for-a-booking }
 
   # Guest count (RST-070 … RST-079) — user
@@ -426,6 +426,9 @@ features:
   BOF-177: { status: shipped, surface: user, manual: todo }
 
   # Offline & PWA (XCT-001 … XCT-029) — internal
+  # BAN-405 — `reloadData()` existed with exactly one occurrence in the tree, its own definition,
+  # so the only repair a venue could actually reach was the device reset. Now a button, guarded.
+  XCT-014: { status: shipped, surface: user, manual: register/orders.md#repair-local-data }
   XCT-016: { status: shipped, surface: internal }
 
   # Tenancy, security & audit (XCT-100 … XCT-129) — internal

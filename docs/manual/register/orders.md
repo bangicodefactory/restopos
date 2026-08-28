@@ -4,6 +4,7 @@ audience: cashier
 features:
   - REG-373
   - REG-374
+  - XCT-014
   - REG-100
   - REG-101
   - REG-103
@@ -232,3 +233,35 @@ If the other till uses a **different currency**, its bills are listed but cannot
 the till says which register to use instead. The amounts on such a bill are in another unit, and this
 register would offer its own payment methods against them — the sale would balance to a number that
 was never the price, and nothing afterwards would look wrong.
+
+## The register is open in another tab
+
+Only one browser tab can take sales at a time. If you open the register a second time on the same
+computer, that tab says so and does not sell.
+
+This is not a limit for its own sake. Both tabs would share the same local database and the same
+queue of sales waiting to reach the server, and both would try to send them — so an order could go
+up twice and appear on the report twice.
+
+Close the other tab and this one takes over on its own. You do not need to reload it, and you do not
+lose anything you had on screen.
+
+If the other tab is gone but this one still says it is blocked — a browser crash, say — wait a few
+seconds. When a tab stops responding the register notices and hands over by itself.
+
+## Repair local data
+
+In the sync panel, under **Repair local data**. Use it when the till works but shows something that
+is plainly out of date — a product missing that the office added this morning, a price that will not
+change no matter how often you sync.
+
+It re-downloads the catalogue and rebuilds what is stored on this device. The register stays paired,
+your open orders stay where they are, and nobody has to enter a manager code.
+
+**It refuses while sales have not reached the server yet**, and tells you how many. Repair is the
+button you reach for when something already looks wrong, and that is exactly the moment when
+rebuilding from a server that has never seen those sales would quietly lose them. Sync first — use
+**Sync now** in the same panel — and then repair.
+
+If it is still wrong after a repair, the last resort is **Reset this device** on the start-up screen.
+That one does clear the pairing, and a manager has to pair the till again.

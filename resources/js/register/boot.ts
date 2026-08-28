@@ -435,11 +435,43 @@ export async function hardReset(force = false): Promise<{ ok: true } | { ok: fal
     return { ok: true };
 }
 
-/** REG-376 (softer) — force a full catalog reload without touching credentials or orders. */
-export async function reloadData(): Promise<boolean> {
+/**
+ * REG-376 (softer) / XCT-014 — repair the local database without revoking the device.
+ *
+ * Re-runs bootstrap and re-hydrates Dexie, keeping the pairing and the orders. Until BAN-405 this
+ * existed but had exactly one occurrence in the tree — its own definition — so the only repair a
+ * venue could actually reach was `hardReset`, which throws the credentials away and needs a
+ * manager to re-pair the till mid-service.
+ *
+ * Refuses while sales are unsynced, mirroring `hardReset`'s guard. A full re-hydrate against a
+ * server that has never seen those orders is exactly when losing them would be silent, and "repair"
+ * is the button a cashier presses precisely when something already looks wrong.
+ */
+export async function reloadData(force = false): Promise<{ ok: true } | { ok: false; unsynced: number }> {
+    const pending = unsyncedCount(useOrderStore.getState());
+    if (pending > 0 && !force) return { ok: false, unsynced: pending };
+
     const ok = await runBootstrap(true);
     if (ok) await hydrateLocal();
-    return ok;
+
+    return ok ? { ok: true } : { ok: false, unsynced: 0 };
+}
+
+/**
+ * Stop this tab writing, because another tab is the elected writer (REG-374, BAN-405).
+ *
+ * Only the outbox drain is stopped, and that is the whole point: two tabs draining one outbox both
+ * push the same orders, and the second push of an order the server has already accepted is at best
+ * wasted work and at worst a duplicate sale. Reads, the replica and the rendered screen are left
+ * alone so a follower tab shows the till rather than a broken page.
+ */
+export function pauseWrites(): void {
+    tryRuntime()?.syncer.stop();
+}
+
+/** This tab is the elected writer again — resume draining. Idempotent, like `start()` itself. */
+export function resumeWrites(): void {
+    void tryRuntime()?.syncer.start();
 }
 
 /** Manual "sync now" from the status bar. */
