@@ -282,7 +282,13 @@ it('queues and renders preparation print jobs, then acknowledges them', function
 
     $job = $jobs->json('jobs.0');
 
-    expect($job['state'])->toBe(PrintJobState::Queued->value)
+    // Polling *claims* (BAN-411): the agent that was handed this job now holds it, so the row is
+    // `printing` with a lease, not `queued`. Before the lease existed, `index` handed the same
+    // `queued` row to every agent that asked and wrote nothing back.
+    expect($job['state'])->toBe(PrintJobState::Printing->value)
+        ->and($job['leased_by'])->not->toBeNull()
+        ->and($job['leased_until'])->not->toBeNull()
+        ->and($job['print_attempts'])->toBe(1)
         ->and($job['job_type'])->toBe('prep_new')
         ->and($job['rendered_text'])->toContain('KITCHEN PRINTER')
         ->and($job['rendered_text'])->toContain('Margherita')

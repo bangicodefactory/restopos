@@ -171,6 +171,13 @@ return [
     'kitchen' => [
         'characters_per_line' => 42,
         'print_job_max_attempts' => 5,
+        // How long a claimed job stays claimed. Long enough that a slow thermal printer finishing a
+        // long ticket is not treated as dead, short enough that a killed agent's jobs come back
+        // within a service rather than at closing time.
+        'print_lease_seconds' => 90,
+        // Delivery attempts before a job is parked. Distinct from `print_job_max_attempts`, which
+        // caps *rendering*.
+        'print_delivery_max_attempts' => 3,
         'done_retention_minutes' => 60,
     ],
 
