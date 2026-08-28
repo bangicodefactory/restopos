@@ -10,6 +10,7 @@ use App\Http\Controllers\Backoffice\CategoryController;
 use App\Http\Controllers\Backoffice\DashboardController;
 use App\Http\Controllers\Backoffice\BarcodeNomenclatureController;
 use App\Http\Controllers\Backoffice\DeviceController;
+use App\Http\Controllers\Backoffice\FiscalPositionController;
 use App\Http\Controllers\Backoffice\MediaController;
 use App\Http\Controllers\Backoffice\EmployeeController;
 use App\Http\Controllers\Backoffice\FloorController;
@@ -185,6 +186,14 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('media/{media:id}', [MediaController::class, 'destroy'])->name('media.destroy');
 
     // Barcode nomenclatures and their rules (BOF-043, BAN-488).
+    // Fiscal positions and their tax mappings (BOF-036, BAN-398).
+    Route::get('fiscal-positions', [FiscalPositionController::class, 'index'])->name('fiscal-positions.index');
+    Route::post('fiscal-positions', [FiscalPositionController::class, 'store'])->name('fiscal-positions.store');
+    Route::patch('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'update'])->name('fiscal-positions.update');
+    Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
+    Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
+    Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
     Route::get('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'index'])->name('barcode-nomenclatures.index');
     Route::post('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'store'])->name('barcode-nomenclatures.store');
     Route::patch('barcode-nomenclatures/{nomenclature}', [BarcodeNomenclatureController::class, 'update'])->name('barcode-nomenclatures.update');

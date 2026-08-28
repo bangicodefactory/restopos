@@ -224,6 +224,22 @@ export class PosDb extends Dexie {
             decimalPrecisions: 'id, name',
         });
 
+        /*
+         * v3 — the fiscal-position mapping index names a column that does not exist.
+         *
+         * The compound index was `[fiscal_position_id+source_tax_id]`, and the row's column is
+         * `tax_src_id`. Dexie happily builds an index over a missing key, so it silently indexed
+         * nothing — which mattered less than the matching bug beside it: the client type used the
+         * same wrong names, so every mapping arrived as `{}` and no fiscal position has ever
+         * rewritten a tax at the till (BAN-398).
+         *
+         * A version bump rather than an edit to v1, because an index change is a schema change and
+         * an installed till upgrading from v1 or v2 has to be told how to get here.
+         */
+        this.version(3).stores({
+            fiscalPositionTaxes: 'id, fiscal_position_id, [fiscal_position_id+tax_src_id]',
+        });
+
         // A schema bump is the one moment a second tab can hard-stop the app: IndexedDB refuses to
         // upgrade while another connection is open on the old version, and `open()` then never
         // settles — a boot screen that hangs forever with nothing on it. The register, the KDS and

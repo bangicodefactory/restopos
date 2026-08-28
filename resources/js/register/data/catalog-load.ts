@@ -243,7 +243,7 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
             name: position.name,
             mappings: fiscalPositionTaxes
                 .filter((t) => t.fiscal_position_id === position.id)
-                .map((t) => ({ taxSrcId: t.source_tax_id, taxDestId: t.dest_tax_id })),
+                .map((t) => ({ taxSrcId: t.tax_src_id, taxDestId: t.tax_dest_id })),
         });
     }
 
