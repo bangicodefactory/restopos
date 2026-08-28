@@ -396,3 +396,53 @@ it('does not let a booking on the boundary count against two intervals', functio
     expect($slots->isFullAt($preset, Carbon::parse('2026-06-01 12:25:00')))->toBeTrue()
         ->and($slots->isFullAt($preset, Carbon::parse('2026-06-01 12:10:00')))->toBeFalse();
 });
+
+it('carries a mode created here all the way to the till', function (): void {
+    // The ticket's acceptance criterion, and the check this project keeps needing: a screen that
+    // saves and a register that never sees the result is the shape behind four premature Dones.
+    // `PosPreset::posLoadScope` decides what reaches a register, and it reads the pivot and the
+    // default — neither of which the create form writes, so this is the join being asserted, not the
+    // insert.
+    test()->post('/presets', ['name' => 'Livraison'])->assertSessionHasNoErrors();
+    $preset = PosPreset::query()->where('name', 'Livraison')->firstOrFail();
+
+    $reaches = function () use ($preset): bool {
+        $payload = test()->withHeaders($this->fx->headers())
+            ->getJson('/api/pos/bootstrap')->assertOk()->json();
+
+        return collect($payload['data']['pos_presets'] ?? [])
+            ->pluck('id')
+            ->contains($preset->getKey());
+    };
+
+    // Created but attached to nothing: the register must not see it.
+    expect($reaches())->toBeFalse();
+
+    test()->patch("/pos-configs/{$this->fx->config->uuid}", [
+        'use_presets' => true,
+        'default_preset_id' => $preset->getKey(),
+    ])->assertSessionHasNoErrors();
+
+    expect($reaches())->toBeTrue();
+});
+
+it('carries its opening hours to the till alongside it', function (): void {
+    // The windows ship as their own table in the payload. A mode that arrives without its hours is a
+    // booking surface with no constraint on it.
+    test()->post('/presets', ['name' => 'Livraison'])->assertSessionHasNoErrors();
+    $preset = PosPreset::query()->where('name', 'Livraison')->firstOrFail();
+
+    addWindow($preset)->assertSessionHasNoErrors();
+
+    test()->patch("/pos-configs/{$this->fx->config->uuid}", [
+        'use_presets' => true,
+        'default_preset_id' => $preset->getKey(),
+    ])->assertSessionHasNoErrors();
+
+    $payload = test()->withHeaders($this->fx->headers())
+        ->getJson('/api/pos/bootstrap')->assertOk()->json();
+
+    expect(collect($payload['data']['preset_service_windows'] ?? [])
+        ->pluck('pos_preset_id')
+        ->contains($preset->getKey()))->toBeTrue();
+});
