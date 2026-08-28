@@ -103,7 +103,12 @@ Route::middleware(['auth'])->group(function (): void {
 
     Route::get('pricelists', [PricelistController::class, 'index'])->name('pricelists.index');
     Route::get('pricelists/{pricelist}/edit', [PricelistController::class, 'edit'])->name('pricelists.edit');
+    Route::post('pricelists', [PricelistController::class, 'store'])->name('pricelists.store');
     Route::patch('pricelists/{pricelist}', [PricelistController::class, 'update'])->name('pricelists.update');
+    Route::delete('pricelists/{pricelist}', [PricelistController::class, 'destroy'])->name('pricelists.destroy');
+    Route::post('pricelists/{pricelist}/items', [PricelistController::class, 'storeItem'])->name('pricelist-items.store');
+    Route::patch('pricelists/{pricelist}/items/{item}', [PricelistController::class, 'updateItem'])->name('pricelist-items.update');
+    Route::delete('pricelists/{pricelist}/items/{item}', [PricelistController::class, 'destroyItem'])->name('pricelist-items.destroy');
 
     Route::get('product-categories', [ProductCategoryController::class, 'index'])->name('product-categories.index');
     Route::post('product-categories', [ProductCategoryController::class, 'store'])->name('product-categories.store');

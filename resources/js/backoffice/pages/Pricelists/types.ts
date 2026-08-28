@@ -18,6 +18,8 @@ export type PricelistListRow = {
 
 export type PricelistsIndexProps = {
     pricelists: PricelistListRow[];
+    /** What a new list can price in. Currencies are global reference data, not company-owned. */
+    currencies: { id: number; name: string; code: string }[];
 };
 
 export type PricelistRecord = {
@@ -66,6 +68,9 @@ export type PricelistItemRecord = {
 export type PricelistEditProps = {
     pricelist: PricelistRecord;
     items: PricelistItemRecord[];
+    /** What a rule can be pointed at — `edit()` sent neither before BAN-401. */
+    products: { id: number; name: string }[];
+    categories: { id: number; name: string }[];
 };
 
 /**

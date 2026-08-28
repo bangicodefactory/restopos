@@ -45,8 +45,15 @@ export const routes = {
 
     pricelists: {
         index: (): string => '/pricelists',
+        store: (): string => '/pricelists',
         edit: (id: number): string => `/pricelists/${id}/edit`,
         update: (id: number): string => `/pricelists/${id}`,
+        destroy: (id: number): string => `/pricelists/${id}`,
+    },
+    pricelistItems: {
+        store: (pricelistId: number): string => `/pricelists/${pricelistId}/items`,
+        update: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
+        destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
     productAttributes: {
