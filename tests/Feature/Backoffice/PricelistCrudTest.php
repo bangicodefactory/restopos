@@ -281,7 +281,10 @@ it('ships the create form what it needs to offer a currency', function (): void 
     // The form cannot be filled in from props that were never sent. `index()` shipped only the rows,
     // so the currency select would have rendered empty and every save would have been refused for a
     // missing `currency_id` — a screen that looks finished and cannot be used.
+    test()->withoutVite();
+
     test()->get('/pricelists')
+        ->assertOk()
         ->assertInertia(fn ($page) => $page->has('currencies', fn ($currencies) => $currencies
             ->has(0, fn ($currency) => $currency->hasAll(['id', 'name', 'code']))
             ->etc()));
@@ -290,9 +293,12 @@ it('ships the create form what it needs to offer a currency', function (): void 
 it('ships the rule editor something to point a rule at', function (): void {
     // Asserting the prop merely *exists* is not enough: an empty array is the failure being guarded
     // against, and it satisfies `has()`. The venue's own product has to actually be in there.
+    test()->withoutVite();
+
     $list = ourList();
 
     test()->get("/pricelists/{$list->getKey()}/edit")
+        ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('products', fn ($products) => collect($products)
                 ->pluck('id')->contains($this->fx->product->getKey()))
