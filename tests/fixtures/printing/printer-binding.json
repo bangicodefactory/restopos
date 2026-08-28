@@ -1,0 +1,111 @@
+{
+    "_comment": [
+        "Cross-language contract for printer bindings (XCT-050, BAN-426).",
+        "",
+        "This fixture exists because the two sides of this wire had never met. `PosPrinterRow`",
+        "declared `address`, `print_receipt` and `pos_category_ids`; `pos_printers` has",
+        "`printer_ip`, `is_receipt_printer` and a pivot; and `posLoadFields()` returned ['*'], so",
+        "the raw columns shipped under their own names. Every field the register read came back",
+        "undefined: a receipt printer was classified `prep`, `categoryIds` was undefined, and the",
+        "first prep ticket of the shift threw a TypeError inside `resolveTargets`. No test on",
+        "either side could see it, because the only fixtures were hand-written to the declared",
+        "shape rather than to what the server sends.",
+        "",
+        "So `printers` below is what the bootstrap must ship \u2014 PrinterBindingContractTest asserts",
+        "the real endpoint's payload carries exactly these field names and these derivations \u2014 and",
+        "`bindings` and `routing` are what the register must then make of them, asserted by",
+        "resources/js/register/domain/printing.test.ts.",
+        "",
+        "Either side drifting fails one of the two."
+    ],
+    "printers": [
+        {
+            "_why": "Front-of-house receipt printer over Epson ePOS. No port set, so the address is the bare IP.",
+            "id": 1,
+            "name": "Imprimante caisse (salle)",
+            "printer_type": "epson_epos",
+            "address": "192.168.1.51",
+            "epos_device_id": null,
+            "profile": null,
+            "pos_category_ids": [],
+            "print_all_categories": false,
+            "print_receipt": true,
+            "characters_per_line": 42,
+            "copies": 1,
+            "sequence": 0
+        },
+        {
+            "_why": "Hot kitchen, network ESC/POS on 9100, routed by category. Address joins ip and port.",
+            "id": 2,
+            "name": "Imprimante cuisine chaude",
+            "printer_type": "network_escpos",
+            "address": "192.168.1.52:9100",
+            "epos_device_id": null,
+            "profile": "epson-tm-t88",
+            "pos_category_ids": [10, 11],
+            "print_all_categories": false,
+            "print_receipt": false,
+            "characters_per_line": 42,
+            "copies": 1,
+            "sequence": 10
+        },
+        {
+            "_why": "Bar, routed by its own categories only.",
+            "id": 3,
+            "name": "Imprimante bar",
+            "printer_type": "network_escpos",
+            "address": "192.168.1.53:9100",
+            "epos_device_id": null,
+            "profile": null,
+            "pos_category_ids": [20],
+            "print_all_categories": false,
+            "print_receipt": false,
+            "characters_per_line": 42,
+            "copies": 1,
+            "sequence": 20
+        },
+        {
+            "_why": "The pass: prints every category. Distinct from an empty category list, which is only a fallback \u2014 this one must print a drink the bar is already printing.",
+            "id": 4,
+            "name": "Imprimante passe",
+            "printer_type": "epson_epos",
+            "address": "192.168.1.54",
+            "epos_device_id": "local_printer2",
+            "profile": null,
+            "pos_category_ids": [],
+            "print_all_categories": true,
+            "print_receipt": false,
+            "characters_per_line": 42,
+            "copies": 1,
+            "sequence": 30
+        }
+    ],
+    "bindings": [
+        { "id": "1", "role": "receipt", "categoryIds": [], "allCategories": false, "transport": "epos", "address": "192.168.1.51", "eposDeviceId": null, "profile": "generic" },
+        { "id": "2", "role": "prep", "categoryIds": [10, 11], "allCategories": false, "transport": "epos", "address": "192.168.1.52:9100", "eposDeviceId": null, "profile": "epson-tm-t88" },
+        { "id": "3", "role": "prep", "categoryIds": [20], "allCategories": false, "transport": "epos", "address": "192.168.1.53:9100", "eposDeviceId": null, "profile": "generic" },
+        { "id": "4", "role": "prep", "categoryIds": [], "allCategories": true, "transport": "epos", "address": "192.168.1.54", "eposDeviceId": "local_printer2", "profile": "generic" }
+    ],
+    "routing": [
+        {
+            "why": "A starter goes to the hot kitchen AND the pass. Before allCategories existed the pass was demoted to a fallback and printed nothing whenever a specific printer matched \u2014 the pass would have missed every course of every service.",
+            "job": { "role": "prep", "categoryIds": [10] },
+            "expect": ["2", "4"]
+        },
+        {
+            "why": "A drink goes to the bar and the pass, not to the kitchen.",
+            "job": { "role": "prep", "categoryIds": [20] },
+            "expect": ["3", "4"]
+        },
+        {
+            "why": "A category no printer claims still reaches the pass, because print-all matches before the fallback rule is ever consulted.",
+            "job": { "role": "prep", "categoryIds": [99] },
+            "expect": ["4"]
+        },
+        {
+            "why": "A receipt goes to the one receipt printer. This is the case that silently regressed: with print_receipt undefined every printer was prep, so no receipt target existed and the placeholder browser sink was invented on a till that has four real printers.",
+            "job": { "role": "receipt", "categoryIds": [] },
+            "expect": ["1"]
+        }
+    ]
+}

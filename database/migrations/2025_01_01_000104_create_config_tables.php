@@ -221,10 +221,19 @@ return new class extends Migration
             $table->string('printer_ip', 128)->nullable();
             $table->unsignedSmallInteger('printer_port')->nullable();
             $table->string('serial_number', 64)->nullable();
+            // ESC/POS command dialect. The transports render through `resolveProfile()`, which
+            // falls back to `generic` — correct for an unknown model, wrong for a TM-T88 whose
+            // cut and drawer-kick sequences differ. Nullable because most venues never set it.
+            $table->string('profile', 32)->nullable();
+            // Epson ePOS device id, the `devid` query parameter. A single TM-i exposes
+            // `local_printer`; a multi-port unit exposes `local_printer2` and up, and without
+            // this every port of it would be addressed as the first one.
+            $table->string('epos_device_id', 32)->nullable();
             $table->boolean('is_receipt_printer')->default(false);
             $table->boolean('print_all_categories')->default(false);
             $table->unsignedTinyInteger('characters_per_line')->default(42);
             $table->unsignedTinyInteger('copies')->default(1);
+            $table->unsignedSmallInteger('sequence')->default(0);
             $table->boolean('active')->default(true)->index();
             $table->timestamps();
         });

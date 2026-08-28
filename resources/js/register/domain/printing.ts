@@ -37,9 +37,14 @@ export function bindingsFromCatalog(catalog: CatalogIndex = getCatalog()): Print
         id: String(printer.id),
         name: printer.name,
         role: printer.print_receipt ? 'receipt' : 'prep',
-        categoryIds: printer.pos_category_ids,
+        // `?? []` is not defensive decoration. A printer whose categories relation was not loaded
+        // ships no array at all, and `resolveTargets` calls `.some()` on this the first time a
+        // cashier sends a course — the difference between a fallback and a TypeError mid-service.
+        categoryIds: printer.pos_category_ids ?? [],
+        allCategories: printer.print_all_categories === true,
         transport: TRANSPORTS[printer.printer_type] ?? 'browser',
         address: printer.address ?? '',
+        eposDeviceId: printer.epos_device_id,
         profile: (printer.profile ?? 'generic') as PrinterProfileId,
         enabled: true,
         status: { online: false, paper: 'unknown', cover: 'unknown', checkedAt: 0 },
@@ -55,8 +60,10 @@ export function bindingsFromCatalog(catalog: CatalogIndex = getCatalog()): Print
             name: 'Navigateur',
             role: 'receipt',
             categoryIds: [],
+            allCategories: false,
             transport: 'browser',
             address: '',
+            eposDeviceId: null,
             profile: 'generic',
             enabled: true,
             placeholder: true,

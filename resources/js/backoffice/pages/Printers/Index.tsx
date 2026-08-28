@@ -53,6 +53,7 @@ import { routes } from '../../lib/routes';
 import {
     CONNECTION_FIELDS,
     JOB_STATE_TONE,
+    PRINTER_PROFILE_OPTIONS,
     PRINTER_TYPE_LABEL,
     categoryOptions,
     toForm,
@@ -286,9 +287,34 @@ function PrinterEditor({
                         disabled={!fields.port}
                         lockedReason={fields.port ? undefined : t('printer.notForType')}
                     />
+                    <TextField
+                        label={t('printer.eposDeviceId')}
+                        value={form.data.epos_device_id}
+                        error={form.errors.epos_device_id}
+                        onChange={(value) => form.setData('epos_device_id', value)}
+                        disabled={form.data.printer_type !== 'epson_epos'}
+                        lockedReason={form.data.printer_type === 'epson_epos' ? undefined : t('printer.notForType')}
+                        placeholder="local_printer"
+                        hint={t('printer.eposDeviceIdHint')}
+                    />
+                    <TextField
+                        label={t('printer.serialNumber')}
+                        value={form.data.serial_number}
+                        error={form.errors.serial_number}
+                        onChange={(value) => form.setData('serial_number', value)}
+                        hint={t('printer.serialNumberHint')}
+                    />
                 </FormSection>
 
                 <FormSection title={t('config.group.receipts')}>
+                    <SelectField
+                        label={t('printer.profile')}
+                        value={form.data.profile}
+                        error={form.errors.profile}
+                        options={PRINTER_PROFILE_OPTIONS}
+                        onChange={(value) => form.setData('profile', value)}
+                        hint={t('printer.profileHint')}
+                    />
                     <NumberField
                         label={t('printer.charsPerLine')}
                         value={form.data.characters_per_line}
@@ -306,6 +332,15 @@ function PrinterEditor({
                         onChange={(value) => form.setData('copies', value)}
                         min={1}
                         max={5}
+                    />
+                    <NumberField
+                        label={t('printer.sequence')}
+                        value={form.data.sequence}
+                        error={form.errors.sequence}
+                        onChange={(value) => form.setData('sequence', value)}
+                        min={0}
+                        max={9_999}
+                        hint={t('printer.sequenceHint')}
                     />
                     <ToggleField
                         label={t('printer.receipt')}

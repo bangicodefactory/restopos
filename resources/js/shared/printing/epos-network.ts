@@ -33,6 +33,12 @@ export type EposOptions = {
     timeoutMs?: number;
     /** Force plain HTTP even from an HTTPS page (only useful behind the print agent). */
     forceHttp?: boolean;
+    /**
+     * ePOS `devid`. Defaults to `local_printer`, which is the only device a single TM-i exposes;
+     * a multi-port unit exposes `local_printer2` and up, and every binding pointed at the same
+     * devid would queue every ticket on one roll.
+     */
+    deviceId?: string | null;
 };
 
 /** `TM-m30_012345` → `012345.printer.epson.net`, Epson's certified-domain trick. */
@@ -44,17 +50,19 @@ export function epsonCertifiedDomain(serial: string): string {
 export function eposServiceUrl(address: string, options: EposOptions = {}): string {
     const pageSecure = globalThis.location?.protocol === 'https:';
     const hasScheme = /^https?:\/\//i.test(address);
+    const deviceId = options.deviceId ?? 'local_printer';
 
     if (hasScheme) {
         const url = new URL(address);
         if (!url.pathname || url.pathname === '/') url.pathname = SERVICE_PATH;
-        url.searchParams.set('devid', url.searchParams.get('devid') ?? 'local_printer');
+        // An explicit devid already in the address wins: an operator who typed one meant it.
+        url.searchParams.set('devid', url.searchParams.get('devid') ?? deviceId);
         url.searchParams.set('timeout', String(options.timeoutMs ?? 10_000));
         return url.toString();
     }
 
     const scheme = options.forceHttp ? 'http' : pageSecure ? 'https' : 'http';
-    return `${scheme}://${address}${SERVICE_PATH}?devid=local_printer&timeout=${options.timeoutMs ?? 10_000}`;
+    return `${scheme}://${address}${SERVICE_PATH}?devid=${encodeURIComponent(deviceId)}&timeout=${options.timeoutMs ?? 10_000}`;
 }
 
 export class EposNetworkTransport implements PrintTransport {
@@ -79,7 +87,12 @@ export class EposNetworkTransport implements PrintTransport {
     }
 
     private async send(xml: string, binding: PrinterBinding): Promise<PrintOutcome> {
-        const url = eposServiceUrl(binding.address, this.options);
+        // The binding's devid wins over the transport default: one transport instance serves
+        // every ePOS printer on the LAN, so a per-transport devid would address them all alike.
+        const url = eposServiceUrl(binding.address, {
+            ...this.options,
+            deviceId: binding.eposDeviceId ?? this.options.deviceId,
+        });
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 15_000);
 
