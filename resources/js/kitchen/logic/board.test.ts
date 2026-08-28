@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { BoardFilter } from './board';
 import type { KitchenLine, KitchenOrder, KitchenStage } from '../types';
 import {
     EMPTY_FILTER,
@@ -11,6 +12,7 @@ import {
     buildBoard,
     effectiveStageId,
     filterLines,
+    groupCombos,
     groupLinesByCourse,
     isCardComplete,
     isLineCancelled,
@@ -500,5 +502,145 @@ describe('isLineOpen', () => {
         // that" from "that was called off".
         expect(isLineDone(line({ state: 'todo', change_type: 'cancelled' }))).toBe(false);
         expect(isLineCancelled(line({ state: 'todo', change_type: 'cancelled' }))).toBe(true);
+    });
+});
+
+// ── combo grouping (KDS-006, BAN-433) ────────────────────────────────────────
+
+function comboLine(uuid: string, name: string, parent: string | null = null): KitchenLine {
+    return {
+        id: Number(uuid.replace(/\D/g, '')) || 1,
+        // Deliberately different from `pos_order_line_uuid`. A prep line has its own identity, and
+        // `combo_parent_uuid` names the *order line* — a fixture that made the two equal could not
+        // tell a lookup by the right key from a lookup by the wrong one.
+        uuid: `prep-${uuid}`,
+        pos_order_line_uuid: uuid,
+        prep_stage_id: 1,
+        course_index: 1,
+        product_id: 1,
+        display_name: name,
+        quantity: '1',
+        change_type: 'new',
+        customer_note: null,
+        internal_note: null,
+        state: 'todo',
+        started_at: null,
+        ready_at: null,
+        served_at: null,
+        fired_at: null,
+        combo_parent_uuid: parent,
+    };
+}
+
+describe('groupCombos', () => {
+    it('puts each child directly under its own parent', () => {
+        const grouped = groupCombos([
+            comboLine('l1', 'Menu A'),
+            comboLine('l2', 'Menu B'),
+            comboLine('l3', 'Fries', 'l1'),
+            comboLine('l4', 'Cola', 'l2'),
+        ]);
+
+        expect(grouped.map((g) => [g.line.display_name, g.depth])).toEqual([
+            ['Menu A', 0],
+            ['Fries', 1],
+            ['Menu B', 0],
+            ['Cola', 1],
+        ]);
+    });
+
+    it('keeps the board order for everything that is not a combo', () => {
+        const grouped = groupCombos([comboLine('l1', 'Soup'), comboLine('l2', 'Steak')]);
+
+        expect(grouped.map((g) => g.line.display_name)).toEqual(['Soup', 'Steak']);
+        expect(grouped.every((g) => g.depth === 0)).toBe(true);
+    });
+
+    it('promotes a child whose parent is not on this card rather than hiding it', () => {
+        // A station filter or a transfer can legitimately separate the two. Dropping the child is
+        // how a component never gets cooked — the same reason register/domain/split.ts promotes.
+        const grouped = groupCombos([comboLine('l3', 'Fries', 'missing-parent')]);
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]?.depth).toBe(0);
+    });
+
+    it('keeps every line exactly once', () => {
+        const lines = [
+            comboLine('l1', 'Menu A'),
+            comboLine('l3', 'Fries', 'l1'),
+            comboLine('l4', 'Orphan', 'gone'),
+            comboLine('l2', 'Steak'),
+        ];
+
+        const grouped = groupCombos(lines);
+
+        expect(grouped).toHaveLength(lines.length);
+        expect(new Set(grouped.map((g) => g.line.uuid)).size).toBe(lines.length);
+    });
+
+    it('does not loop forever when a line claims to be its own parent', () => {
+        // Only bad data produces this, but the card renders whatever the board hands it.
+        const grouped = groupCombos([comboLine('l1', 'Weird', 'l1')]);
+
+        expect(grouped).toHaveLength(1);
+    });
+});
+
+// ── service-mode filter (KDS-012, BAN-433) ───────────────────────────────────
+
+describe('service-mode filter', () => {
+    const board = (filter: BoardFilter, orders: KitchenOrder[]) =>
+        buildBoard({
+            orders,
+            stages: STAGES,
+            filter,
+            categoryOf: () => 7,
+            thresholds: THRESHOLDS,
+            now: NOW,
+            doneRetentionMinutes: 60,
+        });
+
+    const takeaway = order({ id: 1, uuid: 'p1', preset_label: 'Takeaway' });
+    const delivery = order({ id: 2, uuid: 'p2', preset_label: 'Delivery' });
+    const dineIn = order({ id: 3, uuid: 'p3', preset_label: null });
+
+    it('shows everything when no service mode is chosen', () => {
+        expect(board(EMPTY_FILTER, [takeaway, delivery, dineIn]).list).toHaveLength(3);
+    });
+
+    it('narrows to the chosen mode', () => {
+        const view = board({ ...EMPTY_FILTER, presets: ['Takeaway'] }, [takeaway, delivery, dineIn]);
+
+        expect(view.list.map((o) => o.id)).toEqual([1]);
+    });
+
+    it('accepts more than one mode at once', () => {
+        const view = board({ ...EMPTY_FILTER, presets: ['Takeaway', 'Delivery'] }, [takeaway, delivery, dineIn]);
+
+        expect(view.list.map((o) => o.id).sort()).toEqual([1, 2]);
+    });
+
+    it('excludes a card with no service mode when one is chosen', () => {
+        // A dine-in card has a table, not a preset. Letting it through "because it has no mode"
+        // would make the takeaway filter show the whole room.
+        const view = board({ ...EMPTY_FILTER, presets: ['Takeaway'] }, [dineIn]);
+
+        expect(view.list).toEqual([]);
+    });
+
+    it('filters the columns and the flat list identically', () => {
+        // The two layouts render from one projection precisely so they cannot disagree.
+        const view = board({ ...EMPTY_FILTER, presets: ['Delivery'] }, [takeaway, delivery]);
+        const inColumns = view.columns.flatMap((column) => column.orders.map((o) => o.id));
+
+        expect(inColumns.sort()).toEqual(view.list.map((o) => o.id).sort());
+    });
+
+    it('does not drop a card whose lines are all still relevant', () => {
+        // Order-level: the mode belongs to the ticket, so it must not interact with line filtering.
+        const view = board({ ...EMPTY_FILTER, presets: ['Takeaway'] }, [takeaway]);
+
+        expect(view.list[0]?.lines).toHaveLength(takeaway.lines.length);
     });
 });

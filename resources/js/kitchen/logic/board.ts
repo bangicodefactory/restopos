@@ -53,9 +53,17 @@ export type BoardFilter = {
     lateOnly: boolean;
     /** `null` = every course. */
     courseIndex: number | null;
+    /**
+     * Service modes to show — "just the takeaways" (KDS-012). Empty = all.
+     *
+     * Matched against `preset_label`, which is a *label* and not an id: the board reads a
+     * denormalised snapshot of what the order was taken as, so that renaming a preset later does
+     * not retroactively change what a card says it was.
+     */
+    presets: readonly string[];
 };
 
-export const EMPTY_FILTER: BoardFilter = { categoryIds: [], lateOnly: false, courseIndex: null };
+export const EMPTY_FILTER: BoardFilter = { categoryIds: [], lateOnly: false, courseIndex: null, presets: [] };
 
 export type StageColumn = {
     stage: KitchenStage;
@@ -214,6 +222,11 @@ export function buildBoard(options: BuildBoardOptions): BoardView {
             if (withinRetention) recallable.push(projected);
             continue;
         }
+
+        // Order-level, so it belongs here rather than in `filterLines`: the service mode is a
+        // property of the whole ticket, and filtering it line by line would leave a card with no
+        // lines that the loop above has already decided to keep.
+        if (filter.presets.length > 0 && !filter.presets.includes(order.preset_label ?? '')) continue;
 
         if (filter.lateOnly) {
             const level = urgencyOf(elapsedSeconds(projected, now), thresholds);
@@ -479,3 +492,69 @@ export type PendingAction =
     | { kind: 'stage'; prepOrderId: number; stageId: number }
     | { kind: 'recall'; prepOrderId: number }
     | { kind: 'line'; lineId: number; state: KitchenLineState };
+
+/** A line as the card renders it: combo children sit under their parent. */
+export type GroupedLine = {
+    line: KitchenLine;
+    /** 0 = top level, 1 = a component of the line above it. */
+    depth: number;
+};
+
+/**
+ * Combo children grouped under their parent (KDS-006).
+ *
+ * `combo_parent_uuid` has been travelling all the way to the client — populated server-side,
+ * carried in the broadcast payload, mapped into the store, declared on the type — and read by
+ * nothing. So a set menu arrived at the pass as a flat list of unrelated items, and a cook had no
+ * way to tell which drink belonged to which meal.
+ *
+ * Order is preserved: children follow their own parent, and everything else keeps the position the
+ * board gave it. A child whose parent is not on this card is **promoted to top level** rather than
+ * dropped — the same rule `register/domain/split.ts` already applies for the same reason, since a
+ * transfer or a station filter can legitimately separate the two, and silently hiding an item is
+ * how something never gets cooked.
+ */
+export function groupCombos(lines: readonly KitchenLine[]): GroupedLine[] {
+    const present = new Set(lines.map((line) => line.pos_order_line_uuid));
+
+    /**
+     * The parent this line actually nests under, or null for top level.
+     *
+     * A line naming *itself* is treated as having no parent. Only bad data produces that, but the
+     * card renders whatever the board hands it, and the honest failure for a self-reference is a
+     * line shown flat — not a line silently missing from the pass.
+     */
+    const parentOf = (line: KitchenLine): string | null => {
+        const parent = line.combo_parent_uuid ?? null;
+        if (parent === null || parent === line.pos_order_line_uuid) return null;
+
+        return present.has(parent) ? parent : null;
+    };
+
+    const childrenOf = new Map<string, KitchenLine[]>();
+
+    for (const line of lines) {
+        const parent = parentOf(line);
+        if (parent === null) continue;
+
+        const bucket = childrenOf.get(parent);
+        if (bucket) bucket.push(line);
+        else childrenOf.set(parent, [line]);
+    }
+
+    const out: GroupedLine[] = [];
+
+    for (const line of lines) {
+        // Children are emitted with their parent below. A line with no *effective* parent — none
+        // given, absent from this card, or itself — falls through here as top level.
+        if (parentOf(line) !== null) continue;
+
+        out.push({ line, depth: 0 });
+
+        for (const child of childrenOf.get(line.pos_order_line_uuid) ?? []) {
+            out.push({ line: child, depth: 1 });
+        }
+    }
+
+    return out;
+}

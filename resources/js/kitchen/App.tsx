@@ -254,6 +254,21 @@ function BoardScreen({
         return [...present].sort((a, b) => a - b);
     }, [orders]);
 
+    /**
+     * Service modes actually on the board (KDS-012).
+     *
+     * Derived from what is here rather than from the venue's configured presets: a chip for
+     * "Delivery" on a board with no deliveries is a filter whose only outcome is an empty screen.
+     */
+    const activePresets = useMemo(() => {
+        const present = new Set<string>();
+        for (const order of orders) {
+            if (order.preset_label) present.add(order.preset_label);
+        }
+
+        return [...present].sort((a, b) => a.localeCompare(b));
+    }, [orders]);
+
     const applyFilter = (patch: Partial<BoardFilter>): void => {
         const next = { ...filter, ...patch };
         onFilter(next);
@@ -280,6 +295,7 @@ function BoardScreen({
             <FilterBar
                 categories={activeCategories}
                 courses={activeCourses}
+                presets={activePresets}
                 filter={filter}
                 onChange={applyFilter}
             />

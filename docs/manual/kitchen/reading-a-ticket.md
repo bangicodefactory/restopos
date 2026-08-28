@@ -5,6 +5,7 @@ features:
   - KDS-005
   - KDS-006
   - KDS-055
+  - KDS-012
   - RST-073
 ---
 
@@ -45,6 +46,24 @@ Everything in brackets was chosen by the customer at the till. "Happy Birthday" 
 typed rather than an option picked from a list — it is written out exactly as it was entered, so
 read it as an instruction, not a label.
 
+### Set menus
+
+When a set menu is ordered, its parts are listed **underneath it and indented**, with a line down
+the left:
+
+```
+1 x Menu du jour
+  │ 1 x Soupe du jour
+  │ 1 x Steak frites
+  │ 1 x Café
+```
+
+The indented items belong to the menu above them. That matters when two menus are on one ticket:
+without the grouping you would see six unrelated items and no way to tell whose coffee is whose.
+
+Very occasionally a part appears on its own, not indented under anything. That happens when its menu
+went to a different station, or the order was moved between tables. Make it — it was ordered.
+
 ## Anything unusual
 
 Two marks appear under a line:
@@ -63,3 +82,20 @@ already started cooking.
 When an order is split into courses, the ticket groups the items under `- Course 1 -`,
 `- Course 2 -` and so on. A course only reaches you when the front of house fires it, so a ticket
 showing one course is not an incomplete order — it is the part you are meant to be cooking now.
+
+## Showing only some of the board
+
+The row of buttons above the tickets narrows what you see. **All** clears everything back.
+
+- **A category** — only your station's items. Useful on a display shared by the grill and the fryer.
+- **A course** — starters, then mains, when the room is running by course.
+- **A service mode** — *Takeaway*, *Delivery*, and so on. A driver is waiting and you want only the
+  bags; a takeaway that sits under a dine-in ticket is a takeaway that goes cold.
+- **Late** — only the tickets at or past the late threshold.
+
+You can combine them, and you can pick more than one category or service mode at once. Only the
+modes actually on the board right now get a button, so a *Delivery* button never appears on an
+evening with no deliveries.
+
+A ticket hidden by a filter is hidden, not gone. **It is still ordered and still has to be made** —
+clear the filter before the end of service so nothing is left sitting.
