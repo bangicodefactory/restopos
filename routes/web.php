@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Backoffice\CatalogImportController;
 use App\Http\Controllers\Backoffice\ComboController;
 use App\Http\Controllers\Backoffice\CustomerController;
 use App\Http\Controllers\Backoffice\AttributeController;
@@ -201,6 +202,12 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
     Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
     Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
+    // Bringing a catalogue in from a spreadsheet (BOF-093, BAN-491).
+    Route::get('catalog-import', [CatalogImportController::class, 'index'])->name('catalog-import.index');
+    Route::post('catalog-import/preview', [CatalogImportController::class, 'preview'])->name('catalog-import.preview');
+    Route::post('catalog-import', [CatalogImportController::class, 'store'])->name('catalog-import.store');
+    Route::get('catalog-import/{entity}/template', [CatalogImportController::class, 'template'])->name('catalog-import.template');
 
     // Set menus and their courses (BOF-088, BAN-416).
     Route::get('combos', [ComboController::class, 'index'])->name('combos.index');

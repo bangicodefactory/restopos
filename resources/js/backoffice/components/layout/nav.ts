@@ -118,6 +118,12 @@ export const NAV: NavGroup[] = [
                 href: routes.categories.index(),
                 match: startsWith('/categories'),
             },
+            {
+                key: 'catalog-import',
+                labelKey: 'nav.catalogImport',
+                href: routes.catalogImport.index(),
+                match: startsWith('/catalog-import'),
+            },
         ],
     },
     {
