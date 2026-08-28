@@ -56,6 +56,20 @@ export const routes = {
         destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
+    presets: {
+        index: (): string => '/presets',
+        store: (): string => '/presets',
+        edit: (id: number): string => `/presets/${id}/edit`,
+        update: (id: number): string => `/presets/${id}`,
+        destroy: (id: number): string => `/presets/${id}`,
+    },
+
+    serviceWindows: {
+        store: (presetId: number): string => `/presets/${presetId}/service-windows`,
+        update: (presetId: number, id: number): string => `/presets/${presetId}/service-windows/${id}`,
+        destroy: (presetId: number, id: number): string => `/presets/${presetId}/service-windows/${id}`,
+    },
+
     productAttributes: {
         index: (): string => '/product-attributes',
         store: (): string => '/product-attributes',

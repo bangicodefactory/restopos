@@ -20,6 +20,7 @@ use App\Http\Controllers\Backoffice\PosBillController;
 use App\Http\Controllers\Backoffice\PosConfigController;
 use App\Http\Controllers\Backoffice\PosNoteController;
 use App\Http\Controllers\Backoffice\PrepDisplayController;
+use App\Http\Controllers\Backoffice\PresetController;
 use App\Http\Controllers\Backoffice\PricelistController;
 use App\Http\Controllers\Backoffice\PrinterController;
 use App\Http\Controllers\Backoffice\ProductCategoryController;
@@ -198,6 +199,16 @@ Route::middleware(['auth'])->group(function (): void {
     Route::delete('fiscal-positions/{fiscalPosition}', [FiscalPositionController::class, 'destroy'])->name('fiscal-positions.destroy');
     Route::post('fiscal-positions/{fiscalPosition}/mappings', [FiscalPositionController::class, 'storeMapping'])->name('fiscal-position-mappings.store');
     Route::delete('fiscal-positions/{fiscalPosition}/mappings/{mapping}', [FiscalPositionController::class, 'destroyMapping'])->name('fiscal-position-mappings.destroy');
+
+    // Service modes and their opening hours (BOF-113, BAN-429).
+    Route::get('presets', [PresetController::class, 'index'])->name('presets.index');
+    Route::post('presets', [PresetController::class, 'store'])->name('presets.store');
+    Route::get('presets/{preset}/edit', [PresetController::class, 'edit'])->name('presets.edit');
+    Route::patch('presets/{preset}', [PresetController::class, 'update'])->name('presets.update');
+    Route::delete('presets/{preset}', [PresetController::class, 'destroy'])->name('presets.destroy');
+    Route::post('presets/{preset}/service-windows', [PresetController::class, 'storeWindow'])->name('service-windows.store');
+    Route::patch('presets/{preset}/service-windows/{window}', [PresetController::class, 'updateWindow'])->name('service-windows.update');
+    Route::delete('presets/{preset}/service-windows/{window}', [PresetController::class, 'destroyWindow'])->name('service-windows.destroy');
 
     Route::get('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'index'])->name('barcode-nomenclatures.index');
     Route::post('barcode-nomenclatures', [BarcodeNomenclatureController::class, 'store'])->name('barcode-nomenclatures.store');

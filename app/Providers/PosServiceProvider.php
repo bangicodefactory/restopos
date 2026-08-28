@@ -20,6 +20,7 @@ use App\Models\Pos\PosBill;
 use App\Models\Pos\PosConfig;
 use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosNote;
+use App\Models\Pos\PosPreset;
 use App\Models\Pos\PosPrinter;
 use App\Models\Pos\PosSession;
 use App\Models\Pricing\FiscalPosition;
@@ -42,6 +43,7 @@ use App\Policies\PosCategoryPolicy;
 use App\Policies\PosConfigPolicy;
 use App\Policies\PosDevicePolicy;
 use App\Policies\PosNotePolicy;
+use App\Policies\PosPresetPolicy;
 use App\Policies\PrepDisplayPolicy;
 use App\Policies\PricelistPolicy;
 use App\Policies\PrinterPolicy;
@@ -201,6 +203,7 @@ final class PosServiceProvider extends ServiceProvider
         // Registered explicitly: auto-discovery does not reach App\Models\Identity,
         // App\Models\Pricing or App\Models\Pos, and a policy nothing registers fails open.
         Gate::policy(Employee::class, EmployeePolicy::class);
+        Gate::policy(PosPreset::class, PosPresetPolicy::class);
         Gate::policy(Pricelist::class, PricelistPolicy::class);
         Gate::policy(PosDevice::class, PosDevicePolicy::class);
         Gate::policy(MediaFile::class, MediaPolicy::class);

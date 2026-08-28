@@ -397,6 +397,7 @@ features:
 
   # Operational configuration (BOF-110 … BOF-129) — user
   BOF-110: { status: shipped, surface: user, manual: back-office/payment-methods.md#payment-methods }
+  BOF-113: { status: shipped, surface: user, manual: back-office/service-modes.md#service-modes }
   BOF-114: { status: shipped, surface: user, manual: back-office/printers.md#kitchen-printers }
   BOF-111: { status: shipped, surface: user, manual: back-office/denominations-and-notes.md#coin-and-note-denominations }
   BOF-112: { status: shipped, surface: user, manual: back-office/denominations-and-notes.md#predefined-kitchen-notes }
