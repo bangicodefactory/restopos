@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Backoffice;
 
-use App\Enums\EmployeeRole;
 use App\Http\Controllers\Controller;
 use App\Models\Identity\Employee;
+use App\Models\Identity\TillRole;
 use App\Models\Pos\Order;
 use App\Models\Pos\PosSession;
 use App\Rules\StaffPin;
+use App\Support\Auth\EmployeeAbilities;
 use App\Support\Tenancy\ActingCompany;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,7 +29,7 @@ use Inertia\Response;
  */
 final class EmployeeController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
         Gate::authorize('viewAny', Employee::class);
 
@@ -37,15 +38,41 @@ final class EmployeeController extends Controller
                 'id' => (int) $e->getKey(),
                 'name' => (string) $e->name,
                 'job_title' => $e->job_title,
-                'default_role' => (string) ($e->default_role?->value ?? $e->default_role),
+                'default_role' => (string) $e->default_role,
                 'color' => (int) $e->color,
                 'has_pin' => $e->hasPin(),
                 'has_badge' => filled($e->barcode_hash),
                 'user_id' => $e->user_id,
                 'active' => (bool) $e->active,
             ])->values()->all(),
-            'roles' => array_map(static fn (EmployeeRole $r): array => ['value' => $r->value, 'label' => $r->label()], EmployeeRole::cases()),
-            'abilities' => config('pos.role_abilities'),
+            // Roles are rows now, not enum cases (BAN-451). The enum still names the three the
+            // product ships with — `employees.default_role` defaults to one and `AccessLevel` maps
+            // onto all three — but it is no longer the whole list, and rendering from it would hide
+            // every role the venue added.
+            'roles' => TillRole::query()
+                ->orderBy('sequence')
+                ->orderBy('name')
+                ->get()
+                ->map(static fn (TillRole $r): array => [
+                    'id' => (int) $r->getKey(),
+                    'value' => (string) $r->slug,
+                    'label' => (string) $r->name,
+                    'is_system' => (bool) $r->is_system,
+                    'active' => (bool) $r->active,
+                ])->values()->all(),
+            'abilities' => TillRole::query()->get()
+                ->mapWithKeys(static fn (TillRole $r): array => [$r->slug => $r->grantedAbilities()])
+                ->all(),
+            // The fixed set the matrix offers. An operator picks from these; a typed ability would
+            // save cleanly, read as granted, and be checked by nothing.
+            'abilityGroups' => EmployeeAbilities::grouped(),
+            // Which of them this particular user may hand out. The matrix greys the rest rather than
+            // letting the save be the first time anyone finds out.
+            'grantable' => array_values(array_filter(
+                EmployeeAbilities::all(),
+                fn (string $ability): bool => ($needs = EmployeeAbilities::grantRequires($ability)) === null
+                    || $request->user()?->hasPermission($needs) === true,
+            )),
         ]);
     }
 
@@ -156,7 +183,15 @@ final class EmployeeController extends Controller
         $data = $request->validate([
             'name' => [$required, 'string', 'max:120'],
             'job_title' => ['sometimes', 'nullable', 'string', 'max:80'],
-            'default_role' => [$required, Rule::enum(EmployeeRole::class)],
+            // Any role this venue has, not just the three the product ships with (BAN-451).
+            // Resolved through the scoped model rather than `Rule::exists`, which runs on the query
+            // builder where `CompanyScope` cannot reach — it would accept another venue's role slug
+            // and hand this employee whatever *that* venue had granted it.
+            'default_role' => [$required, 'string', 'max:32', static function (string $attribute, mixed $value, callable $fail): void {
+                if (! TillRole::query()->where('slug', (string) $value)->where('active', true)->exists()) {
+                    $fail('No such role at this venue.');
+                }
+            }],
             'color' => ['sometimes', 'integer', 'min:0', 'max:255'],
             'active' => ['sometimes', 'boolean'],
             // BOF-117 — `min:4|max:12` accepted `0000` and `1234` on the credential that authorises

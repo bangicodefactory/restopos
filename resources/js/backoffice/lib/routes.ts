@@ -56,6 +56,12 @@ export const routes = {
         destroy: (pricelistId: number, itemId: number): string => `/pricelists/${pricelistId}/items/${itemId}`,
     },
 
+    tillRoles: {
+        store: (): string => '/till-roles',
+        update: (id: number): string => `/till-roles/${id}`,
+        destroy: (id: number): string => `/till-roles/${id}`,
+    },
+
     catalogImport: {
         index: (): string => '/catalog-import',
         preview: (): string => '/catalog-import/preview',

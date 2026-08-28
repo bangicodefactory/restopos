@@ -6,11 +6,13 @@
  * `sha256(value)` — the same hash the per-device offline verifiers are derived from (spec 03
  * §2.3). Nothing in this module ever holds a secret it did not just receive from an input.
  *
- * `abilities` is `config('pos.role_abilities')`: role → list of ability strings. It is
- * configuration, not data, and the contract exposes no write for it, so the matrix is a reader.
+ * `abilities` is role slug → ability strings, read from `till_roles` since BAN-451. It was
+ * `config('pos.role_abilities')` and therefore a reader; roles are rows now and the matrix writes.
+ *
+ * `grantable` is the subset **this user** may hand out. Three abilities reach back into the back
+ * office — `config.manage` most of all — and granting one needs the matching axis-1 permission, so
+ * the matrix greys the rest rather than letting the save be the first time anyone finds out.
  */
-
-import type { EnumOption } from '../../types/inertia';
 
 export type EmployeeRow = {
     id: number;
@@ -24,11 +26,24 @@ export type EmployeeRow = {
     active: boolean;
 };
 
+/** One of the venue's till roles. `is_system` marks the three the product ships with. */
+export type TillRoleRow = {
+    id: number;
+    value: string;
+    label: string;
+    is_system: boolean;
+    active: boolean;
+};
+
 export type EmployeesIndexProps = {
     employees: EmployeeRow[];
-    roles: EnumOption[];
-    /** role value → ability strings, from `config/pos.php`. */
+    roles: TillRoleRow[];
+    /** role slug → ability strings, from `till_roles`. */
     abilities: Record<string, string[]>;
+    /** The fixed set an operator picks from, grouped as a shift reads. */
+    abilityGroups: Record<string, string[]>;
+    /** Which of them this user may grant. */
+    grantable: string[];
 };
 
 /** The keys `PATCH /employees/{employee}` validates. */
@@ -60,31 +75,6 @@ export function toForm(employee: EmployeeRow): EmployeeForm {
     };
 }
 
-/**
- * Every ability mentioned by any role, in a stable order: the matrix's rows.
- *
- * Grouped by the segment before the first dot (`order`, `cash`, `session`…) because that is how
- * an operator reasons about them — "can a cashier do anything with the drawer" is one glance at
- * one group, not a hunt through forty alphabetical rows.
- */
-export function abilityGroups(abilities: Record<string, string[]>): { group: string; items: string[] }[] {
-    const all = new Set<string>();
-    for (const list of Object.values(abilities)) {
-        for (const ability of list) all.add(ability);
-    }
-
-    const byGroup = new Map<string, string[]>();
-    for (const ability of [...all].sort()) {
-        const group = ability.split('.')[0] ?? ability;
-        const bucket = byGroup.get(group);
-        if (bucket) bucket.push(ability);
-        else byGroup.set(group, [ability]);
-    }
-
-    return [...byGroup.entries()]
-        .sort(([a], [b]) => a.localeCompare(b, 'fr'))
-        .map(([group, items]) => ({ group, items }));
-}
 
 /** Role ranking for the matrix's column order: least privileged first. */
 export const ROLE_ORDER: Record<string, number> = {

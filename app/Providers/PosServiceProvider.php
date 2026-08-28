@@ -15,6 +15,7 @@ use App\Models\Catalog\ProductVariant;
 use App\Models\Identity\Customer;
 use App\Models\Identity\Employee;
 use App\Models\Identity\MediaFile;
+use App\Models\Identity\TillRole;
 use App\Models\Kitchen\PrepDisplay;
 use App\Models\Pos\Order;
 use App\Models\Pos\PaymentMethod;
@@ -57,6 +58,7 @@ use App\Policies\ProductPolicy;
 use App\Policies\SessionPolicy;
 use App\Policies\TaxGroupPolicy;
 use App\Policies\TaxPolicy;
+use App\Policies\TillRolePolicy;
 use App\Services\Payment\NullProvider;
 use App\Services\Payment\PaymentProvider;
 use App\Support\Tenancy\ActingCompany;
@@ -208,6 +210,7 @@ final class PosServiceProvider extends ServiceProvider
         // App\Models\Pricing or App\Models\Pos, and a policy nothing registers fails open.
         Gate::policy(Employee::class, EmployeePolicy::class);
         Gate::policy(Combo::class, ComboPolicy::class);
+        Gate::policy(TillRole::class, TillRolePolicy::class);
         Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(PosPreset::class, PosPresetPolicy::class);
         Gate::policy(Pricelist::class, PricelistPolicy::class);

@@ -168,6 +168,41 @@ return new class extends Migration
             $table->primary(['role_id', 'user_id']);
         });
 
+        /*
+         * Till roles and what each may do — axis 2 (BOF-118, BAN-451).
+         *
+         * Named for the axis rather than for the thing, because both names were taken. `roles` is
+         * back-office *users* and their policy permissions; `EmployeeRole` is the enum of the three
+         * the product ships with. This is the till side — whether a cashier may void a paid order,
+         * discount past the limit, or close over a variance — and calling it that removes the
+         * ambiguity rather than adding a third spelling of "role".
+         *
+         * These lived in `config/pos.php` and could only change with a deploy. `TillRoleSeeder`
+         * seeds the three the product ships with, from that same config, so nothing changes on
+         * migration.
+         *
+         * `abilities` is a JSON list rather than a pivot, matching `pos_configs.role_abilities` —
+         * the per-register override that already existed — so both sides of the resolution read the
+         * same shape, and the bootstrap ships a resolved list either way.
+         */
+        Schema::create('till_roles', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+            $table->string('slug', 32);
+            $table->string('name', 64);
+            $table->json('abilities');
+            // The three the product ships with. Renameable and re-grantable like any other, but not
+            // removable: `employees.default_role` defaults to `cashier` and `AccessLevel::toRole()`
+            // maps onto all three, so a venue that deleted one would have employees pointing at a
+            // role that no longer exists.
+            $table->boolean('is_system')->default(false);
+            $table->integer('sequence')->default(10);
+            $table->boolean('active')->default(true)->index();
+            $table->timestamps();
+
+            $table->unique(['company_id', 'slug']);
+        });
+
         // Cashier identity at the register: badge + PIN, never plaintext on the wire.
         Schema::create('employees', function (Blueprint $table): void {
             $table->id();
@@ -188,7 +223,13 @@ return new class extends Migration
             $table->unique(['company_id', 'barcode']);
         });
 
-        $this->applyChecks('employees', ['default_role' => EmployeeRole::values()]);
+        // No CHECK on `default_role` any more: a role is a row in `employee_roles`, not one of three
+        // enum cases, and the whole point of BAN-451 is that a venue can add "Shift lead". The
+        // constraint that replaces it is referential — `EmployeeController` resolves the slug
+        // through the scoped `TillRole` model — and it is a constraint the database cannot
+        // express here, because the roles table is per-company and this column is a slug rather
+        // than an id (kept a slug so every existing reader, the bootstrap payload included, is
+        // unchanged).
 
         Schema::create('customers', function (Blueprint $table): void {
             $table->id();
