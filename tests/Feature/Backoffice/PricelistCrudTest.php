@@ -287,10 +287,16 @@ it('ships the create form what it needs to offer a currency', function (): void 
 });
 
 it('ships the rule editor something to point a rule at', function (): void {
+    // Asserting the prop merely *exists* is not enough: an empty array is the failure being guarded
+    // against, and it satisfies `has()`. The venue's own product has to actually be in there.
     $list = ourList();
 
     test()->get("/pricelists/{$list->getKey()}/edit")
-        ->assertInertia(fn ($page) => $page->has('products')->has('categories'));
+        ->assertInertia(fn ($page) => $page
+            ->where('products', fn ($products) => collect($products)
+                ->pluck('id')->contains($this->fx->product->getKey()))
+            ->has('categories')
+            ->etc());
 });
 
 it('accepts exactly what the rule form posts', function (): void {
@@ -309,4 +315,17 @@ it('accepts exactly what the rule form posts', function (): void {
     ])->assertSessionHasNoErrors();
 
     expect(PricelistItem::query()->where('pricelist_id', $list->getKey())->count())->toBe(1);
+});
+
+it('refuses to remove a list a register defaults to', function (): void {
+    // `pos_configs.pricelist_id` would be left pointing at nothing, and the register would fall back
+    // to catalogue prices mid-service with no one told.
+    $list = ourList();
+
+    PosConfig::query()->whereKey($this->fx->config->getKey())
+        ->update(['pricelist_id' => $list->getKey()]);
+
+    test()->delete("/pricelists/{$list->getKey()}")->assertSessionHasErrors('pricelist');
+
+    expect(Pricelist::query()->whereKey($list->getKey())->exists())->toBeTrue();
 });
