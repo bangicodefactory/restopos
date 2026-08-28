@@ -6,11 +6,14 @@ namespace Tests\Feature\Backoffice\SelfOrderSettings;
 
 use App\Models\Identity\Language;
 use App\Models\Pos\PosConfig;
+use App\Models\Restaurant\Floor;
+use App\Models\Restaurant\Table;
 use App\Models\SelfOrder\CustomLink;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Feature\PosFixtures;
 use Tests\TestCase;
@@ -183,6 +186,67 @@ it('does not hand it a table from a floor this register does not serve', functio
                 fn (array $row): bool => $row['table_number'] === 9,
             ),
         ));
+});
+
+it('does not hand it a table from its own venue that this register does not serve', function (): void {
+    // The case that matters, and the one a cross-venue test cannot reach: `CompanyScope` already
+    // hides another company's tables, so removing the floor filter passed clean until this existed.
+    //
+    // A venue with a terrace till and a restaurant till serves different rooms from each. Printing
+    // the restaurant's QR codes from the terrace register would produce cards that point diners at
+    // a register which does not serve their table.
+    $this->withoutVite();
+
+    $fx = $this->fx->withFloor();
+    $fx->table(6);
+
+    // A second room in the same venue, which this register is not attached to.
+    $otherFloor = Floor::query()->create([
+        'company_id' => $fx->company->getKey(),
+        'name' => 'Terrasse',
+    ]);
+
+    Table::query()->create([
+        'company_id' => $fx->company->getKey(),
+        'restaurant_floor_id' => $otherFloor->getKey(),
+        'uuid' => (string) Str::uuid(),
+        'table_number' => 99,
+        'identifier' => Table::newIdentifier(),
+    ]);
+
+    DB::table('pos_config_floor')->insertOrIgnore([
+        'pos_config_id' => $fx->config->getKey(),
+        'restaurant_floor_id' => $fx->floor->getKey(),
+    ]);
+
+    $this->get("/self-order/{$fx->config->uuid}/settings")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where(
+            'tables',
+            fn ($tables): bool => collect($tables)->doesntContain(
+                fn (array $row): bool => $row['table_number'] === 99,
+            ),
+        ));
+});
+
+it('refuses another venue image as the kiosk brand', function (): void {
+    // The negative half of the brand picker. Only the happy path was covered, so removing the
+    // ownership check changed nothing any test could see.
+    Storage::fake('public');
+
+    $this->actingAs($this->other->userWith('backoffice.access', 'backoffice.manage_media'));
+
+    $theirs = $this->postJson('/media', [
+        'file' => UploadedFile::fake()->image('theirs.png', 100, 40),
+        'collection' => 'brand',
+    ])->json('id');
+
+    $this->actingAs($this->fx->userWith('backoffice.access', 'backoffice.manage_configs'));
+
+    saveSelfOrder(['self_ordering_brand_media_id' => $theirs])
+        ->assertSessionHasErrors('self_ordering_brand_media_id');
+
+    expect(storedSelfOrder('self_ordering_brand_media_id'))->toBeNull();
 });
 
 it('sets the kiosk brand image, which needed the upload pipeline first', function (): void {
