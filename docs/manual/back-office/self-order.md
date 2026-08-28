@@ -2,6 +2,7 @@
 title: Self-order and table QR codes
 audience: manager
 features:
+  - SLF-005
   - SLF-011
   - SLF-098
 ---
@@ -48,7 +49,18 @@ again will work.
 own venue's payment methods are offered.
 
 **Pay after** decides whether they settle each order as they place it, or accumulate a tab and pay at
-the end. A tab only makes sense with table service — a counter or kiosk customer walks away.
+the end.
+
+**A tab only works with table service, and the system will not let you set it otherwise.** This is
+not a preference. Paying at the end means somebody comes back to the customer, and that only happens
+where the customer is sitting down:
+
+- a **kiosk** customer orders and walks away;
+- a **counter** customer is standing at the counter.
+
+Set either of those to pay-at-the-end and your tills would be waiting for a settlement nobody comes
+back to ask for, with orders staying open until someone notices at close. If you want tabs, put the
+register into restaurant mode with table service first.
 
 ## Branding
 
