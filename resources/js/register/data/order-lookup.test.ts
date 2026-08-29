@@ -227,6 +227,32 @@ describe('toClientRows', () => {
         expect(orders[0]?.company_id).toBe(2);
     });
 
+    it('carries the weight provenance back, and refuses to invent one (XCT-058)', () => {
+        // A weighed line fetched from another till keeps its evidence. The three cases are the
+        // whole point of the column: a measurement, a hand entry, and a line that is neither.
+        //
+        // The last one matters most. Rows written before the column existed, and every line not
+        // sold by weight, arrive with nothing — and "we do not know" has to stay "we do not know".
+        // Defaulting to 'manual' would put a claim about a cashier on a row nobody weighed;
+        // defaulting to 'scale' would put a claim about a certified instrument on one.
+        const { lines } = toClientRows({
+            ...payload,
+            lines: [
+                { id: 11, uuid: 'weighed', quantity: '0.2', price_unit: '20.00', weight_source: 'scale' },
+                { id: 12, uuid: 'typed', quantity: '0.3', price_unit: '20.00', weight_source: 'manual' },
+                { id: 13, uuid: 'plain', quantity: '1', price_unit: '10.00' },
+                { id: 14, uuid: 'garbled', quantity: '1', price_unit: '10.00', weight_source: 'notarised' },
+            ],
+        });
+
+        const sourceOf = (uuid: string) => lines.find((line) => line.uuid === uuid)?.weight_source;
+
+        expect(sourceOf('weighed')).toBe('scale');
+        expect(sourceOf('typed')).toBe('manual');
+        expect(sourceOf('plain')).toBeNull();
+        expect(sourceOf('garbled')).toBeNull();
+    });
+
     it('tolerates an order with no children at all', () => {
         const graph = toClientRows({ uuid: 'bare', updated_at: '2026-08-05T10:00:00Z' });
 

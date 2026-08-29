@@ -1200,7 +1200,7 @@ onboarding scenario loaders.
 | use_iot_box | boolean default false | `is_posbox` |
 | proxy_ip | string(64) nullable | |
 | iot_scan | boolean default false | barcode/card reader via proxy |
-| iot_scale | boolean default false | |
+| iot_scale | boolean default false | XCT-058 — the register's scale gate. Read by `resolveScaleTransport` in `resources/js/shared/scale/`: off means the weighing dialog is manual entry only, on means it opens a `ScaleTransport` and polls at 4 Hz while the dialog is up. Note this is the column the client gates on, **not** `iface_electronic_scale` — spec 03 §7.7 names the latter and Odoo uses it, but it has no column here and no server writer, so it could only ever read `undefined`. |
 | iot_print | boolean default false | |
 | iot_cashdrawer | boolean default false | |
 | use_epos_printer | boolean default false | `other_devices` |
@@ -1920,6 +1920,7 @@ Maps from `pos.order.line`. Dropped: `pack_lot_ids`, `total_cost` valuation laye
 | full_product_name | string(255) | frozen display name incl. attributes |
 | uom_id | FK→uoms.id, restrict | |
 | quantity | decimal(16,3) default 1 | negative for refunds/returns |
+| weight_source | string(16) nullable, CHECK in ('scale','manual') | XCT-058 — provenance of a **weighed** quantity; null on every line not sold by weight. `scale` means a certified instrument produced the number, `manual` means a cashier typed it; an inspector may ask which, and both are legitimate. Set from `AddLineInput.weightSource` (`ScaleDialog`) and nowhere else, which is why it also decides whether `setQuantity` will let the quantity be edited. |
 | price_unit | decimal(16,4) default 0 | pre-discount, pre-tax-inclusion unit price |
 | price_extra | decimal(16,4) default 0 | Σ attribute price extras |
 | price_type | enum('original','manual','automatic') default 'original' | how the price got set |

@@ -1,6 +1,6 @@
 import { Decimal, ZERO } from '@domain/money/decimal';
 import { generateReceiptToken, generateUuid } from '@domain/sequence/index';
-import type { PriceType } from '@domain/enums';
+import type { PriceType, WeightSource } from '@domain/enums';
 import type {
     CourseRow,
     OrderLineRow,
@@ -38,6 +38,7 @@ import { orderName } from './order-naming';
 import { tipDelta, tipTopUp } from './tips';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
+import { forgetWeighings, releaseWeighing } from './weighing';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
 import { invalidateTotals, orderTotals } from './totals';
 
@@ -370,6 +371,13 @@ export type AddLineInput = {
     /** Refund lines, combos and scale/open-price lines never merge. */
     skipMerge?: boolean;
     fullProductName?: string;
+    /**
+     * Provenance of a weighed quantity (XCT-058, AC4). Omit on anything not sold by weight.
+     *
+     * Setting it is what makes the line weighed as far as `setQuantity` is concerned, so it is not
+     * decoration: a line that carries a source is a line whose quantity may no longer be retyped.
+     */
+    weightSource?: WeightSource | null;
 };
 
 function noteKey(line: Pick<OrderLineRow, 'customer_note' | 'internal_note'>): string {
@@ -412,6 +420,7 @@ export function canMergeLines(
         | 'uom_id'
         | 'attribute_line_value_ids'
         | 'full_product_name'
+        | 'weight_source'
     >,
     catalog: CatalogIndex = getCatalog(),
 ): boolean {
@@ -426,6 +435,16 @@ export function canMergeLines(
     if (a.combo_parent_uuid !== null || b.combo_parent_uuid !== null) return false;
     if (a.combo_item_id !== null || b.combo_item_id !== null) return false;
     if (a.refunded_line_uuid !== null || b.refunded_line_uuid !== null) return false;
+    // Two weighings are two measurements and never one line (REG-077, XCT-058). Callers pass
+    // `skipMerge` for the scale path, so this has never fired in practice — but a merge is the one
+    // way a weighed line's quantity could still move now that `setQuantity` refuses one, and it
+    // would move it *silently*: `addLine` returns the existing uuid whether the merge landed or
+    // not, so the caller would be told the 300 g went on and the line would still read 200 g.
+    //
+    // Not covered for by the `is_pos_groupable` check below, though it looks as though it should
+    // be: a weighed product is *usually* on a non-groupable kg UoM, and nothing enforces that. The
+    // back office will happily leave a `to_weight` product on the default unit.
+    if (a.weight_source !== null || b.weight_source !== null) return false;
     if ((a.course_uuid ?? null) !== (b.course_uuid ?? null)) return false;
     const uom = catalog.uoms.get(a.uom_id);
     if (uom && !uom.is_pos_groupable) return false;
@@ -460,6 +479,7 @@ export function addLine(input: AddLineInput): string {
         attribute_line_value_ids: attributeIds,
         full_product_name:
             input.fullProductName ?? fullProductName(catalog, input.variantId, attributeIds),
+        weight_source: input.weightSource ?? null,
     };
 
     const existing = input.skipMerge
@@ -514,6 +534,7 @@ export function addLine(input: AddLineInput): string {
 
         skip_preparation: false,
         is_edited: false,
+        weight_source: candidate.weight_source,
         rev: 0,
     };
 
@@ -553,11 +574,46 @@ function isRefundLine(lineUuid: string): boolean {
     return line !== undefined && line.refunded_line_uuid !== null;
 }
 
-export function setQuantity(lineUuid: string, quantity: number): void {
+/**
+ * A weighed line's quantity is a measurement, not a number (REG-077, XCT-058).
+ *
+ * Keyed on `weight_source`, which the scale dialog sets through `addLine` and nothing else does,
+ * rather than on the product's `to_weight` flag. A product can be flipped to weighed in the back
+ * office after a line was rung, and a line rung as a unit does not retroactively become a
+ * measurement. The flag decides which *dialog* opens (`product-flow.ts`); the source records what
+ * actually happened, and that is the thing which has to be immutable afterwards.
+ */
+export function isWeighedLine(lineUuid: string): boolean {
+    const line = snapshot().lines[lineUuid];
+
+    return line !== undefined && line.weight_source !== null;
+}
+
+/**
+ * @returns false when the line refused the change — a refund line, or a weighed one.
+ *
+ * The return value exists so the numpad can say *why* nothing happened. Silence on a refusal is how
+ * the price-override lock used to read as the till ignoring the tap (NumpadPanel's docblock records
+ * that); the mistake is not worth repeating for a guard cashiers will meet far more often.
+ */
+export function setQuantity(lineUuid: string, quantity: number): boolean {
     const state = snapshot();
     const line = state.lines[lineUuid];
-    if (!line) return;
-    if (isRefundLine(lineUuid)) return;
+    if (!line) return false;
+    if (isRefundLine(lineUuid)) return false;
+    // REG-077 — the legal-metrology guard, and the reason it belongs *here* rather than in the
+    // dialog that used to own the whole rule.
+    //
+    // The scale dialog has always refused to add the same weight twice, which is Odoo's rule and a
+    // certification requirement in France and Belgium. But the dialog was never the only way a
+    // weighed line's quantity could move: select the line, tap Qty, type 5, and 200 g of truffle
+    // becomes 5 kg without the scale, the dialog or the rule being involved at all. That is far
+    // cheaper than re-weighing and defeats the same control, so guarding one path and not the other
+    // was not a guard — it was a detour sign.
+    //
+    // Re-weigh (which lands a fresh line through `addLine`) or void the line. Those are the two
+    // honest ways to change a weight and both remain available.
+    if (isWeighedLine(lineUuid)) return false;
     // REG-177 — the line's unit of measure decides what quantities exist, not a hardcoded 3 dp.
     const rounded = roundQuantity(quantity, line.uom_id);
 
@@ -578,6 +634,8 @@ export function setQuantity(lineUuid: string, quantity: number): void {
     });
 
     commit(line.order_uuid);
+
+    return true;
 }
 
 /**
@@ -589,6 +647,11 @@ export function reduceQuantity(lineUuid: string, nextQuantity: number): string {
     const state = snapshot();
     const line = state.lines[lineUuid];
     if (!line) return lineUuid;
+    // Before the split below, not after it. `setQuantity` refuses a weighed line, so letting one
+    // through here would write the original back to `sent` (silently a no-op) and then add a
+    // compensating *negative* line for a reduction that never happened — a credit for nothing, on
+    // an order whose weighed line still reads its full quantity.
+    if (isWeighedLine(lineUuid)) return lineUuid;
     const order = state.orders[line.order_uuid];
     const sent = order?.last_prep_snapshot?.lines[prepKeyOf(line)] ?? 0;
 
@@ -691,6 +754,17 @@ export function removeLine(lineUuid: string): void {
     const line = state.lines[lineUuid];
     if (!line) return;
     const victims = [lineUuid, ...childLinesOf(state, lineUuid).map((child) => child.uuid)];
+
+    // Voiding a weighed line releases its remembered weight, or 'void it and weigh again' —
+    // the documented way out of a wrong weighing — is refused by the repeat-weight rule the
+    // moment the same item goes back on the pan. With the numpad now closed on weighed lines
+    // too, that would leave a cashier with no way to re-add the item at all.
+    for (const uuid of victims) {
+        const victim = state.lines[uuid];
+        if (victim?.weight_source != null) {
+            releaseWeighing(victim.order_uuid, victim.product_variant_id);
+        }
+    }
 
     mutate((draft) => {
         const order = draft.orders[line.order_uuid];
@@ -1231,6 +1305,11 @@ export function validateOrder(orderUuid: string): void {
         touch(draft, orderUuid);
     });
 
+    // REG-077 — the weight-change rule is scoped to the order, so the order ending releases it. A
+    // till that stayed open all week used to accumulate one entry per weighed line forever, and
+    // the next customer buying the same 300 g of coffee was refused because of the last one.
+    forgetWeighings(orderUuid);
+
     commit(orderUuid);
 }
 
@@ -1300,6 +1379,8 @@ export function cancelOrder(orderUuid: string, reason: string | null = null): vo
         order.cancelled_at = nowIso();
         order.cancel_reason = reason;
     });
+
+    forgetWeighings(orderUuid);
 }
 
 /** Drop a never-synced draft entirely; a synced one is cancelled instead so the server hears about it. */
@@ -1315,6 +1396,7 @@ export function discardOrder(orderUuid: string): void {
     mutate((draft) => {
         forgetOrder(draft, orderUuid);
     });
+    forgetWeighings(orderUuid);
     deps.persist(orderUuid);
     deps.onChange(orderUuid);
     invalidateTotals(orderUuid);
@@ -1559,6 +1641,11 @@ export async function createRefundOrder(
             comboParentUuid: line.combo_parent_uuid
                 ? (parentMap.get(line.combo_parent_uuid as string) ?? null)
                 : null,
+            // The credit line records how the original weight was arrived at. The refund
+            // guard in `setQuantity` already makes this line unretypeable, so unlike the
+            // split this is about the record rather than the money: a refund of a scale
+            // weighing should not read as a refund of a hand-typed one.
+            weightSource: line.weight_source,
             skipMerge: true,
             fullProductName: line.full_product_name,
         });
@@ -1666,6 +1753,14 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
                 ? (parentMap.get(part.line.combo_parent_uuid) ?? null)
                 : null,
             courseUuid: part.line.course_uuid ? (courseMap.get(part.line.course_uuid) ?? null) : null,
+            // Provenance moves with the line, or the guard does not survive a split.
+            //
+            // `isWeighedLine` keys on `weight_source`, so a moved line that arrives without it
+            // is an ordinary line as far as `setQuantity` is concerned — and the numpad will
+            // happily retype 0.200 kg to 5.000 kg on the split bill. Every other field that
+            // decides what the customer pays is carried above; this one decides whether the
+            // amount can be changed at all, which makes leaving it out worse, not smaller.
+            weightSource: part.line.weight_source,
             skipMerge: true,
             fullProductName: part.line.full_product_name,
         });

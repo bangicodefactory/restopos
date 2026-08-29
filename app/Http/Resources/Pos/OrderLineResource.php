@@ -47,6 +47,9 @@ final class OrderLineResource extends JsonResource
             'refunded_order_line_id' => $line->refunded_order_line_id,
             'refunded_quantity' => (string) $line->refunded_quantity,
             'skip_preparation' => (bool) $line->skip_preparation,
+            // XCT-058 — whether this weight was read or typed. Round-trips so a refund, a reprint
+            // or another till sees the same provenance the selling till recorded.
+            'weight_source' => $line->weight_source?->value,
             'discount_notice' => $line->discount_notice,
             'is_edited' => (bool) $line->is_edited,
             // The chosen variant attributes, which live in a pivot rather than on the row. A

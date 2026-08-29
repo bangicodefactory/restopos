@@ -2,7 +2,7 @@ import { Decimal } from '@domain/money/decimal';
 import { Button, NumPad, cn } from '@shared/ui';
 import { useCan } from '@shared/auth';
 import type { JSX } from 'react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { requestApproval } from '../domain/approval';
 import { useT } from '../i18n';
@@ -81,6 +81,18 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
     const order = useOrder(line?.order_uuid ?? null);
     const alreadySent = line ? (order?.last_prep_snapshot?.lines[prepKeyOf(line)] ?? 0) : 0;
 
+    // REG-077, XCT-058 — read off the line itself rather than asked of `order-actions`, so the
+    // panel repaints when the selection moves. `setQuantity` refuses one of these regardless; this
+    // is only about the cashier being told, instead of tapping a number into a void.
+    const weighed = line !== null && line.weight_source !== null;
+
+    // A refusal is about the line it was raised on. Leaving it up after the cashier selects another
+    // one tells them a lie about the line they are now looking at.
+    const selectedUuid = line?.uuid ?? null;
+    useEffect(() => {
+        setRefused(null);
+    }, [selectedUuid]);
+
     const applyLive = useCallback(
         (value: string) => {
             if (!line) return;
@@ -111,12 +123,19 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
 
                 return;
             }
+            // REG-077 — a weighed quantity is a measurement and the numpad is not an instrument.
+            // Checked before `alreadySent`, because a weighed line the kitchen has already seen was
+            // refused twice over and would have shown nothing either way.
+            if (weighed) {
+                setRefused('line.weighed');
+                return;
+            }
             // A line the kitchen has seen is committed on confirm, so the compensating negative
             // line is created once rather than once per digit.
             if (alreadySent > 0) return;
             setQuantity(line.uuid, parsed);
         },
-        [allowDiscount, allowPrice, alreadySent, line, mode],
+        [allowDiscount, allowPrice, alreadySent, line, mode, weighed],
     );
 
     const onChange = useCallback(
@@ -164,13 +183,19 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
         (value: string) => {
             if (!line) return;
             if (mode === 'quantity') {
+                if (weighed) {
+                    setRefused('line.weighed');
+                    previous.current = '';
+                    setBuffer('');
+                    return;
+                }
                 const parsed = value === '' ? line.quantity : Number.parseFloat(value);
                 if (Number.isFinite(parsed)) reduceQuantity(line.uuid, parsed);
             }
             previous.current = '';
             setBuffer('');
         },
-        [line, mode, setBuffer],
+        [line, mode, setBuffer, weighed],
     );
 
     return (
@@ -237,6 +262,12 @@ export function NumpadPanel({ className }: { className?: string }): JSX.Element 
                     >
                         {t('reg.order.askManager')}
                     </Button>
+                </div>
+            ) : null}
+
+            {refused === 'line.weighed' ? (
+                <div className="rounded-pos bg-warning-soft p-3 text-sm" data-testid="line-weighed-refused">
+                    <p>{t('reg.order.weighedLocked')}</p>
                 </div>
             ) : null}
 
