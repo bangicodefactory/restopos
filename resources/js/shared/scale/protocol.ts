@@ -20,13 +20,23 @@ import type { ScaleReading, WeightUnit } from './types';
  * legitimate reading (an empty pan) and the zero check in `reader.ts` depends on it meaning that.
  */
 
+/**
+ * The units a line may be sold in. The lookup is the *only* place a unit is validated — the two
+ * frame patterns below deliberately match any alphabetic suffix rather than an alternation of
+ * these three.
+ *
+ * Spelling it `(kg|g|lb)` in the pattern would push the check into the regex, where a frame
+ * reporting ounces stops being "a frame in a unit we do not sell in" and becomes "not a frame at
+ * all". Both end in null, so the behaviour is identical and nothing observable changes — but the
+ * branch below then becomes unreachable, and unreachable code is code no test can defend.
+ */
 const UNITS: Record<string, WeightUnit> = { kg: 'kg', g: 'g', lb: 'lb' };
 
 /** `S S      0.200 kg` and its `S D` unstable sibling. */
-const SICS = /^S\s+([SD])\s+(-?\d+(?:\.\d+)?)\s*(kg|g|lb)\s*$/i;
+const SICS = /^S\s+([SD])\s+(-?\d+(?:\.\d+)?)\s*([a-z]+)\s*$/i;
 
 /** `ST,GS,   0.200kg` / `US,NT,-0.005 kg`. */
-const DIALOG = /^(ST|US),(GS|NT),\s*([+-]?\d+(?:\.\d+)?)\s*(kg|g|lb)\s*$/i;
+const DIALOG = /^(ST|US),(GS|NT),\s*([+-]?\d+(?:\.\d+)?)\s*([a-z]+)\s*$/i;
 
 /**
  * Parse one complete frame. `at` is passed in rather than read from the clock so the caller owns
@@ -68,6 +78,8 @@ function build(
     if (!Number.isFinite(weight)) return null;
 
     const resolved = UNITS[unit.toLowerCase()];
+    // A unit we do not sell in — ounces on a scale someone brought back from the US. Refused
+    // rather than assumed to be kilograms, which would be a 28x error on the bill.
     if (resolved === undefined) return null;
 
     return { weight, unit: resolved, stable, tare, at };

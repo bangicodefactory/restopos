@@ -174,7 +174,12 @@ export class ScaleReader {
             if (reading === null) return;
             this.apply(reading);
         } catch (error) {
-            this.set({ status: 'error', error: messageOf(error), stable: false });
+            // `stable` is deliberately left alone. The last reading really was settled; what
+            // changed is that the reader is no longer live, and `acceptable()` gates on the
+            // status. Clearing both would have made the status check in `acceptable()`
+            // unreachable — two layers each covering for the other, which is the shape this
+            // project has repeatedly found a dead guard hiding in.
+            this.set({ status: 'error', error: messageOf(error) });
             this.streak = 0;
         } finally {
             this.polling = false;
