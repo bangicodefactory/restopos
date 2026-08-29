@@ -61,11 +61,20 @@ features:
   REG-065: { status: shipped, surface: user, manual: todo }
   REG-067: { status: shipped, surface: user, manual: todo }
   REG-068: { status: shipped, surface: user, manual: todo }
+  # BAN-421 — `GET /api/pos/products` had shipped, been routed, documented and server-tested, and no
+  # client had ever called it. A scan the capped local catalogue did not know silently filled the
+  # search box, so "not on this till", "does not exist" and "offline" were one non-event.
+  REG-071: { status: shipped, surface: user, manual: register/orders.md#when-a-barcode-is-not-recognised }
   REG-072: { status: shipped, surface: user, manual: todo }
   REG-073: { status: shipped, surface: user, manual: todo }
   REG-075: { status: shipped, surface: user, manual: todo }
   REG-077: { status: shipped, surface: user, manual: todo }
   REG-080: { status: shipped, surface: user, manual: todo }
+  # BAN-421 — camera capture behind a `BarcodeSource` interface, using the platform's own
+  # `BarcodeDetector`. `partial` on purpose: source selection, the decode→routeScan seam and the
+  # stream release are covered, and the decode itself cannot be exercised in CI — no camera, no
+  # detector, and a wasm decoder would have been the largest dependency in the tree unverified.
+  REG-081: { status: partial, surface: user, manual: register/orders.md#scanning-with-the-tablet-camera, note: "Needs a device with BarcodeDetector (Chrome/Edge on Android and ChromeOS); falls back to the hardware scanner elsewhere. The decode path is a hand test." }
   REG-083: { status: shipped, surface: user, manual: todo }
   REG-087: { status: shipped, surface: user, manual: todo }
   REG-089: { status: shipped, surface: user, manual: todo }
@@ -434,6 +443,9 @@ features:
   # so the only repair a venue could actually reach was the device reset. Now a button, guarded.
   XCT-014: { status: shipped, surface: user, manual: register/orders.md#repair-local-data }
   XCT-016: { status: shipped, surface: internal }
+  # BAN-421 — HID wedge and camera. The IoT/proxy scanner (REG-082) is not built, so this is
+  # `partial` rather than shipped; two of the three transports is not the feature.
+  XCT-059: { status: partial, surface: user, manual: register/orders.md#scanning, note: "HID wedge and device camera. The IoT/proxy long-poll scanner (REG-082) is not built." }
 
   # Tenancy, security & audit (XCT-100 … XCT-129) — internal
   XCT-101: { status: shipped, surface: internal }

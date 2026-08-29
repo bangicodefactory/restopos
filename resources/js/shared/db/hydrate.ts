@@ -203,6 +203,82 @@ export async function applyPayload(db: PosDb, payload: BootstrapResponse | Delta
 }
 
 /**
+ * Cache a handful of catalogue rows fetched outside the bootstrap/delta pipeline (REG-071).
+ *
+ * The register's scan-miss lookup pulls one product and its variants from `GET /api/pos/products`.
+ * That payload is not a delta and must not be mistaken for one, which is the whole reason this is a
+ * separate function rather than a call to {@link applyPayload}:
+ *
+ *   - **no watermark is written.** `applyPayload` stamps `watermark.*` from the payload's
+ *     `server_time`, and the delta puller sends that back as `?since=`. Advancing it on a lazy fetch
+ *     would tell the server "I already have everything up to now" on the strength of one product,
+ *     and every row changed since the last real delta would be skipped — permanently, because the
+ *     watermark only moves forward. The till would quietly serve a stale price list.
+ *   - **no config revision, no tombstones.** A search result is not a statement about what has been
+ *     deleted; treating an absent row as a tombstone would purge the catalogue one scan at a time.
+ *
+ * The same `TRANSFORMS` run, so a lazily cached row is indistinguishable from a bootstrapped one —
+ * `searchText` included, or the product would be scannable and unfindable by name.
+ *
+ * @returns how many rows were written.
+ */
+export async function ingestCatalogRows(
+    db: PosDb,
+    rows: { products?: readonly unknown[]; product_variants?: readonly unknown[] },
+): Promise<number> {
+    const products = (rows.products ?? []) as Unknown[];
+    const variants = (rows.product_variants ?? []) as Unknown[];
+
+    if (products.length === 0 && variants.length === 0) return 0;
+
+    let written = 0;
+
+    await db.transaction('rw', [db.products, db.variants], async () => {
+        const productNames = new Map<number, string>();
+        for (const row of products) {
+            const id = row['id'];
+            if (typeof id === 'number') productNames.set(id, str(row, 'name'));
+        }
+
+        // A variant whose parent is not in this payload still needs the parent's name folded into
+        // its `searchText`, or the same variant would search differently depending on which request
+        // happened to carry it. The parent is already in Dexie in that case.
+        const missing = [
+            ...new Set(
+                variants
+                    .map((row) => row['product_id'])
+                    .filter((id): id is number => typeof id === 'number' && !productNames.has(id)),
+            ),
+        ];
+
+        if (missing.length > 0) {
+            for (const held of await db.products.bulkGet(missing)) {
+                const row = held as Unknown | undefined;
+                const id = row?.['id'];
+                if (row && typeof id === 'number') productNames.set(id, str(row, 'name'));
+            }
+        }
+
+        const ctx: HydrateContext = { productNames, ancestorsOf: () => [] };
+
+        for (const [entity, rowsToWrite] of [
+            ['products', products],
+            ['product_variants', variants],
+        ] as const) {
+            if (rowsToWrite.length === 0) continue;
+
+            const table = tableFor(db, entity);
+            if (!table) continue;
+
+            await table.bulkPut(rowsToWrite.map((row) => TRANSFORMS[entity]!(row, ctx)));
+            written += rowsToWrite.length;
+        }
+    });
+
+    return written;
+}
+
+/**
  * A tombstone must never delete an order we have not pushed yet.
  *
  * The server can legitimately tombstone an order it considers gone (paid elsewhere, merged) while

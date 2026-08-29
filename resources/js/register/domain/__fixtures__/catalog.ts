@@ -20,6 +20,11 @@ import type {
     UomRow,
 } from '@domain/types';
 
+import {
+    defaultVariantsByProduct,
+    groupVariantsByProduct,
+    indexBarcodes,
+} from '../../data/barcode-index';
 import { emptyCatalog, setCatalog, type CatalogIndex } from '../../data/catalog';
 import { useOrderStore } from '../../state/order-store';
 import { resetOrderActions } from '../order-actions';
@@ -349,25 +354,13 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
     const taxes = parts.taxes ?? [];
     const uoms = parts.uoms ?? [makeUom({ id: 1 })];
 
-    const variantsByProduct = new Map<number, ProductVariantRow[]>();
-    const defaultVariantByProduct = new Map<number, ProductVariantRow>();
-    const barcodeIndex = new Map<string, ProductVariantRow>();
-    for (const variant of variants) {
-        const bucket = variantsByProduct.get(variant.product_id);
-        if (bucket) bucket.push(variant);
-        else variantsByProduct.set(variant.product_id, [variant]);
-        if (variant.barcode) barcodeIndex.set(variant.barcode, variant);
-    }
-    // Same rule as `catalog-load.ts`: the first sellable combination, else the first variant at all.
-    for (const [productId, list] of variantsByProduct) {
-        const first = list.filter((v) => v.active && v.is_active_combination)[0] ?? list[0];
-        if (first) defaultVariantByProduct.set(productId, first);
-    }
-    for (const product of products) {
-        if (!product.barcode) continue;
-        const variant = defaultVariantByProduct.get(product.id);
-        if (variant && !barcodeIndex.has(product.barcode)) barcodeIndex.set(product.barcode, variant);
-    }
+    // Through the same helpers `catalog-load.ts` uses, not a copy of them. This block used to be a
+    // hand transcription annotated "same rule as catalog-load.ts", which is a promise nothing
+    // checked: a fixture that resolves barcodes differently from production builds a catalog shape
+    // production never produces, and every domain test then asserts against it (BAN-421).
+    const variantsByProduct = groupVariantsByProduct(variants);
+    const defaultVariantByProduct = defaultVariantsByProduct(variantsByProduct);
+    const barcodeIndex = indexBarcodes(products, variants, defaultVariantByProduct);
 
     const categoryChildren = new Map<number, PosCategoryRow[]>();
     for (const category of categories) {

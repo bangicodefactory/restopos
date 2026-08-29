@@ -47,6 +47,9 @@ final class CatalogController extends Controller
         return new JsonResponse([
             'model' => 'products',
             'records' => $result['records'],
+            // The variants of the matched products, so a lazily fetched product is sellable the
+            // moment it lands (REG-071). A line references a variant, never a template.
+            'variants' => $result['variants'],
             'next_cursor' => $result['next_cursor'],
             'total' => $result['total'],
             'server_time' => now()->toIso8601ZuluString('microsecond'),

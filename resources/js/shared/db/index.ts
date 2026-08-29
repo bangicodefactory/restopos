@@ -14,6 +14,7 @@ export {
     applyPayload,
     destroyDatabase,
     getMeta,
+    ingestCatalogRows,
     loadCatalog,
     normalizeSearch,
     phoneDigitsOf,

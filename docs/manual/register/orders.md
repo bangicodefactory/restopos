@@ -5,6 +5,9 @@ features:
   - REG-373
   - REG-374
   - XCT-014
+  - REG-071
+  - REG-081
+  - XCT-059
   - REG-100
   - REG-101
   - REG-103
@@ -51,6 +54,34 @@ which is what you want.
 
 Items with options show their full name including the choices made, so *Pizza (large, extra
 cheese)* reads correctly on the receipt and in the kitchen.
+
+## Scanning
+
+A barcode scanner plugged into the till works everywhere on this screen — you do not have to tap
+into the search box first. Scan, and the item is added.
+
+### Scanning with the tablet camera
+
+On a tablet with no scanner attached, tap **Scan with the camera** next to the search box. A small
+preview appears above the product grid; hold the barcode in front of it and the item is added
+exactly as a hardware scan would add it — including labels that carry a weight or a price.
+
+The button only appears on devices that can do it, and the camera is switched off the moment you
+leave this screen. If the camera cannot be opened — permission refused, or an older tablet — the
+till keeps working with the hardware scanner.
+
+### When a barcode is not recognised
+
+The till keeps only part of the menu on the device, so a barcode it does not know is not
+necessarily a barcode that does not exist. It asks the server, and if the product is there it is
+added to the order and kept on the device for next time.
+
+If it still cannot be found you get **Unknown barcode**, with the digits, and the code is dropped
+into the search box so you can look for the item by name or have it created.
+
+If you are **offline** the till says so — *Unknown product, connect to look it up* — rather than
+telling you the product does not exist. Those are different problems: the second one is worth
+walking to the stockroom about, the first one only means the wifi is down.
 
 ## Change a line
 

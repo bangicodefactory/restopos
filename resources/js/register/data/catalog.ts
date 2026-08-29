@@ -164,6 +164,21 @@ export function emptyCatalog(): CatalogIndex {
 let current: CatalogIndex = emptyCatalog();
 const listeners = new Set<() => void>();
 
+let versionSeq = 0;
+
+/**
+ * The next value for `CatalogIndex.version` — monotonic across **every** writer.
+ *
+ * `version` is a memo key, so two different indexes must never carry the same number. Boot used to
+ * own a private counter; once the lazy scan-miss fetch could also produce an index, a private
+ * counter meant the next full re-read could reuse a number the lazy insert had already published,
+ * and every memo keyed on it would keep showing the previous catalogue. One sequence, one writer.
+ */
+export function nextCatalogVersion(): number {
+    versionSeq += 1;
+    return versionSeq;
+}
+
 export function getCatalog(): CatalogIndex {
     return current;
 }
