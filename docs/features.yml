@@ -123,6 +123,15 @@ features:
   # is the *absence* case, which is REG-212's refusal — so this is partial, and internal.
   REG-210: { status: partial, surface: internal }
   REG-212: { status: shipped, surface: user, manual: register/payments.md }
+  # BAN-414a. The metadata wire is complete end to end — the column had a reader and no writer —
+  # but the receipt does not yet render the slip, which is REG-213's second half.
+  REG-213: { status: partial, surface: user, manual: register/payments.md#what-the-terminal-writes-on-the-payment }
+  # The registry, a fake driver and a conformance test. No vendor driver exists, and none can be
+  # verified here: there is no terminal, no SDK and no credentials in config/.
+  XCT-060: { status: partial, surface: internal }
+  # `adjustOnTerminal` has full conformance coverage and no caller — routing tips through it turns
+  # on a per-vendor question about adjusting an uncaptured authorisation. Interface only.
+  RST-128: { status: partial, surface: internal }
   REG-216: { status: shipped, surface: user, manual: register/payments.md }
   REG-219: { status: shipped, surface: user, manual: register/payments.md }
   REG-217: { status: shipped, surface: user, manual: register/payments.md }
