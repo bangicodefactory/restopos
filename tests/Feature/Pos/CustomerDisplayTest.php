@@ -32,20 +32,24 @@ beforeEach(function (): void {
     $this->fx = PosFixtures::make()->withSession();
 });
 
-function displayMedia(PosFixtures $fx, string $collection = MediaCollection::Brand->value): MediaFile
-{
-    Storage::disk('public')->put('media/wall.png', 'WALL-BYTES');
+function displayMedia(
+    PosFixtures $fx,
+    string $collection = MediaCollection::Brand->value,
+    string $bytes = 'WALL-BYTES',
+    string $checksum = 'wall-sum',
+): MediaFile {
+    Storage::disk('public')->put('media/'.$checksum.'.png', $bytes);
 
     return MediaFile::query()->create([
         'uuid' => (string) Str::uuid(),
         'company_id' => $fx->company->getKey(),
         'collection' => $collection,
         'disk' => 'public',
-        'path' => 'media/wall.png',
+        'path' => 'media/'.$checksum.'.png',
         'filename' => 'wall.png',
         'mime_type' => 'image/png',
         'size_bytes' => 10,
-        'checksum' => 'wall-sum',
+        'checksum' => $checksum,
         'is_public' => false,
     ]);
 }
@@ -213,6 +217,29 @@ it('gives a display with no credential its venue name and background', function 
     expect($bytes->streamedContent())->toBe('WALL-BYTES');
 });
 
+it('changes the background URL when the background changes, so an immutable cache cannot pin it', function (): void {
+    // The bytes are served `public, max-age=31536000, immutable`. Without something in the URL that
+    // identifies *which* bytes, a display that cached one background would keep showing it for a
+    // year after the venue swapped it — `immutable` tells the browser not even to revalidate.
+    $first = displayMedia($this->fx, MediaCollection::Brand->value, 'OLD-BYTES', 'sum-old');
+    $this->fx->config->forceFill(['customer_display_bg_media_id' => $first->getKey()])->save();
+
+    $id = $this->fx->config->getKey();
+    $token = $this->fx->config->customerDisplayToken();
+
+    $before = $this->getJson("/api/pos/customer-display/{$id}?token={$token}")->assertOk()->json('data.background');
+
+    $second = displayMedia($this->fx, MediaCollection::Brand->value, 'NEW-BYTES', 'sum-new');
+    $this->fx->config->forceFill(['customer_display_bg_media_id' => $second->getKey()])->save();
+
+    $after = $this->getJson("/api/pos/customer-display/{$id}?token={$token}")->assertOk()->json('data.background');
+
+    expect($after)->not->toBe($before);
+
+    // And the new URL really serves the new bytes, not just a different string.
+    expect($this->get($after)->assertOk()->streamedContent())->toBe('NEW-BYTES');
+});
+
 it('reports no background when the venue configured none', function (): void {
     $id = $this->fx->config->getKey();
     $token = $this->fx->config->customerDisplayToken();
@@ -258,7 +285,7 @@ it('404s when the row exists but the file is gone', function (): void {
     $media = displayMedia($this->fx);
     $this->fx->config->forceFill(['customer_display_bg_media_id' => $media->getKey()])->save();
 
-    Storage::disk('public')->delete('media/wall.png');
+    Storage::disk('public')->delete($media->path);
 
     $id = $this->fx->config->getKey();
     $token = $this->fx->config->customerDisplayToken();

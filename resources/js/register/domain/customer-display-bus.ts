@@ -285,3 +285,36 @@ export function readDisplayBroadcast(event: unknown): DisplayPayload | null {
 
     return isDisplayPayload(payload) ? payload : null;
 }
+
+/**
+ * Drops a frame that is older than one already shown (BAN-443a review).
+ *
+ * The display can be fed by two transports at once — BroadcastChannel for a second monitor on the
+ * same machine, the socket for one on another device — and "Open here" turns both on. They are not
+ * the same speed: BroadcastChannel is synchronous and in-process, while the socket leg is throttled,
+ * then an HTTP round trip, then a Reverb hop. So frame 2 can arrive locally while frame 1 is still
+ * in the air, and the late copy of frame 1 would put the pre-item total back in front of a paying
+ * customer until the next send caught up.
+ *
+ * Whole frames solve the *merge* problem. They do not solve the *ordering* one, which is what `at`
+ * is for — it was on every payload variant and enforced by `isDisplayPayload` from the start, with
+ * no reader.
+ *
+ * Stateful on purpose: the caller is a render path, and threading the high-water mark through it
+ * would put the decision back in the component where it cannot be tested.
+ */
+export function createFrameGate(): { accept(frame: DisplayPayload): boolean } {
+    let lastAt = 0;
+
+    return {
+        accept(frame: DisplayPayload): boolean {
+            // `<`, not `<=`: two frames can share a millisecond, and the later of those is still the
+            // one the cashier just caused. Only a strictly older frame is dropped.
+            if (frame.at < lastAt) return false;
+
+            lastAt = frame.at;
+
+            return true;
+        },
+    };
+}

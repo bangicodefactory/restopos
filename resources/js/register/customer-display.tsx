@@ -4,18 +4,10 @@ import { registerServiceWorker } from '@shared/pwa/register-sw';
 import { useEcho } from '@shared/store';
 import { ErrorBoundary } from '@shared/ui';
 import type { CSSProperties, JSX } from 'react';
-import { StrictMode, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import {
-    DISPLAY_EVENT,
-    displayChannel,
-    displayConfigIdFromUrl,
-    displayTokenFromUrl,
-    readDisplayBroadcast,
-    subscribeDisplay,
-    type DisplayPayload,
-} from './domain/customer-display-bus';
+import { DISPLAY_EVENT, createFrameGate, displayChannel, displayConfigIdFromUrl, displayTokenFromUrl, readDisplayBroadcast, subscribeDisplay, type DisplayPayload } from './domain/customer-display-bus';
 import { useT } from './i18n';
 import { publicReverbConfig } from './realtime';
 
@@ -65,7 +57,18 @@ function Display({ configId, token }: { configId: number | null; token: string |
     const [payload, setPayload] = useState<DisplayPayload | null>(null);
     const [branding, setBranding] = useState<Branding>({ venue: null, background: null });
 
-    useEffect(() => subscribeDisplay(setPayload), []);
+    // The newest frame wins, whichever leg it arrived on (BAN-443a). The reasoning, and why
+    // whole frames do not make this unnecessary, is on `createFrameGate`.
+    const gate = useMemo(() => createFrameGate(), []);
+
+    const showFrame = useCallback(
+        (next: DisplayPayload): void => {
+            if (gate.accept(next)) setPayload(next);
+        },
+        [gate],
+    );
+
+    useEffect(() => subscribeDisplay(showFrame), [showFrame]);
 
     // REG-354 — the configured background. Fetched rather than pointed at by an `<img src>` on the
     // media route, because that route needs a bearer this screen does not have; the display's own
@@ -91,10 +94,10 @@ function Display({ configId, token }: { configId: number | null; token: string |
                 // A frame off the network that this screen cannot render is dropped, not shown.
                 // There is no replica to re-read from, so the last good picture is the best
                 // available one — and rendering a malformed frame takes the screen down.
-                if (next !== null) setPayload(next);
+                if (next !== null) showFrame(next);
             },
         }),
-        [],
+        [showFrame],
     );
 
     useEcho({

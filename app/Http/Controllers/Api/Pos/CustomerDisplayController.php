@@ -111,6 +111,13 @@ final class CustomerDisplayController extends Controller
                     : route('api.pos.customer-display.background', [
                         'config' => $config->getKey(),
                         'token' => $config->customerDisplayToken(),
+                        // Cache key, not a credential. The bytes are served `immutable` for a
+                        // year, and without something identifying *which* bytes, the URL for
+                        // a config never changes — so a venue that swaps its background would
+                        // go on seeing the old one until someone cleared the display's cache.
+                        // Keying on the checksum makes the URL name the content, which is what
+                        // makes `immutable` true rather than merely convenient.
+                        'v' => substr((string) $background->checksum, 0, 16),
                     ]),
             ],
         ]);

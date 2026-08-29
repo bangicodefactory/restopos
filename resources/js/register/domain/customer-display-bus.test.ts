@@ -6,6 +6,7 @@ import {
     DISPLAY_EVENT,
     closeDisplay,
     createDisplayRelay,
+    createFrameGate,
     displayChannel,
     displayConfigIdFromUrl,
     displayTokenFromUrl,
@@ -291,5 +292,55 @@ describe('the pairing URL (REG-356)', () => {
         expect(displayConfigIdFromUrl('https://pos.example/pos/7')).toBeNull();
         expect(displayTokenFromUrl('https://pos.example/pos/7/display?other=1')).toBeNull();
         expect(displayTokenFromUrl('https://pos.example/pos/7/display?t=')).toBeNull();
+    });
+});
+
+describe('frame ordering across two transports (BAN-443a)', () => {
+    const frame = (at: number): DisplayPayload => ({ kind: 'idle', venue: 'Chez Nous', at });
+
+    it('accepts frames that arrive in order', () => {
+        const gate = createFrameGate();
+
+        expect(gate.accept(frame(100))).toBe(true);
+        expect(gate.accept(frame(200))).toBe(true);
+    });
+
+    it('drops a stale frame that overtook a newer one', () => {
+        // The real race: "Open here" runs BroadcastChannel AND the socket. The local leg is
+        // synchronous; the remote leg is throttled, then an HTTP round trip, then a Reverb hop. So
+        // the socket's copy of frame 1 can land after frame 2 is already on screen — and without
+        // this, the customer watches the total go backwards to the pre-item amount.
+        const gate = createFrameGate();
+
+        gate.accept(frame(200));
+
+        expect(gate.accept(frame(100))).toBe(false);
+    });
+
+    it('accepts a frame from the same millisecond as the last one', () => {
+        // `<` not `<=`. Two frames can share a tick, and the later of those is still the one the
+        // cashier just caused; dropping it would stick the display on the earlier picture.
+        const gate = createFrameGate();
+
+        gate.accept(frame(200));
+
+        expect(gate.accept(frame(200))).toBe(true);
+    });
+
+    it('does not let a dropped frame drag the high-water mark backwards', () => {
+        // If rejecting frame 50 also recorded 50, the gate would then happily accept 100 and
+        // 150 — replaying the whole stale sequence it had just refused, one frame at a time.
+        const gate = createFrameGate();
+
+        gate.accept(frame(200));
+        expect(gate.accept(frame(50))).toBe(false);
+        expect(gate.accept(frame(100))).toBe(false);
+        expect(gate.accept(frame(201))).toBe(true);
+    });
+
+    it('lets the first frame through whatever its timestamp', () => {
+        const gate = createFrameGate();
+
+        expect(gate.accept(frame(0))).toBe(true);
     });
 });
