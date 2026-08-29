@@ -228,6 +228,32 @@ it('recomputes amount_paid, change and due from the payment rows', function (): 
         ->and((string) $order->amount_due)->toBe('0.0000');
 });
 
+it('stops counting a payment the terminal reversed towards amount_paid', function (): void {
+    // BAN-414a. `reversed` is a long-standing PaymentStatus case that nothing could produce until
+    // the register gained a terminal `reverse` verb. `paymentTotals` summed every undeleted row
+    // regardless of status, so the first reversal would have left the order reading fully paid with
+    // the money already back in the customer's hand.
+    //
+    // Asserted server-side as well as on the client because the server total is authoritative on
+    // sync: a client-only fix would be overwritten by the next pull, which is exactly how a till
+    // comes to disagree with its own back office.
+    $uuid = (string) Str::uuid();
+
+    sync([$this->fx->orderCommand($uuid, [], ['state' => OrderState::Paid->value], [
+        ['op' => 'create', 'uuid' => (string) Str::uuid(), 'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '10.00'],
+        ['op' => 'create', 'uuid' => (string) Str::uuid(), 'payment_method_id' => $this->fx->cash->getKey(), 'amount' => '14.20', 'payment_status' => 'reversed'],
+    ])])->assertOk();
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+
+    expect((string) $order->amount_paid)->toBe('10.0000')
+        ->and((string) $order->amount_due)->toBe('14.2000');
+
+    // The row is kept, not deleted: the reversal is part of the order's history and the receipt
+    // has to be able to show it.
+    expect(Payment::query()->where('pos_order_id', $order->getKey())->count())->toBe(2);
+});
+
 it('reroutes an order whose session closed into a rescue session', function (): void {
     $closedId = $this->fx->session->getKey();
     $this->fx->session->forceFill(['state' => SessionState::Closed->value, 'closed_at' => now()])->save();

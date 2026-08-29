@@ -3175,6 +3175,10 @@ final readonly class OrderSyncService
         $rows = $this->connection->table('pos_payments')
             ->where('pos_order_id', $order->getKey())
             ->whereNull('deleted_at')
+            // A reversal returned the money, so the row must stop counting as tender
+            // (BAN-414a). Kept rather than deleted because the reversal is part of the
+            // order's history and the receipt has to be able to show it.
+            ->where('payment_status', '!=', PaymentStatus::Reversed->value)
             ->selectRaw('sum(case when is_change then 0 else amount end) as paid')
             ->selectRaw('sum(case when is_change then amount else 0 end) as change_amount')
             ->first();
