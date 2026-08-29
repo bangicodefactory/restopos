@@ -943,10 +943,19 @@ export default function PosConfigEdit({ config, options, devices }: PosConfigEdi
                                     disabled={!form.data.use_iot_box}
                                     onChange={(checked) => form.setData('iot_scan', checked)}
                                 />
+                                {/*
+                                  * The scale is the exception to the rule above, since BAN-418a.
+                                  * The register's driver talks to it over WebSerial — straight from
+                                  * the browser to an RS-232 or USB-serial port, with no box in
+                                  * between — so tying this switch to `use_iot_box` made the only
+                                  * gate the driver reads unreachable for the common installation.
+                                  * The proxy path (`GET /scale/read`) does want the box, and when
+                                  * it is built it will want the box ticked; it is not built.
+                                  */}
                                 <ToggleField
-                                    label="Balance"
+                                    label="Balance électronique"
+                                    hint="Le poids est lu par la balance au lieu d’être saisi. Sans elle, la caisse demande le poids au clavier."
                                     checked={form.data.iot_scale}
-                                    disabled={!form.data.use_iot_box}
                                     onChange={(checked) => form.setData('iot_scale', checked)}
                                 />
                                 <ToggleField

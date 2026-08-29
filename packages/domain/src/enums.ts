@@ -712,6 +712,18 @@ export const UpcEanConversion = {
 } as const;
 export type UpcEanConversion = (typeof UpcEanConversion)[keyof typeof UpcEanConversion];
 
+/**
+ * Where a weighed line's quantity came from (XCT-058). Null on any line not sold by weight.
+ *
+ * Re-exported by `@shared/scale` so a component takes one import; defined here because the column
+ * it maps to is cast to `App\Enums\WeightSource`, and every PHP-mirrored literal lives in this file.
+ */
+export const WeightSource = {
+    Scale: 'scale',
+    Manual: 'manual',
+} as const;
+export type WeightSource = (typeof WeightSource)[keyof typeof WeightSource];
+
 /** Every enum name mirrored here, for the parity test on the PHP side. */
 export const MIRRORED_ENUMS = [
     'AccessLevel',
@@ -797,4 +809,5 @@ export const MIRRORED_ENUMS = [
     'TerminalProvider',
     'UomType',
     'UpcEanConversion',
+    'WeightSource',
 ] as const;

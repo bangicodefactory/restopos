@@ -1,3 +1,4 @@
+import { WeightSource } from '@domain/enums';
 import type { CourseRow, OrderLineRow, OrderRow, PaymentRow, Uuid } from '@domain/types';
 import type { ApiClient } from '@shared/sync';
 
@@ -333,6 +334,9 @@ function toLineRow(
 
         skip_preparation: bool(line.skip_preparation),
         is_edited: bool(line.is_edited),
+        // XCT-058 — a line fetched back from the server keeps its provenance, so a refund taken
+        // from the ticket screen still knows the original weight was read rather than typed.
+        weight_source: weightSourceOf(line.weight_source),
         rev: 0,
     } as unknown as OrderLineRow;
 }
@@ -405,6 +409,17 @@ function numOrNull(value: unknown): number | null {
 
 function bool(value: unknown): boolean {
     return value === true || value === 1 || value === '1';
+}
+
+/**
+ * XCT-058 — an unrecognised provenance becomes null, never a guess.
+ *
+ * "We do not know where this weight came from" is a true statement about an old row written before
+ * the column existed. Defaulting to `manual` would be a claim about a cashier, and defaulting to
+ * `scale` would be a claim about an instrument; both are worse than the honest gap.
+ */
+function weightSourceOf(value: unknown): WeightSource | null {
+    return value === WeightSource.Scale || value === WeightSource.Manual ? value : null;
 }
 
 function intArray(value: unknown): number[] {

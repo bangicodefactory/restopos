@@ -62,6 +62,7 @@ export function makeLine(partial: Partial<OrderLineRow> = {}): OrderLineRow {
 
         skip_preparation: false,
         is_edited: false,
+        weight_source: null,
         rev: 0,
         ...partial,
     };

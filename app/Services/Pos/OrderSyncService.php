@@ -13,6 +13,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\PriceType;
 use App\Enums\SyncConflictType;
 use App\Enums\SyncResolution;
+use App\Enums\WeightSource;
 use App\Events\Pos\OrderStateChanged;
 use App\Events\Pos\OrderSynced;
 use App\Exceptions\Pos\ChangeWithoutCashException;
@@ -1908,6 +1909,9 @@ final readonly class OrderSyncService
             // it was called without one — so the link the cap counts against did not exist.
             'refunded_order_line_id' => $refundedLineId,
             'skip_preparation' => (bool) ($command['skip_preparation'] ?? false),
+            // XCT-058 — provenance of a weighed quantity, validated rather than trusted: an
+            // unknown string becomes null, so a client cannot invent a third kind of evidence.
+            'weight_source' => WeightSource::tryFrom((string) ($command['weight_source'] ?? '')),
         ]);
 
         $existing[$uuid] = (int) $line->getKey();
@@ -2153,6 +2157,14 @@ final readonly class OrderSyncService
             if (array_key_exists($from, $command)) {
                 $update[$to] = $command[$from];
             }
+        }
+
+        // XCT-058 — kept out of the plain map above because it must be *parsed*, not copied. The
+        // column is cast to WeightSource, so an arbitrary client string would throw on hydrate
+        // rather than be refused here. Anything unrecognised becomes null: no provenance recorded
+        // is honest, an invented one is not.
+        if (array_key_exists('weight_source', $command)) {
+            $update['weight_source'] = WeightSource::tryFrom((string) ($command['weight_source'] ?? ''));
         }
 
         // Same authority as on create: where the server has a price of its own, it wins, whether the

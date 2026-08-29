@@ -1840,13 +1840,24 @@ The register emits a frame on every `order.rev` change, debounced to 100 ms and 
 
 ### 7.7 Scale
 
-`iface_electronic_scale` + a scale binding. Transports: WebSerial (most scales are RS-232 speaking a simple ASCII protocol — Toledo/Dialog 06, CAS, Mettler SICS) or the print agent (`GET /scale/read`). Poll at 4 Hz while the weighing dialog is open, never otherwise.
+Gated on **`pos_configs.iot_scale`**. Transports: WebSerial (most scales are RS-232 speaking a simple ASCII protocol — Toledo/Dialog 06, CAS, Mettler SICS) or the print agent (`GET /scale/read`). Poll at 4 Hz while the weighing dialog is open, never otherwise.
 
 ```ts
-export interface ScaleReading { weight: number; unit: 'kg' | 'lb' | 'g'; stable: boolean; tare: number; at: number }
+export type ScaleReading = { weight: number; unit: 'kg' | 'lb' | 'g'; stable: boolean; tare: number; at: number };
 ```
 
-Legal-metrology rule replicated from Odoo: a product may only be added at a weight that **differs from the previously accepted weight**, and only when `stable === true`. Both are enforced in `packages/hardware/src/scale/` and covered by unit tests, because in several jurisdictions this is a certification requirement rather than a nicety.
+> **Two corrections this section carried until BAN-418a.** It named `iface_electronic_scale` as the gate, which is what Odoo uses — but there is no such `pos_configs` column here, no cast, no validation rule and no server writer, so a client reading it would get `undefined` on every till forever. `iot_scale` is the column that exists (and was itself read by nothing until this ticket). It also placed the implementation in `packages/hardware/src/scale/`; no such package exists, and `packages/domain` is barred from runtime dependencies, so it lives in **`resources/js/shared/scale/`** beside `shared/printing`, which solved the same one-interface-several-transports problem.
+
+Legal-metrology rule replicated from Odoo: a product may only be added at a weight that **differs from the previously accepted weight**, and only when `stable === true`. Both are covered by unit tests, because in several jurisdictions this is a certification requirement rather than a nicety.
+
+The rule has two halves and they live apart, because only one of them applies without a scale:
+
+- **Arithmetic** — "not the same weight twice", in `@register/domain/weighing`, keyed on (order, variant) so that 200 g of gruyère does not block 200 g of olives, and released when the order is paid, cancelled or discarded. Applies to manual entry too, which is the path an operator would otherwise use to get round it.
+- **Mechanical** — "settled, and the pan seen empty since the last accepted weight", in the reader. Requiring an observed zero is stricter than Odoo's rule and closes its cheap loophole: adding a gram makes the weight "differ" without the item ever coming off the scale.
+
+The layering is what makes any of it testable. Transports do I/O and no thinking; the reader does the thinking and no I/O. `WebSerialScaleTransport` therefore cannot be verified in CI — `navigator.serial` needs Chromium, a user gesture and a physical scale — but the two decisions it would otherwise own, byte framing and number parsing, are pure functions in `protocol.ts` and are covered. A `FakeScaleTransport` drives the reader through the same interface production uses, mirroring the injectable `transports` map in `shared/printing/router.ts`.
+
+**Manual entry is a supported fallback, not a failure state**, and the line records which produced its quantity in `pos_order_lines.weight_source` (XCT-058). It is also what a till without a scale, or a browser without WebSerial, always does.
 
 ### 7.8 Payment terminals
 

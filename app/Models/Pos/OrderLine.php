@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Pos;
 
 use App\Enums\PriceType;
+use App\Enums\WeightSource;
 use App\Models\Catalog\Combo;
 use App\Models\Catalog\ComboItem;
 use App\Models\Catalog\PosCategory;
@@ -87,6 +88,7 @@ class OrderLine extends Model implements PosLoadable
         'points_cost',
         'is_edited',
         'skip_preparation',
+        'weight_source',
         'ui_state',
     ];
 
@@ -112,6 +114,7 @@ class OrderLine extends Model implements PosLoadable
             'points_cost' => 'decimal:3',
             'is_edited' => 'boolean',
             'skip_preparation' => 'boolean',
+            'weight_source' => WeightSource::class,
             'ui_state' => AsArrayObject::class,
         ];
     }

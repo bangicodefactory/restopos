@@ -60,6 +60,11 @@ function lineCommand(line: OrderLineRow): RecordCommand<OrderLineRow> {
         refunded_line_uuid: line.refunded_line_uuid,
         refunded_line_id: line.refunded_line_id,
         skip_preparation: line.skip_preparation,
+        // XCT-058 — without this on the command the provenance exists only in this device's
+        // IndexedDB: the server never sees it, so a reprint, a refund or an inspection from any
+        // other till has no way to tell a certified reading from a typed one. Same failure the
+        // terminal slip above was fixed for.
+        weight_source: line.weight_source,
     };
 }
 

@@ -28,6 +28,7 @@ use App\Enums\OrderState;
 use App\Enums\PaymentStatus;
 use App\Enums\PaymentTransactionState;
 use App\Enums\PriceType;
+use App\Enums\WeightSource;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -165,6 +166,10 @@ return new class extends Migration
             $table->string('full_product_name', 255);
             $table->foreignId('uom_id')->constrained('uoms')->restrictOnDelete();
             $table->decimal('quantity', 16, 3)->default(1); // negative for refunds
+            // Provenance of a weighed quantity (XCT-058). Null on every line not sold by weight;
+            // 'scale' or 'manual' on one that is. An inspector may ask whether a weight came off a
+            // certified instrument, and the answer has to survive the sale.
+            $table->string('weight_source', 16)->nullable();
             $table->decimal('price_unit', 16, 4)->default(0);
             $table->decimal('price_extra', 16, 4)->default(0);
             $table->string('price_type', 16)->default(PriceType::Original->value);
@@ -201,7 +206,12 @@ return new class extends Migration
             $table->index(['product_variant_id', 'created_at'], 'pos_order_lines_variant_date_index');
         });
 
-        $this->applyChecks('pos_order_lines', ['price_type' => PriceType::values()]);
+        $this->applyChecks('pos_order_lines', [
+            'price_type' => PriceType::values(),
+            // NULL passes a CHECK (`NULL IN (...)` is NULL, not false), which is what we want:
+            // a line that is not weighed carries no source.
+            'weight_source' => WeightSource::values(),
+        ]);
 
         // `no_variant` attribute values riding on the line.
         Schema::create('pos_order_line_attribute_value', function (Blueprint $table): void {

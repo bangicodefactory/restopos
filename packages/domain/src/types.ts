@@ -53,6 +53,7 @@ import type {
     TaxScope,
     UomType,
     UpcEanConversion,
+    WeightSource,
 } from './enums';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1030,6 +1031,14 @@ export type OrderLineRow = {
 
     skip_preparation: boolean;
     is_edited: boolean;
+    /**
+     * Where a weighed quantity came from (XCT-058, AC4). Null on any line not sold by weight.
+     *
+     * The distinction is legal rather than cosmetic: `scale` means a certified instrument produced
+     * this number, `manual` means a cashier typed it. Both are permitted; conflating them is what
+     * the column exists to stop.
+     */
+    weight_source: WeightSource | null;
     rev: number;
 };
 
