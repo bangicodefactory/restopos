@@ -183,12 +183,17 @@ function asDuplicate(doc: EscPosDoc, copy: number): EscPosDoc {
 export function summariseSend(delta: PrepDelta, catalog: CatalogIndex = getCatalog()): SendCategoryCount[] {
     const out: SendCategoryCount[] = [];
 
-    // No `count === 0` guard. `changeCountsByCategory` sums **absolute** quantities, and
-    // `computePrepDelta` — the only producer of a `PrepDelta` — never emits a zero-quantity change
-    // (it skips `delta === 0`, `quantity === 0` and empty snapshot entries at all three sites). A
-    // zero bucket is therefore unreachable, and a branch no test can reach is a branch that is
-    // wrong the first time something makes it reachable.
+    // `changeCountsByCategory` sums **absolute** quantities, so a bucket can total zero and a
+    // cashier would read "0 × Boissons" on the send toast.
+    //
+    // It was tempting to call that unreachable: `computePrepDelta` guards `delta !== 0` on a
+    // quantity change and `quantity !== 0` on a new line. But the note-update site between them
+    // does not — it pushes `quantity: line.quantity` unconditionally (kitchen-delta.ts:151-154),
+    // so a line sitting at zero whose note was edited emits a zero-quantity change and lands
+    // here. The branch is reachable; the guard stays, and the test below reaches it.
     for (const [categoryId, count] of changeCountsByCategory(delta)) {
+        if (count === 0) continue;
+
         out.push({
             categoryId,
             name: categoryId === null ? '' : (catalog.categoriesById.get(categoryId)?.name ?? ''),

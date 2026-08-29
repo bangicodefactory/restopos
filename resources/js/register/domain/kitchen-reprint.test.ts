@@ -164,6 +164,24 @@ describe('summariseSend (KDS-061)', () => {
         expect(summary.map((entry) => entry.categoryId)).toEqual([DRINK, FOOD]);
     });
 
+    it('drops a bucket that totals zero rather than telling a cashier "0 x Boissons"', () => {
+        // Reachable, though it looks as though it should not be. `computePrepDelta` guards
+        // `delta !== 0` on a quantity change and `quantity !== 0` on a new line — but the
+        // note-update site between them pushes the current quantity unconditionally. So a line
+        // sitting at zero whose note was edited emits a zero-quantity change, and without the
+        // guard the send toast names a category that has nothing in it.
+        const line = makeLine({ pos_category_id: DRINK, quantity: 0, customer_note: 'no ice' });
+        const before = { ...line, customer_note: 'with ice' };
+        const snapshot = { lines: { [prepKeyOf(before)]: 2 } } as never;
+
+        const changes = computePrepDelta([line], [], snapshot);
+
+        // The zero-quantity note_update really is produced — if this stops being true the guard
+        // above is dead and the comment on it is wrong.
+        expect(changes.changes.some((c) => c.changeType === 'note_update' && c.quantity === 0)).toBe(true);
+        expect(summariseSend(changes)).toEqual([]);
+    });
+
     it('leaves the name empty for a product in no category, for the caller to localise', () => {
         // A bare category id in a toast is worse than no label at all.
         const summary = summariseSend(delta(makeLine({ pos_category_id: null, quantity: 2 })));
