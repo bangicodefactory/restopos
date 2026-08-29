@@ -166,6 +166,7 @@ describe('cameraBarcodeSource', () => {
         const scheduled: Array<() => void> = [];
         let cancelled = 0;
         let round = 0;
+        let decodes = 0;
 
         const stream: CameraStream = {
             getTracks: () => [
@@ -182,6 +183,7 @@ describe('cameraBarcodeSource', () => {
             createDecoder: () =>
                 Promise.resolve({
                     detect: () => {
+                        decodes += 1;
                         const batch = codes[round] ?? [];
                         round += 1;
                         return Promise.resolve(batch.map((rawValue) => ({ rawValue })));
@@ -218,6 +220,9 @@ describe('cameraBarcodeSource', () => {
             get cancelled() {
                 return cancelled;
             },
+            get decodes() {
+                return decodes;
+            },
             get pending() {
                 return scheduled.length;
             },
@@ -248,16 +253,23 @@ describe('cameraBarcodeSource', () => {
         expect(h.unpresented).toBe(1);
     });
 
-    it('stops decoding once released', async () => {
+    it('stops decoding once released, not merely stops emitting', async () => {
+        // Asserting only on `seen` here was a test that could not fail: the guard *inside* the
+        // result loop already blocks the emission, so deleting the guard at the top of the tick
+        // survived. What that guard actually protects is the decode itself — a scheduler that fires
+        // once more after its canceller (a stale rAF, a timer race) would otherwise run the decoder
+        // against a stream whose tracks are already stopped, every frame, forever.
         const h = harness([[PLAIN_EAN], ['4006381333931']]);
         const seen: string[] = [];
         const release = await h.source.start((code) => seen.push(code));
 
         await h.step();
+        const decodesBeforeRelease = h.decodes;
         release();
         await h.step();
 
         expect(seen).toEqual([PLAIN_EAN]);
+        expect(h.decodes).toBe(decodesBeforeRelease);
     });
 
     it('keeps scanning after a frame the decoder chokes on', async () => {

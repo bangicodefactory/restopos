@@ -96,6 +96,36 @@ it('never returns another company’s product or its variants', function (): voi
         ->and($response->json('variants'))->toBe([]);
 });
 
+it('will not hand over a variant whose company does not match its product', function (): void {
+    // Deliberately corrupt: `product_variants.company_id` is a denormalised copy of the product's
+    // and there is no composite foreign key holding the two together. Everything upstream already
+    // scopes by config, so this row is the *only* way the company guard on the variant query is
+    // reachable — and removing that guard passed the whole suite until this test existed.
+    //
+    // It is not hypothetical either. This project has shipped a cross-tenant name disclosure
+    // (BAN-420) and a subtree query that reached into the next venue (BAN-508), both through
+    // denormalised columns nobody was re-checking.
+    $other = PosFixtures::make();
+
+    $stray = ProductVariant::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'product_id' => $this->fx->product->getKey(),
+        'company_id' => $other->company->getKey(),
+        'display_name' => 'Leaked SKU',
+        'list_price' => '99.00',
+        'standard_price' => '1.00',
+        'active' => true,
+    ]);
+
+    $response = $this->withHeaders($this->fx->headers())
+        ->getJson('/api/pos/products?search=margherita')
+        ->assertOk();
+
+    expect(collect($response->json('variants'))->pluck('id')->all())
+        ->toBe([$this->fx->variant->getKey()])
+        ->not->toContain($stray->getKey());
+});
+
 it('returns no variants when nothing matched', function (): void {
     $this->withHeaders($this->fx->headers())
         ->getJson('/api/pos/products?search=nothing-like-this')
