@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { ApprovalDialog } from './dialogs/ApprovalDialog';
 import { ComboDialog } from './dialogs/ComboDialog';
 import { CustomerDialog } from './dialogs/CustomerDialog';
+import { CustomerDisplayDialog } from './dialogs/CustomerDisplayDialog';
 import {
     CashMoveDialog,
     GuestsDialog,
@@ -37,6 +38,7 @@ export function DialogHost({
             <ScaleDialog />
             <OpenPriceDialog />
             <CustomerDialog />
+            <CustomerDisplayDialog />
             <NotesDialog />
             <GuestsDialog />
             <OrderNameDialog />

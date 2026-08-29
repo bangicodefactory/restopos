@@ -538,6 +538,15 @@ final readonly class BootstrapService
         if ($profile === PosLoadable::PROFILE_REGISTER) {
             // The register needs the token for the self-order QR + channel name.
             $row['access_token'] = $config->access_token;
+
+            // REG-352 / REG-356 — the customer display's capability token (BAN-443a).
+            //
+            // A *derived* token, not `access_token`: the register both relays frames onto that
+            // channel and hands the token to a second screen in the pairing dialog, and
+            // `access_token` is the one printed on every table's self-order QR. Deriving it here
+            // rather than on the client is what stops the two from drifting — the same token names
+            // the channel `CustomerDisplayUpdated` broadcasts on.
+            $row['customer_display_token'] = $config->customerDisplayToken();
         }
 
         $row['payment_method_ids'] = $config->paymentMethods()->pluck('payment_methods.id')->all();

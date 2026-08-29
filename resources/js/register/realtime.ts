@@ -184,6 +184,25 @@ function str(value: string | boolean | undefined): string {
     return typeof value === 'string' ? value : '';
 }
 
+/** Where the socket is, or null when broadcasting is not configured for this deployment. */
+function reverbEndpoint(): Omit<ReverbConfig, 'token'> | null {
+    const env = (import.meta.env ?? {}) as ViteEnv;
+    const key = str(env['VITE_REVERB_APP_KEY']);
+    if (key === '') return null;
+
+    const scheme = str(env['VITE_REVERB_SCHEME']) === 'https' ? 'https' : 'http';
+    const host = str(env['VITE_REVERB_HOST']) || globalThis.location?.hostname || 'localhost';
+    const port = Number.parseInt(str(env['VITE_REVERB_PORT']) || '8080', 10);
+
+    return {
+        key,
+        host,
+        port: Number.isFinite(port) ? port : 8080,
+        scheme,
+        enabled: true,
+    };
+}
+
 /**
  * Reverb connection details, or null when broadcasting is not configured.
  *
@@ -191,9 +210,8 @@ function str(value: string | boolean | undefined): string {
  * `useEcho` reports `unavailable` and leaves the register working exactly as it always has.
  */
 export function reverbConfig(token: string | null): ReverbConfig | null {
-    const env = (import.meta.env ?? {}) as ViteEnv;
-    const key = str(env['VITE_REVERB_APP_KEY']);
-    if (key === '') return null;
+    const endpoint = reverbEndpoint();
+    if (endpoint === null) return null;
 
     // No token, no realtime — and say so rather than pretending (BAN-402a).
     //
@@ -205,18 +223,28 @@ export function reverbConfig(token: string | null): ReverbConfig | null {
     // `useEcho` report `unavailable` and start the poll, which is the honest degradation.
     if (token === null || token === '') return null;
 
-    const scheme = str(env['VITE_REVERB_SCHEME']) === 'https' ? 'https' : 'http';
-    const host = str(env['VITE_REVERB_HOST']) || globalThis.location?.hostname || 'localhost';
-    const port = Number.parseInt(str(env['VITE_REVERB_PORT']) || '8080', 10);
-
     return {
-        key,
-        host,
-        port: Number.isFinite(port) ? port : 8080,
-        scheme,
+        ...endpoint,
         // A private channel, so `/broadcasting/auth` needs the device's bearer token — a register is
         // a paired device, not an anonymous customer.
         token,
-        enabled: true,
     };
+}
+
+/**
+ * The same endpoint with no credential, for the customer display (REG-352, BAN-443a).
+ *
+ * The guard above is deliberately **not** relaxed to cover this. It is not a rule about tokens in
+ * general — it is a rule about *private* channels, where a missing bearer produces a socket that
+ * reports connected and can never deliver. `pos.display.{token}` is public: Echo calls
+ * `/broadcasting/auth` for it never, the authorizer runs never, and the capability is the channel
+ * name. A separate function says which of the two a caller is asking for, so relaxing one can never
+ * silently relax the other.
+ *
+ * The display is the only caller and it holds no device token — see the display shell.
+ */
+export function publicReverbConfig(): ReverbConfig | null {
+    const endpoint = reverbEndpoint();
+
+    return endpoint === null ? null : { ...endpoint, token: null };
 }

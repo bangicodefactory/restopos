@@ -17,7 +17,7 @@ import {
     sessionChannel,
     startDeltaScheduler,
 } from './realtime';
-import { publishDisplay } from './domain/customer-display-bus';
+import { createDisplayRelay, publishDisplay, setDisplayRelay } from './domain/customer-display-bus';
 import { applySessionClosedBroadcast } from './domain/session-actions';
 import { canOpenOrder, foreignOrder } from './domain/foreign-order';
 import {
@@ -302,6 +302,41 @@ export function App(): JSX.Element {
         };
     }, []);
 
+    /**
+     * The display's remote leg (REG-352).
+     *
+     * `publishDisplay` has always posted to `BroadcastChannel`, which reaches a second monitor on
+     * this machine and nothing else. A display on a separate device — the normal restaurant
+     * wiring — could not be driven at all. The relay posts the same frame to the server, which
+     * broadcasts it on the display's public channel.
+     *
+     * Installed only when the config carries a display token, because that token is what names the
+     * channel *and* what the pairing dialog puts in the URL: no token, no second device to reach,
+     * and `BroadcastChannel` carries on alone.
+     */
+    const displayToken = catalog.config?.customer_display_token ?? null;
+
+    useEffect(() => {
+        if (displayToken === null) return;
+
+        setDisplayRelay(
+            createDisplayRelay({
+                send: (payload) => {
+                    // Fire and forget, and swallow the failure. A frame that does not land costs a
+                    // display one keystroke behind, and the next frame supersedes it — whereas
+                    // retrying would push a stale picture in front of a fresh one, and surfacing it
+                    // would put a network toast in front of a cashier for a screen they are not
+                    // looking at.
+                    void tryRuntime()
+                        ?.api.post('pos/customer-display', { payload })
+                        .catch(() => {});
+                },
+            }),
+        );
+
+        return () => setDisplayRelay(null);
+    }, [displayToken]);
+
     // ── mirror the order to the customer display (REG-350 / REG-351) ─────────
     useEffect(() =>
         useOrderStore.subscribe((state) => {
@@ -465,6 +500,16 @@ export function App(): JSX.Element {
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => void syncNow()}>
                         {t('reg.sync.now')}
+                    </Button>
+                    {/* REG-356 — the display route has existed since the display was built and
+                        nothing in the till ever linked to it. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        data-testid="nav-customer-display"
+                        onClick={() => openDialog('customerDisplay')}
+                    >
+                        {t('reg.nav.customerDisplay')}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setLocked(true)}>
                         {t('reg.login.lockNow')}

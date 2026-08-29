@@ -10,6 +10,7 @@ import {
     configChannel,
     emittedByDeviceUuid,
     isSelfEcho,
+    publicReverbConfig,
     realtimeBadge,
     reverbConfig,
     sessionChannel,
@@ -395,5 +396,41 @@ describe('reverbConfig', () => {
         expect(config).not.toBeNull();
         expect(config?.token).toBe('device-token');
         expect(config?.enabled).toBe(true);
+    });
+});
+
+describe('publicReverbConfig', () => {
+    beforeEach(() => {
+        vi.stubEnv('VITE_REVERB_APP_KEY', 'test-key');
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('is still nothing without an app key', () => {
+        vi.stubEnv('VITE_REVERB_APP_KEY', '');
+
+        expect(publicReverbConfig()).toBeNull();
+    });
+
+    it('connects with no credential, which is the whole point (BAN-443a)', () => {
+        // The customer display holds no device token and never will — it is a propless screen
+        // strangers can see. Its channel is public, so `/broadcasting/auth` is never called and
+        // there is nothing for a bearer to authenticate against. Returning null here, the way
+        // `reverbConfig` does, would leave a paired display permanently unable to connect.
+        const config = publicReverbConfig();
+
+        expect(config).not.toBeNull();
+        expect(config?.token).toBeNull();
+        expect(config?.enabled).toBe(true);
+        expect(config?.key).toBe('test-key');
+    });
+
+    it('does not weaken the private guard beside it', () => {
+        // Two functions rather than a flag, so a change that makes the public one lenient cannot
+        // make the private one lenient by the same edit.
+        expect(reverbConfig(null)).toBeNull();
+        expect(publicReverbConfig()).not.toBeNull();
     });
 });

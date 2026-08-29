@@ -465,6 +465,13 @@ export const registerEn = {
     'reg.display.change': 'Change',
     'reg.display.paid': 'Paid',
     'reg.display.due': 'Due',
+    'reg.display.pairTitle': 'Customer display',
+    'reg.display.pairHelp':
+        'Open this address on the screen facing the customer. A second monitor on this machine works offline; another device follows over the network.',
+    'reg.display.pairOpen': 'Open here',
+    'reg.display.pairCopy': 'Copy the address',
+    'reg.display.pairCopied': 'Copied',
+    'reg.display.pairUnavailable': 'Available once this register has loaded its configuration.',
 } as const;
 
 export type RegisterKey = keyof typeof registerEn;
@@ -908,6 +915,13 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.display.change': 'Rendu',
     'reg.display.paid': 'Payé',
     'reg.display.due': 'Reste à payer',
+    'reg.display.pairTitle': 'Afficheur client',
+    'reg.display.pairHelp':
+        "Ouvrez cette adresse sur l'écran face au client. Un second moniteur sur ce poste fonctionne hors ligne ; un autre appareil suit par le réseau.",
+    'reg.display.pairOpen': 'Ouvrir ici',
+    'reg.display.pairCopy': "Copier l'adresse",
+    'reg.display.pairCopied': 'Copié',
+    'reg.display.pairUnavailable': 'Disponible une fois la configuration de la caisse chargée.',
 };
 
 const REGISTER_DICTIONARIES: Record<string, Record<RegisterKey, string>> = {

@@ -434,4 +434,33 @@ class PosConfig extends Model
     {
         return Str::lower(Str::random(32));
     }
+
+    /**
+     * The capability token that names this register's customer-display channel (REG-352, BAN-443a).
+     *
+     * **Not `access_token`, deliberately.** That one is already the self-order entry token: it is
+     * printed on every table QR, so every guest in the room holds it. The display feed carries the
+     * live order of whoever is at the counter, and putting it on a channel named by a token the
+     * whole dining room has would let any guest watch every sale. This one is derived from
+     * `access_token` and does not reveal it, so a display URL cannot be turned back into a menu URL.
+     *
+     * Derived rather than stored, because a stored one needs a rotation story of its own and would
+     * outlive an `access_token` rotation — a till whose token was rotated after a leak would still
+     * be broadcasting on the old display channel. HMAC-ing the config id under `access_token` means
+     * rotating that rotates this, once, in the place a reader already looks.
+     *
+     * `channelName()` used to live near here and was deleted for being a name nothing subscribed
+     * with (see the note above `hasOpenSession()`). This one has three readers that must agree —
+     * `CustomerDisplayUpdated::broadcastOn()`, `CustomerDisplayController`, and the register's
+     * bootstrap payload — and `tests/Feature/Pos/CustomerDisplayTest.php` asserts the three match,
+     * which is the property the deleted one never had.
+     */
+    public function customerDisplayToken(): string
+    {
+        return substr(
+            hash_hmac('sha256', 'pos.customer_display:'.$this->getKey(), (string) $this->access_token),
+            0,
+            40,
+        );
+    }
 }
