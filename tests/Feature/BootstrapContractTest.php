@@ -317,10 +317,18 @@ it('leaves the slip null when the terminal did not hand one back', function (): 
         'payment_status' => 'done',
     ]])])->assertOk();
 
-    $this->withHeaders($this->fx->headers())
+    $payment = $this->withHeaders($this->fx->headers())
         ->getJson("/api/pos/orders/{$uuid}")
         ->assertOk()
-        ->assertJsonPath('payments.0.terminal_ticket', null);
+        ->json('payments.0');
+
+    // `assertJsonPath(..., null)` would NOT do here: a missing key resolves to null through
+    // `data_get`, so it passes just as happily with the resource emitting no `terminal_ticket`
+    // at all — which is the exact defect this section exists to catch. The key has to be
+    // present AND null: the register reads it back into the replica unconditionally
+    // (order-lookup.ts:361), so an absent key and a null one are different bugs.
+    expect($payment)->toHaveKey('terminal_ticket')
+        ->and($payment['terminal_ticket'])->toBeNull();
 });
 
 // ── (h) printers — the register reads a shape the bootstrap had never sent (BAN-426) ──
