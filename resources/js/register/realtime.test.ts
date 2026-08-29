@@ -128,6 +128,18 @@ describe('self-echo suppression', () => {
         expect(isSelfEcho({ emitted_by_device_uuid: 'dev-a' }, null)).toBe(false);
         expect(isSelfEcho({ emitted_by_device_uuid: 'dev-a' }, '')).toBe(false);
     });
+
+    it('suppresses nothing when BOTH sides are unknown', () => {
+        // Found by sabotage: dropping the null-device guard leaves `null === null`, which is true.
+        // The cases above all survive that mutation, because a known emitter never equals `null` —
+        // so the guard's only load-bearing case is this one, and it is the worst possible one to
+        // get wrong. A freshly wiped till, on a config whose events are unattributed, would treat
+        // every single broadcast as its own echo and pull nothing for the rest of the shift.
+        expect(isSelfEcho({}, null)).toBe(false);
+        expect(isSelfEcho({ emitted_by_device_uuid: null }, null)).toBe(false);
+        expect(isSelfEcho({ emitted_by_device_uuid: '' }, '')).toBe(false);
+        expect(isSelfEcho(null, null)).toBe(false);
+    });
 });
 
 describe('realtimeBadge', () => {
@@ -204,7 +216,7 @@ describe('the delta scheduler', () => {
         expect(DELTA_POLL_MS).toBe(30_000);
     });
 
-    it('stops pulling once stopped', async () => {
+    it('stops pulling once stopped, and leaves no timer behind', async () => {
         const running = scheduler({ intervalMs: 1000 });
 
         await vi.advanceTimersByTimeAsync(1500);
@@ -212,6 +224,12 @@ describe('the delta scheduler', () => {
         await vi.advanceTimersByTimeAsync(5000);
 
         expect(pulls).toBe(1);
+
+        // Found by sabotage: `stopped = true` alone makes every assertion above pass while the
+        // interval keeps firing forever. The shell mounts this in an effect, so an uncleared timer
+        // per mount accumulates across every config reload for the life of the tab — invisible in
+        // behaviour and eventually not invisible at all.
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('coalesces a burst of events into one pull', async () => {
