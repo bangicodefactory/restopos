@@ -55,6 +55,22 @@ export function recordAcceptedWeight(orderUuid: string, variantId: number, weigh
 }
 
 /**
+ * Forget the weight remembered for one item, because the line carrying it is gone.
+ *
+ * Without this, voiding a mis-weighed line is a dead end. The repeat-weight rule refuses the same
+ * weight twice for an (order, item), and the documented way out of a wrong weighing is "void the
+ * line and weigh again" — but putting the same block of cheese back on the pan produces the same
+ * reading, which the rule then refuses. The cashier is left with no way to re-add the item, and
+ * since `setQuantity` now also refuses the numpad on a weighed line, there is no fallback at all.
+ *
+ * Releasing on delete keeps the rule doing its actual job — catching a *second* item weighed
+ * without clearing the pan — while leaving the escape hatch open.
+ */
+export function releaseWeighing(orderUuid: string, variantId: number): void {
+    accepted.delete(keyOf(orderUuid, variantId));
+}
+
+/**
  * Drop everything remembered for one order.
  *
  * Called when an order is validated, cancelled or discarded. Without it the map is a leak on a

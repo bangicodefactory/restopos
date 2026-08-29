@@ -20,8 +20,10 @@ import {
     isWeighedLine,
     markPrepSent,
     reduceQuantity,
+    createRefundOrder,
     removeLine,
     setQuantity,
+    splitOrder,
     validateOrder,
 } from './order-actions';
 import { forgetWeighings, isRepeatWeight, recordAcceptedWeight, resetWeighings } from './weighing';
@@ -176,17 +178,86 @@ describe('reduceQuantity refuses a weighed line', () => {
 });
 
 describe('removing the line is still the way out', () => {
-    it('a mis-weighed line can be voided and weighed again', async () => {
-        // The guard must not trap a cashier. Refusing an edit is only defensible because voiding
-        // and re-weighing both still work.
+    it('a mis-weighed line can be voided and the SAME weight put back', async () => {
+        // The scenario the escape hatch is actually for: the block of cheese goes back on the pan
+        // and reads the same, because it is the same block. Re-weighing at a *different* value —
+        // which this test used to do — was never refused by anything, so it proved nothing.
+        //
+        // The repeat-weight rule is keyed on (order, item) and was released only on validate,
+        // cancel and discard. Voiding released nothing, so the second weighing was refused and,
+        // with the numpad now closed on weighed lines, the cashier had no way to re-add the item.
         const orderUuid = await createOrder();
-        const first = weigh(orderUuid, 5);
+        const first = weigh(orderUuid, 0.2);
+        recordAcceptedWeight(orderUuid, CHEESE, 0.2);
 
         removeLine(first);
+
         expect(linesOf(state(), orderUuid)).toHaveLength(0);
+        expect(isRepeatWeight(orderUuid, CHEESE, 0.2)).toBe(false);
 
         const second = weigh(orderUuid, 0.2);
         expect(lineOf(second).quantity).toBe(0.2);
+    });
+
+    it('releases only the voided item, leaving other weighings on the order remembered', async () => {
+        // `accepted.clear()` passes every other test here, and is wrong: voiding the cheese would
+        // disarm the repeat-weight rule for the olives sitting on the same bill, so the next
+        // olives weighing would go on unchecked.
+        const orderUuid = await createOrder();
+        const cheese = weigh(orderUuid, 0.2);
+        recordAcceptedWeight(orderUuid, CHEESE, 0.2);
+        recordAcceptedWeight(orderUuid, OLIVES, 0.35);
+
+        removeLine(cheese);
+
+        expect(isRepeatWeight(orderUuid, CHEESE, 0.2)).toBe(false);
+        expect(isRepeatWeight(orderUuid, OLIVES, 0.35)).toBe(true);
+    });
+
+    it('still refuses a second item weighed without clearing the pan', async () => {
+        // Releasing on delete must not disarm the rule for the case it exists for: a live line's
+        // weight stays remembered, so weighing the next block without clearing reads as a repeat.
+        const orderUuid = await createOrder();
+        weigh(orderUuid, 0.2);
+        recordAcceptedWeight(orderUuid, CHEESE, 0.2);
+
+        expect(isRepeatWeight(orderUuid, CHEESE, 0.2)).toBe(true);
+    });
+});
+
+describe('the guard survives being moved between orders', () => {
+    it('carries provenance onto a split bill, so the numpad cannot retype it there', async () => {
+        // The hole a reviewer found: `splitOrder` rebuilds each moved line through `addLine` and
+        // carries price, discount, notes, combo links and course — but not `weight_source`. The
+        // moved line arrived unweighed, so the guard did not apply to it and 0.200 kg could be
+        // retyped to 5.000 kg in three taps on the split bill, with the original row deleted.
+        const orderUuid = await createOrder();
+        const lineUuid = weigh(orderUuid, 0.2);
+
+        const splitUuid = await splitOrder(orderUuid, { [lineUuid]: 0.2 });
+        expect(splitUuid).not.toBeNull();
+
+        const moved = linesOf(state(), splitUuid as string);
+        expect(moved).toHaveLength(1);
+
+        const movedLine = moved[0]!;
+        expect(movedLine.weight_source).toBe(WeightSource.Scale);
+        expect(isWeighedLine(movedLine.uuid)).toBe(true);
+        expect(setQuantity(movedLine.uuid, 5)).toBe(false);
+        expect(lineOf(movedLine.uuid).quantity).toBe(0.2);
+    });
+
+    it('records on a refund line how the original weight was arrived at', async () => {
+        // Not a money hole — the refund guard already makes a credit line unretypeable — but a
+        // refund of a scale weighing must not read as a refund of a hand-typed one.
+        const orderUuid = await createOrder();
+        const lineUuid = weigh(orderUuid, 0.2, WeightSource.Manual);
+
+        const refundUuid = await createRefundOrder(orderUuid, { [lineUuid]: 0.2 });
+        expect(refundUuid).not.toBeNull();
+
+        const credit = linesOf(state(), refundUuid as string)[0]!;
+        expect(credit.weight_source).toBe(WeightSource.Manual);
     });
 });
 

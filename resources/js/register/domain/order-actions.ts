@@ -38,7 +38,7 @@ import { orderName } from './order-naming';
 import { tipDelta, tipTopUp } from './tips';
 import { buildPrepSnapshot, computePrepDelta, prepKey } from './kitchen-delta';
 import { isZeroQuantity, roundQuantity, trimQuantity } from './precision';
-import { forgetWeighings } from './weighing';
+import { forgetWeighings, releaseWeighing } from './weighing';
 import { clampSelection, nextSplitLetter, splitPrepSnapshot, type SplitSelection } from './split';
 import { invalidateTotals, orderTotals } from './totals';
 
@@ -754,6 +754,17 @@ export function removeLine(lineUuid: string): void {
     const line = state.lines[lineUuid];
     if (!line) return;
     const victims = [lineUuid, ...childLinesOf(state, lineUuid).map((child) => child.uuid)];
+
+    // Voiding a weighed line releases its remembered weight, or 'void it and weigh again' —
+    // the documented way out of a wrong weighing — is refused by the repeat-weight rule the
+    // moment the same item goes back on the pan. With the numpad now closed on weighed lines
+    // too, that would leave a cashier with no way to re-add the item at all.
+    for (const uuid of victims) {
+        const victim = state.lines[uuid];
+        if (victim?.weight_source != null) {
+            releaseWeighing(victim.order_uuid, victim.product_variant_id);
+        }
+    }
 
     mutate((draft) => {
         const order = draft.orders[line.order_uuid];
@@ -1630,6 +1641,11 @@ export async function createRefundOrder(
             comboParentUuid: line.combo_parent_uuid
                 ? (parentMap.get(line.combo_parent_uuid as string) ?? null)
                 : null,
+            // The credit line records how the original weight was arrived at. The refund
+            // guard in `setQuantity` already makes this line unretypeable, so unlike the
+            // split this is about the record rather than the money: a refund of a scale
+            // weighing should not read as a refund of a hand-typed one.
+            weightSource: line.weight_source,
             skipMerge: true,
             fullProductName: line.full_product_name,
         });
@@ -1737,6 +1753,14 @@ export async function splitOrder(orderUuid: string, selection: SplitSelection): 
                 ? (parentMap.get(part.line.combo_parent_uuid) ?? null)
                 : null,
             courseUuid: part.line.course_uuid ? (courseMap.get(part.line.course_uuid) ?? null) : null,
+            // Provenance moves with the line, or the guard does not survive a split.
+            //
+            // `isWeighedLine` keys on `weight_source`, so a moved line that arrives without it
+            // is an ordinary line as far as `setQuantity` is concerned — and the numpad will
+            // happily retype 0.200 kg to 5.000 kg on the split bill. Every other field that
+            // decides what the customer pays is carried above; this one decides whether the
+            // amount can be changed at all, which makes leaving it out worse, not smaller.
+            weightSource: part.line.weight_source,
             skipMerge: true,
             fullProductName: part.line.full_product_name,
         });
