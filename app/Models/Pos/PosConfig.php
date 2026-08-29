@@ -454,6 +454,13 @@ class PosConfig extends Model
      * `CustomerDisplayUpdated::broadcastOn()`, `CustomerDisplayController`, and the register's
      * bootstrap payload — and `tests/Feature/Pos/CustomerDisplayTest.php` asserts the three match,
      * which is the property the deleted one never had.
+     *
+     * The config id in the message is **domain separation, not uniqueness**, and no test can tell
+     * the difference: `pos_configs.access_token` carries a unique index, so two configs get two
+     * tokens whether or not the id is in the message. Removing it survives mutation testing for
+     * that reason and not because the tests are thin. It earns its place against a second value
+     * being HMAC'd under the same key later — two derivations with no domain tag are one
+     * derivation — so it stays, recorded rather than covered.
      */
     public function customerDisplayToken(): string
     {

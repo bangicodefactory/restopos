@@ -166,7 +166,18 @@ final class CustomerDisplayController extends Controller
         return in_array($media->collection->value, MediaFile::posCollections(), true) ? $media : null;
     }
 
-    /** 404, not 403: an unknown token should not confirm that the config exists. */
+    /**
+     * 404, not 403: an unknown token should not confirm that the config exists.
+     *
+     * `$given !== ''` survives mutation testing today, and deliberately stays. `hash_equals`
+     * already returns false on a length mismatch, and `customerDisplayToken()` is always exactly
+     * 40 hex characters — asserted in `CustomerDisplayTest`, which is what makes the clause
+     * redundant rather than wishful. It is not redundant in the state that would matter: an
+     * expected value of `''` makes `hash_equals('', '')` true and turns this into an open door,
+     * and that is the shape a future change to the derivation could take. No test can reach that
+     * branch without first breaking the property the shape assertion holds, so it is recorded here
+     * rather than covered.
+     */
     private function assertToken(Request $request, PosConfig $config): void
     {
         $given = (string) $request->query('token', '');

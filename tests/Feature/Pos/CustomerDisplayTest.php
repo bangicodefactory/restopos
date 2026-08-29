@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Enums\DeviceType;
 use App\Enums\MediaCollection;
 use App\Events\Pos\CustomerDisplayUpdated;
 use App\Models\Identity\MediaFile;
 use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosDevice;
+use App\Services\Device\DeviceTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
@@ -138,6 +141,33 @@ it('refuses a relay from a device with no token', function (): void {
     $this->withHeaders(['Accept' => 'application/json'])
         ->postJson('/api/pos/customer-display', ['payload' => displayFrame()])
         ->assertUnauthorized();
+
+    Event::assertNotDispatched(CustomerDisplayUpdated::class);
+});
+
+it('refuses a relay from a device whose token does not carry pos:realtime', function (): void {
+    Event::fake([CustomerDisplayUpdated::class]);
+
+    // `config('pos.abilities')` gives `self_mobile` catalogue and self-order and nothing else. A
+    // token that may read a menu must not be able to drive the screen at the counter — and a
+    // no-token test alone would not have noticed the ability constraint being dropped, because
+    // every device type a venue actually pairs happens to hold `pos:realtime`.
+    $weak = PosDevice::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'pos_config_id' => $this->fx->config->getKey(),
+        'device_identifier' => 99,
+        'name' => 'A phone',
+        'device_type' => DeviceType::SelfMobile->value,
+        'active' => true,
+    ]);
+
+    $token = app(DeviceTokenService::class)->issue($weak)['token'];
+
+    expect($token)->toBeString();
+
+    $this->withHeaders(['Authorization' => 'Bearer '.$token, 'Accept' => 'application/json'])
+        ->postJson('/api/pos/customer-display', ['payload' => displayFrame()])
+        ->assertForbidden();
 
     Event::assertNotDispatched(CustomerDisplayUpdated::class);
 });
