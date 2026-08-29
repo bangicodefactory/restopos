@@ -73,6 +73,14 @@ export const useBootStore = createPosStore<BootSlice>((set) => ({
 export type SyncSlice = {
     online: boolean;
     realtime: 'connected' | 'degraded' | 'off';
+    /**
+     * A sale is being flushed to the replica and drained to the server (REG-367).
+     *
+     * The periodic delta pull reads this and defers while it is true. A delta landing between
+     * "paid" and "flushed" rewrites the very rows `commitPaidOrder` is persisting, which loses the
+     * sale rather than merely showing a stale one.
+     */
+    paymentInFlight: boolean;
     stats: OutboxStats | null;
     lastSyncAt: number | null;
     /** Entries the server refused or that have exhausted their fast retries (spec 03 §3.6.6). */
@@ -82,6 +90,7 @@ export type SyncSlice = {
 
     setOnline: (online: boolean) => void;
     setRealtime: (realtime: 'connected' | 'degraded' | 'off') => void;
+    setPaymentInFlight: (paymentInFlight: boolean) => void;
     setStats: (stats: OutboxStats) => void;
     setProblems: (problems: OutboxEntry[]) => void;
     noteSync: () => void;
@@ -94,6 +103,7 @@ let noticeSeq = 0;
 export const useSyncStore = createPosStore<SyncSlice>((set) => ({
     online: globalThis.navigator?.onLine !== false,
     realtime: 'off',
+    paymentInFlight: false,
     stats: null,
     lastSyncAt: null,
     problems: [],
@@ -107,6 +117,11 @@ export const useSyncStore = createPosStore<SyncSlice>((set) => ({
     setRealtime: (realtime) =>
         set((state) => {
             state.realtime = realtime;
+        }),
+
+    setPaymentInFlight: (paymentInFlight) =>
+        set((state) => {
+            state.paymentInFlight = paymentInFlight;
         }),
 
     setStats: (stats) =>

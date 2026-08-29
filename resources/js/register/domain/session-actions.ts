@@ -350,11 +350,12 @@ export async function printXReport(input: {
  * Returns whether the caller should say so out loud, so the notice and the state change stay one
  * decision rather than two that can disagree.
  *
- * The device that *did* the closing is not a sibling and must not be told about its own action —
- * but the register does not know its own device uuid, and the broadcast's `emitted_by_device_uuid`
- * has never been populated by the server. It does not need to be: the closer's own store has
- * already moved off an open session, so "do I still believe I am open?" answers the same question
- * with what the client actually has.
+ * The device that *did* the closing is not a sibling and must not be told about its own action.
+ * `SessionClosed` now carries `emitted_by_device_uuid` and the register now knows its own uuid, so
+ * a self-echo filter is available — and this path deliberately does not use one. "Do I still
+ * believe I am open?" is the stronger question: it also silences the *user* who closed from the
+ * back office, where the broadcast has no emitting device at all, and it is right after a reload
+ * that lost any in-memory record of who pressed the button.
  */
 export function applySessionClosedBroadcast(payload: unknown): boolean {
     const { session_id: closedId } = (payload ?? {}) as { session_id?: number };

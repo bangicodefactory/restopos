@@ -69,10 +69,11 @@ export function openDb(configId: number): PosDb {
 /**
  * Persist the pairing.
  *
- * `@shared/auth`'s `storePairing` is the canonical writer, but its `PairingResponse` type predates
- * the shipped `/api/devices/pair` contract (`device.device_seq` / flat `config_id` vs the spec's
- * `device.device_identifier` / nested `config`). We adapt rather than duplicate, so the device
- * record, the token and the non-extractable HMAC key all land through the shared path.
+ * `@shared/auth`'s `storePairing` is the canonical writer. Its `PairingResponse` now mirrors the
+ * shipped `/api/devices/pair` contract field for field, so the only thing left to adapt is this
+ * app's nested `config` (the register's flat `config_id`) and the fact that a display's kind is
+ * fixed rather than echoed back. We adapt rather than duplicate, so the device record, the token
+ * and the non-extractable HMAC key all land through the shared path.
  *
  * The HMAC import needs `crypto.subtle`, which is absent on a plain-HTTP LAN address. A kitchen
  * display never verifies a PIN, so that failure is downgraded: the token is written directly and
@@ -98,12 +99,11 @@ export async function persistPairing(
             db,
             {
                 device: {
-                    id: String(response.device.id),
+                    id: response.device.id,
                     uuid: response.device.uuid,
                     name: response.device.name,
-                    device_seq: response.device.device_identifier,
-                    device_identifier: String(response.device.device_identifier),
-                    kind: 'prep_display',
+                    device_identifier: response.device.device_identifier,
+                    device_type: 'prep_display',
                 },
                 token: response.token,
                 device_secret: response.device_secret,
@@ -117,8 +117,9 @@ export async function persistPairing(
         await setMeta(db, META.deviceToken, response.token);
         await setMeta(db, META.device, {
             device_id: String(response.device.id),
+            uuid: response.device.uuid,
             device_identifier: String(response.device.device_identifier),
-            device_seq: response.device.device_identifier,
+            device_seq: Number(response.device.device_identifier),
             config_id: configId,
             name: response.device.name,
             kind: 'prep_display',

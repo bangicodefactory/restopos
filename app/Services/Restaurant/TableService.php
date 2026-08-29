@@ -10,6 +10,7 @@ use App\Events\Restaurant\TableStateChanged;
 use App\Models\Pos\Order;
 use App\Models\Pos\OrderLine;
 use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosDevice;
 use App\Models\Restaurant\OrderCourse;
 use App\Models\Restaurant\Table as RestaurantTable;
 use App\Services\Kitchen\PreparationService;
@@ -45,15 +46,18 @@ final readonly class TableService
      * Move an order to another table. When the target already holds a draft
      * order the two are merged; a self-transfer is refused.
      *
+     * `$device` is the till that performed the move; it rides out on `TableStateChanged` as
+     * `emitted_by_device_uuid` so peers can suppress their own echo (REG-365).
+     *
      * @return array{order: Order, merged: bool, merge_id: ?int}
      */
-    public function transfer(Order $order, RestaurantTable $target, ?int $employeeId = null): array
+    public function transfer(Order $order, RestaurantTable $target, ?int $employeeId = null, ?PosDevice $device = null): array
     {
         if ((int) $order->restaurant_table_id === (int) $target->getKey()) {
             throw new DomainException('The order is already on that table.');
         }
 
-        return $this->connection->transaction(function () use ($order, $target, $employeeId): array {
+        return $this->connection->transaction(function () use ($order, $target, $employeeId, $device): array {
             $sourceTableId = $order->restaurant_table_id === null ? null : (int) $order->restaurant_table_id;
 
             /** @var Order|null $existing */
@@ -68,8 +72,8 @@ final readonly class TableService
             if ($existing !== null) {
                 $mergeId = $this->mergeInto($order, $existing, MergeType::OrderTransfer, $employeeId);
 
-                $this->emit($existing);
-                $this->emitTable($order, $sourceTableId);
+                $this->emit($existing, $device);
+                $this->emitTable($order, $sourceTableId, null, $device);
 
                 return ['order' => $existing->refresh(), 'merged' => true, 'merge_id' => $mergeId];
             }
@@ -79,8 +83,8 @@ final readonly class TableService
                 'guest_count' => max((int) $order->guest_count, 1),
             ])->save();
 
-            $this->emit($order);
-            $this->emitTable($order, $sourceTableId);
+            $this->emit($order, $device);
+            $this->emitTable($order, $sourceTableId, null, $device);
 
             return ['order' => $order, 'merged' => false, 'merge_id' => null];
         });
@@ -91,16 +95,16 @@ final readonly class TableService
      * Guest counts add up, courses are matched by index, and the print history
      * is combined so nothing is re-fired.
      */
-    public function merge(Order $source, Order $target, ?int $employeeId = null): int
+    public function merge(Order $source, Order $target, ?int $employeeId = null, ?PosDevice $device = null): int
     {
         if ((int) $source->getKey() === (int) $target->getKey()) {
             throw new DomainException('An order cannot be merged into itself.');
         }
 
-        return $this->connection->transaction(function () use ($source, $target, $employeeId): int {
+        return $this->connection->transaction(function () use ($source, $target, $employeeId, $device): int {
             $id = $this->mergeInto($source, $target, MergeType::OrderMerge, $employeeId);
 
-            $this->emit($target);
+            $this->emit($target, $device);
 
             return $id;
         });
@@ -110,9 +114,9 @@ final readonly class TableService
      * Restore a merge: the recorded lines and courses are recreated on a new
      * draft order on the original table (RST-052).
      */
-    public function unmerge(int $mergeId, ?int $employeeId = null): Order
+    public function unmerge(int $mergeId, ?int $employeeId = null, ?PosDevice $device = null): Order
     {
-        return $this->connection->transaction(function () use ($mergeId): Order {
+        return $this->connection->transaction(function () use ($mergeId, $device): Order {
             $record = $this->connection->table('pos_order_merges')->where('id', $mergeId)->lockForUpdate()->first();
 
             if ($record === null || $record->reverted_at !== null) {
@@ -176,15 +180,15 @@ final readonly class TableService
                 'updated_at' => now(),
             ]);
 
-            $this->emit($restored);
-            $this->emit($target);
+            $this->emit($restored, $device);
+            $this->emit($target, $device);
 
             return $restored;
         });
     }
 
     /** Guest count, minimum 1 when a table is attached (RST-070). */
-    public function setGuestCount(Order $order, int $guests): Order
+    public function setGuestCount(Order $order, int $guests, ?PosDevice $device = null): Order
     {
         if ($guests < 0) {
             throw new DomainException('Guest count cannot be negative.');
@@ -192,7 +196,7 @@ final readonly class TableService
 
         $order->forceFill(['guest_count' => $guests])->save();
 
-        $this->emit($order);
+        $this->emit($order, $device);
 
         return $order;
     }
@@ -390,7 +394,7 @@ final readonly class TableService
         return $mergeId;
     }
 
-    private function emit(Order $order): void
+    private function emit(Order $order, ?PosDevice $device = null): void
     {
         $config = PosConfig::query()->find($order->pos_config_id);
 
@@ -398,10 +402,10 @@ final readonly class TableService
             return;
         }
 
-        $this->emitTable($order, (int) $order->restaurant_table_id, $config);
+        $this->emitTable($order, (int) $order->restaurant_table_id, $config, $device);
     }
 
-    private function emitTable(Order $order, ?int $tableId, ?PosConfig $config = null): void
+    private function emitTable(Order $order, ?int $tableId, ?PosConfig $config = null, ?PosDevice $device = null): void
     {
         if ($tableId === null) {
             return;
@@ -433,6 +437,9 @@ final readonly class TableService
             amountTotal: (string) ($row->amount_total ?? '0'),
             orderUuid: (string) $order->uuid,
             childTableIds: $childIds,
+            // Null when no device did it (a back-office edit, a job). A subscriber must treat that
+            // as "not mine" and pull, which is what `isSelfEcho` does.
+            emittedByDeviceUuid: $device?->uuid,
         ));
     }
 

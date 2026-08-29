@@ -1131,6 +1131,12 @@ export type SyncErrorShape =
 
 export type DeviceInfo = {
     device_id: string;
+    /**
+     * `pos_devices.uuid` — the identity the *server* stamps on every broadcast as
+     * `emitted_by_device_uuid`. Without it a till cannot tell its own echo from a sibling's news,
+     * so it either re-pulls its own writes or suppresses everything. Persisted at pairing.
+     */
+    uuid: string;
     device_identifier: string;
     device_seq: number;
     config_id: number;

@@ -32,6 +32,7 @@ import {
     useOrderStore,
     type OrderSlice,
 } from '../state/order-store';
+import { useSyncStore } from '../state/boot-store';
 import { resolveFiscalPosition, type FiscalPositionSource } from './fiscal-position-precedence';
 import { orderName } from './order-naming';
 import { tipDelta, tipTopUp } from './tips';
@@ -1241,15 +1242,28 @@ export function validateOrder(orderUuid: string): void {
  * sale — and only then does `drain()` push to the server best-effort. The drain runs even when the
  * flush failed, so the sale still reaches the server, and the flush result is returned so the caller
  * can warn the cashier instead of silently navigating past a lost local write.
+ *
+ * The window is also flagged on the sync store (REG-367). The periodic delta pull defers while it
+ * is raised: a peer's delta landing between the validate and the flush rewrites the rows this
+ * function is part-way through persisting. The flag is raised here rather than in the payment
+ * screen because there are two callers — the payment screen and the order panel's fast-pay path —
+ * and a guard that lives in one screen is a guard the other caller does not get.
  */
 export async function commitPaidOrder(
     orderUuid: string,
     durability: { flushNow: () => Promise<boolean>; drain: () => Promise<unknown> } | null,
 ): Promise<boolean> {
     validateOrder(orderUuid);
-    const flushed = (await durability?.flushNow()) ?? true;
-    await durability?.drain();
-    return flushed;
+    useSyncStore.getState().setPaymentInFlight(true);
+    try {
+        const flushed = (await durability?.flushNow()) ?? true;
+        await durability?.drain();
+        return flushed;
+    } finally {
+        // `finally`, not a trailing call: a throwing flush that left the flag raised would stop the
+        // register pulling deltas for the rest of the shift.
+        useSyncStore.getState().setPaymentInFlight(false);
+    }
 }
 
 export function markPrinted(orderUuid: string): void {

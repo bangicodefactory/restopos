@@ -23,14 +23,22 @@ export type PairingRequest = {
     app_version: string;
 };
 
+/**
+ * `POST /api/devices/pair`, exactly as `DevicePairingResource` serialises it.
+ *
+ * The numeric fields really do arrive as numbers and the kind really is called `device_type`; the
+ * older shape of this type invented `device_seq` and `kind`, which the server has never sent, so
+ * every register paired with `device_seq: undefined` and stamped `26Dundefined-…` on its first
+ * offline order reference. Mirroring the wire and normalising in one place is what stops that
+ * recurring.
+ */
 export type PairingResponse = {
     device: {
-        id: string;
+        id: string | number;
         uuid: string;
         name: string;
-        device_seq: number;
-        device_identifier: string;
-        kind: DeviceInfo['kind'];
+        device_identifier: string | number;
+        device_type: DeviceInfo['kind'];
     };
     token: string;
     /** 32 bytes hex — used to derive the offline PIN/badge verifiers. Never persisted raw. */
@@ -63,15 +71,26 @@ export async function importDeviceKey(secretHex: string): Promise<CryptoKey> {
     );
 }
 
-/** Persist everything the device needs to work offline forever after. */
+/**
+ * Persist everything the device needs to work offline forever after.
+ *
+ * `uuid` is stored because the server stamps it on every broadcast as `emitted_by_device_uuid`.
+ * A till that does not know its own uuid cannot suppress its own echo, so it re-pulls every order
+ * it just wrote — or, worse, suppresses nothing and the two behaviours are indistinguishable from
+ * the outside.
+ *
+ * `device_seq` is the per-config ordinal that prefixes offline order references; the server calls
+ * it `device_identifier` and sends nothing named `device_seq`.
+ */
 export async function storePairing(db: PosDb, response: PairingResponse, appVersion: string): Promise<StoredDevice> {
     const info: DeviceInfo = {
-        device_id: response.device.id,
-        device_identifier: response.device.device_identifier,
-        device_seq: response.device.device_seq,
+        device_id: String(response.device.id),
+        uuid: String(response.device.uuid),
+        device_identifier: String(response.device.device_identifier),
+        device_seq: Number(response.device.device_identifier),
         config_id: response.config_id,
         name: response.device.name,
-        kind: response.device.kind,
+        kind: response.device.device_type,
         app_version: appVersion,
     };
 

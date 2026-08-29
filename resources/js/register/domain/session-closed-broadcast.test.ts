@@ -6,10 +6,10 @@ import { applySessionClosedBroadcast } from './session-actions';
 /**
  * BAN-438 / REG-024 — a session closed on another till.
  *
- * `events.sessionClosed` has been in the event map since the printing contract was written, and
- * `error.sessionClosed` ("This session was closed on another device") has been translated into
- * three languages. Nothing consumed either: the register subscribed to no broadcasts at all, so a
- * second till kept ringing sales into a session whose summaries had already been frozen.
+ * `error.sessionClosed` ("This session was closed on another device") had been translated into
+ * three languages before anything consumed it: the register subscribed to no broadcasts at all, so
+ * a second till kept ringing sales into a session whose summaries had already been frozen. The
+ * shell now subscribes to `pos.session.{id}` and routes the event here.
  */
 
 function openSession(id: number): void {
@@ -33,8 +33,9 @@ describe('applySessionClosedBroadcast', () => {
 
     it('says nothing on the till that did the closing', () => {
         // That device's own store has already moved off an open session, which is how this tells
-        // the two apart — the register does not know its own device uuid, and the broadcast's
-        // `emitted_by_device_uuid` has never been populated by the server.
+        // the two apart. `emitted_by_device_uuid` is populated now (BAN-402) and this path still
+        // does not use it: the state question also silences a back-office close, where there is no
+        // emitting device to compare against.
         usePosSessionStore.setState((state) => ({
             ...state,
             session: { id: 7, state: 'closed' } as never,

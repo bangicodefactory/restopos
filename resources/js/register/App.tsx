@@ -4,11 +4,19 @@ import { Button, useToast } from '@shared/ui';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { syncNow } from './boot';
+import { pullDelta, syncNow } from './boot';
 import { DialogHost } from './components/DialogHost';
 import { StatusStrip } from './components/StatusStrip';
 import { tryRuntime } from './data/runtime';
-import { REGISTER_EVENTS, reverbConfig, sessionChannel } from './realtime';
+import {
+    REGISTER_EVENTS,
+    configChannel,
+    isSelfEcho,
+    realtimeBadge,
+    reverbConfig,
+    sessionChannel,
+    startDeltaScheduler,
+} from './realtime';
 import { publishDisplay } from './domain/customer-display-bus';
 import { applySessionClosedBroadcast } from './domain/session-actions';
 import { canOpenOrder, foreignOrder } from './domain/foreign-order';
@@ -92,14 +100,27 @@ export function App(): JSX.Element {
     const selectedOrderUuid = useSelectedOrderUuid();
     const selectOrder = useOrderStore((state) => state.selectOrder);
 
-    // A session closed on another till (REG-024). The register subscribes to nothing else — the
-    // outbox carries everything that originates *here* — but a session ending somewhere else is a
-    // fact this device cannot derive, and a till still ringing sales into frozen summaries is a
-    // reconciliation problem that surfaces days later.
+    /**
+     * Realtime (REG-365…REG-368). Two subscriptions, because they answer two different questions
+     * and have two different lifetimes.
+     *
+     * `pos.session.{id}` is alive only while this till is trading, and carries the one fact the
+     * outbox can never deliver: the shift ended somewhere else. `pos.config.{access_token}` is alive
+     * for the whole shell and carries the peer traffic — an order another till changed, a table
+     * another till seated. Neither event is trusted as data: each one asks for a delta pull, and
+     * the pull is what is authoritative.
+     */
     const reverb = useMemo(() => reverbConfig(tryRuntime()?.device?.token ?? null), []);
+    const deviceUuid = useMemo(() => tryRuntime()?.device?.info.uuid ?? null, []);
+    const setRealtime = useSyncStore((state) => state.setRealtime);
+
     const sessionEvents = useMemo(
         () => ({
             [REGISTER_EVENTS.sessionClosed]: (payload: unknown) => {
+                // Not filtered on `emitted_by_device_uuid`: the device that closed the session has
+                // already moved its own store off an open session, so `applySessionClosedBroadcast`
+                // returns false for it anyway — and that check also covers a *user* closing from
+                // the back office, where there is no emitting device at all.
                 if (applySessionClosedBroadcast(payload)) {
                     toast.show({ tone: 'warn', title: t('error.sessionClosed') });
                 }
@@ -108,12 +129,68 @@ export function App(): JSX.Element {
         [t, toast],
     );
 
-    useEcho({
+    const sessionStatus = useEcho({
         config: reverb,
         channel: session !== null && session.state !== 'closed' ? sessionChannel(session.id) : null,
         visibility: 'private',
         events: sessionEvents,
     });
+
+    /**
+     * The delta scheduler outlives every event handler, so it is a ref rather than state: a new
+     * timer per render would reset the interval on every keystroke and pull far more often than
+     * once every 30 s.
+     */
+    const scheduler = useRef<ReturnType<typeof startDeltaScheduler> | null>(null);
+
+    useEffect(() => {
+        const running = startDeltaScheduler({
+            pull: pullDelta,
+            isOnline: () => useSyncStore.getState().online,
+            isPaymentInFlight: () => useSyncStore.getState().paymentInFlight,
+        });
+        scheduler.current = running;
+
+        return () => {
+            scheduler.current = null;
+            running.stop();
+        };
+    }, []);
+
+    const configEvents = useMemo(() => {
+        const onPeerChange = (payload: unknown): void => {
+            // This till's own write, echoed back. Pulling on it would overwrite the copy the
+            // cashier is still looking at with the copy they just sent.
+            if (isSelfEcho(payload, deviceUuid)) return;
+            scheduler.current?.request();
+        };
+
+        return {
+            [REGISTER_EVENTS.orderSynced]: onPeerChange,
+            [REGISTER_EVENTS.tableState]: onPeerChange,
+        };
+    }, [deviceUuid]);
+
+    const configToken = catalog.config?.access_token ?? null;
+
+    const configStatus = useEcho({
+        config: reverb,
+        channel: configToken === null ? null : configChannel(configToken),
+        visibility: 'private',
+        events: configEvents,
+    });
+
+    // The status strip read `off` forever before this: `setRealtime` was declared, read by
+    // `StatusStrip`, and called by nobody. The config channel is the one that matters for peer
+    // traffic, so it is the one the badge reports.
+    useEffect(() => {
+        setRealtime(realtimeBadge(configStatus, reverb !== null && configToken !== null));
+    }, [configStatus, configToken, reverb, setRealtime]);
+
+    // A reconnect must not wait a whole interval to catch up on what it missed while down.
+    useEffect(() => {
+        if (configStatus === 'connected' || sessionStatus === 'connected') scheduler.current?.request();
+    }, [configStatus, sessionStatus]);
 
     /**
      * One writer per register (REG-374). Placed with the other shell-level state because the

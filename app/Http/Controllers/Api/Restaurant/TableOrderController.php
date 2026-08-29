@@ -55,6 +55,7 @@ final class TableOrderController extends Controller
     /** `POST /api/pos/orders/{order}/transfer` */
     public function transfer(TransferOrderRequest $request, Order $order): JsonResponse
     {
+        [$device] = $this->deviceContext($request);
         $this->assertOwned($request, $order);
 
         /** @var RestaurantTable $target */
@@ -65,6 +66,9 @@ final class TableOrderController extends Controller
                 $order,
                 $target,
                 $request->validated('employee_id') === null ? null : (int) $request->validated('employee_id'),
+                // The emitting till, so the other registers on this config can tell a peer's move
+                // from the echo of their own (REG-365).
+                $device,
             );
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'transfer_refused', 'message' => $e->getMessage()]], 422);
@@ -82,6 +86,7 @@ final class TableOrderController extends Controller
     /** `POST /api/pos/orders/{order}/merge` */
     public function merge(MergeOrderRequest $request, Order $order): JsonResponse
     {
+        [$device] = $this->deviceContext($request);
         $this->assertOwned($request, $order);
 
         /** @var Order $target */
@@ -92,6 +97,7 @@ final class TableOrderController extends Controller
                 $order,
                 $target,
                 $request->validated('employee_id') === null ? null : (int) $request->validated('employee_id'),
+                $device,
             );
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'merge_refused', 'message' => $e->getMessage()]], 422);
@@ -108,10 +114,10 @@ final class TableOrderController extends Controller
     /** `POST /api/pos/order-merges/{merge}/unmerge` */
     public function unmerge(Request $request, int $merge): JsonResponse
     {
-        $this->deviceContext($request);
+        [$device] = $this->deviceContext($request);
 
         try {
-            $restored = $this->tables->unmerge($merge, $request->integer('employee_id') ?: null);
+            $restored = $this->tables->unmerge($merge, $request->integer('employee_id') ?: null, $device);
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'unmerge_refused', 'message' => $e->getMessage()]], 422);
         }
@@ -124,12 +130,13 @@ final class TableOrderController extends Controller
     /** `PATCH /api/pos/orders/{order}/guests` */
     public function guests(Request $request, Order $order): JsonResponse
     {
+        [$device] = $this->deviceContext($request);
         $this->assertOwned($request, $order);
 
         $request->validate(['guest_count' => ['required', 'integer', 'min:0', 'max:999']]);
 
         try {
-            $order = $this->tables->setGuestCount($order, $request->integer('guest_count'));
+            $order = $this->tables->setGuestCount($order, $request->integer('guest_count'), $device);
         } catch (DomainException $e) {
             return new JsonResponse(['error' => ['code' => 'invalid_guest_count', 'message' => $e->getMessage()]], 422);
         }

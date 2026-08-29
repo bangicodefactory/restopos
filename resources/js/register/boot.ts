@@ -471,6 +471,43 @@ export function resumeWrites(): void {
     void tryRuntime()?.syncer.start();
 }
 
+/**
+ * A delta pull driven by a broadcast or by the periodic timer (REG-367).
+ *
+ * Deliberately **not** `syncNow`: this path must not drain the outbox. It runs up to twice a minute
+ * per till plus once per peer broadcast, and a drain on every one of those re-pushes anything the
+ * server has not yet acknowledged — which is how a slow ack turns into a duplicate sale. Pushing is
+ * the outbox syncer's job and it has its own schedule.
+ *
+ * Also not a re-bootstrap. A full reload throws the catalogue away and blocks the till; a delta is
+ * the whole point of the endpoint. `needsBootstrap` is the one case that genuinely cannot be
+ * expressed as a delta — the config revision moved — and only then is the heavy path taken.
+ *
+ * Swallows its own failures: the scheduler treats a rejected pull as "owed", and a stale replica is
+ * not a reason to put an error on a cashier's screen.
+ */
+export async function pullDelta(): Promise<void> {
+    const runtime = tryRuntime();
+    if (!runtime) return;
+
+    try {
+        const result = await runtime.delta.pull({ drain: true });
+
+        if (result.needsBootstrap) {
+            useBootStore.getState().setPhase('reloading');
+            await runBootstrap();
+            await hydrateLocal();
+            useBootStore.getState().setPhase('ready');
+        } else if (result.applied) {
+            await hydrateLocal();
+        }
+
+        useSyncStore.getState().noteSync();
+    } catch {
+        // Offline, or the server refused. The local replica stays authoritative.
+    }
+}
+
 /** Manual "sync now" from the status bar. */
 export async function syncNow(): Promise<void> {
     const runtime = tryRuntime();

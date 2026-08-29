@@ -145,7 +145,7 @@ final class SessionController extends Controller
     /** `POST /api/pos/sessions/{session}/close` */
     public function close(CloseSessionRequest $request, PosSession $session): JsonResponse
     {
-        [, $config] = $this->deviceContext($request);
+        [$device, $config] = $this->deviceContext($request);
         $this->assertOwned($request, $session);
 
         // An over-variance close needs a manager, verified here rather than
@@ -175,6 +175,9 @@ final class SessionController extends Controller
                 force: (bool) ($request->validated('force') ?? false),
                 approvedByEmployeeId: $approvedByEmployeeId,
                 abandon: (bool) ($request->validated('abandon') ?? false),
+                // Stamped on the broadcast so the other tills on this config can tell a sibling's
+                // close from their own echo (REG-365).
+                device: $device,
             );
         } catch (DomainException $e) {
             return new JsonResponse([
