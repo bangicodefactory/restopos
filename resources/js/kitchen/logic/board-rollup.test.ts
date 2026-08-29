@@ -173,12 +173,19 @@ describe('rollUp', () => {
     });
 
     it('does not merge a name-and-note pair that concatenates to the same string', () => {
-        // The separator has to be a character a product name cannot contain. With a space or a
-        // pipe, "Pizza Reine"/no note and "Pizza"/note "Reine" key identically.
+        // The separator has to be a character a product name cannot contain. Both fixtures carry a
+        // note on purpose: the first version of this test left one of them empty, and a trailing
+        // empty field made the two keys differ by a stray space *whatever* separator was used — so
+        // it passed against a deliberately broken separator and proved nothing. This pair keys
+        // identically under any printable separator, and only NUL keeps them apart.
         const items = rollUp(
             [
-                order({ lines: [line({ product_id: null, display_name: 'Pizza Reine' })] }),
-                order({ lines: [line({ product_id: null, display_name: 'Pizza', customer_note: 'Reine' })] }),
+                order({
+                    lines: [line({ product_id: null, display_name: 'Pizza Reine', customer_note: 'extra' })],
+                }),
+                order({
+                    lines: [line({ product_id: null, display_name: 'Pizza', customer_note: 'Reine extra' })],
+                }),
             ],
             NOW,
         );

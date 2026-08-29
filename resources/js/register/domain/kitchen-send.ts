@@ -183,8 +183,12 @@ function asDuplicate(doc: EscPosDoc, copy: number): EscPosDoc {
 export function summariseSend(delta: PrepDelta, catalog: CatalogIndex = getCatalog()): SendCategoryCount[] {
     const out: SendCategoryCount[] = [];
 
+    // No `count === 0` guard. `changeCountsByCategory` sums **absolute** quantities, and
+    // `computePrepDelta` — the only producer of a `PrepDelta` — never emits a zero-quantity change
+    // (it skips `delta === 0`, `quantity === 0` and empty snapshot entries at all three sites). A
+    // zero bucket is therefore unreachable, and a branch no test can reach is a branch that is
+    // wrong the first time something makes it reachable.
     for (const [categoryId, count] of changeCountsByCategory(delta)) {
-        if (count === 0) continue;
         out.push({
             categoryId,
             name: categoryId === null ? '' : (catalog.categoriesById.get(categoryId)?.name ?? ''),

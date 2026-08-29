@@ -249,6 +249,25 @@ describe('explicitReprint (KDS-059)', () => {
         expect(unsentChangeCount(orderUuid)).toBe(before);
     });
 
+    it('does not fire a delta that has accumulated since the send', async () => {
+        // The scenario the guard is really for, and the one the "no post" test above cannot see:
+        // send, the printer jams, the waiter adds a dessert on the way back, *then* presses
+        // reprint. With an empty delta a reprint routed through the send path is indistinguishable
+        // from a correct one — it posts nothing because there is nothing to post. With a pending
+        // delta it puts food on the pass that nobody confirmed, and marks it sent.
+        const orderUuid = await sentOrder();
+        addLine({ orderUuid, variantId: PIZZA, quantity: 3 });
+
+        expect(unsentChangeCount(orderUuid)).toBe(3);
+
+        await explicitReprint(orderUuid);
+
+        expect(post).not.toHaveBeenCalled();
+        expect(unsentChangeCount(orderUuid)).toBe(3);
+        // One document — the retained one. Two would mean the dessert printed as well.
+        expect(enqueued).toHaveLength(1);
+    });
+
     it('reprints the same document, not a freshly computed one', async () => {
         // After a send the delta is empty, so anything that rebuilt the ticket from the current
         // state would hand the kitchen a ticket with no lines on it.

@@ -169,7 +169,15 @@ const FALLBACK_DISPLAY: KitchenDisplay = {
     sound_on_new_order: true,
 };
 
-function BoardScreen({
+/**
+ * The board itself, exported for testing.
+ *
+ * `App` cannot be rendered in a unit test — it boots the store, opens IndexedDB and attaches a
+ * websocket on mount. `BoardScreen` reads state and renders, which is where the layout decision
+ * lives, and that decision is exactly what silently discarded a `grid` display for as long as it
+ * was a private ternary nothing could reach (BAN-436a).
+ */
+export function BoardScreen({
     filter,
     onFilter,
     now,
