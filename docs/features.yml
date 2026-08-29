@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 130
+  manual_debt: 129
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
