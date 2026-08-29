@@ -6,6 +6,9 @@ features:
   - KDS-006
   - KDS-055
   - KDS-012
+  - KDS-059
+  - KDS-061
+  - REG-297
   - RST-073
 ---
 
@@ -99,3 +102,24 @@ evening with no deliveries.
 
 A ticket hidden by a filter is hidden, not gone. **It is still ordered and still has to be made** —
 clear the filter before the end of service so nothing is left sitting.
+
+## Putting a ticket on paper again
+
+If a printer jammed, ran out of paper, or somebody binned the ticket, the cashier can reprint it
+from the order — **Reprint** on the order panel. It puts the last ticket out again exactly as it was.
+
+Two things about a reprint worth knowing:
+
+- **It does not re-send anything.** Nothing new is fired, nothing is cooked twice, and the board does
+  not change. It is a second copy of a ticket that already went out.
+- **The copy is marked.** A reprinted ticket carries a DUPLICATA banner across the top, so nobody at
+  the pass mistakes it for a fresh order.
+
+Reprint is per till and per shift: it replays what *this* register last printed. A ticket sent from
+another till, or before this one was reloaded, is not there to replay.
+
+## What the cashier sees when a ticket is sent
+
+The till confirms a send by naming what went where — "3 × Plats, 2 × Boissons" — rather than a bare
+"sent". A cook missing a course usually notices as an argument at the pass; the count on the cashier's
+screen is what makes it an argument about a number instead.

@@ -32,6 +32,8 @@ export type ProductScreenProps = {
     onFastPaid: () => void;
     onSend: () => void;
     onFireCourse: (courseUuid: string) => void;
+    /** KDS-059 — put the last kitchen ticket on paper again, without re-firing the pass. */
+    onReprintPrep: () => void;
     onBill: () => void;
     onSplit: () => void;
     onTransfer: () => void;
@@ -42,6 +44,7 @@ export function ProductScreen({
     onFastPaid,
     onSend,
     onFireCourse,
+    onReprintPrep,
     onBill,
     onSplit,
     onTransfer,
@@ -149,6 +152,7 @@ export function ProductScreen({
                     onFastPaid={onFastPaid}
                     onSend={onSend}
                     onFireCourse={onFireCourse}
+                    onReprintPrep={onReprintPrep}
                     onBill={onBill}
                     onSplit={onSplit}
                     onTransfer={onTransfer}

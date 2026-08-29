@@ -7,7 +7,7 @@ import { FilterBar, RecallBar, SummaryBar } from './components/Chrome';
 import { DisplayPicker, PairingScreen, RevokedScreen } from './components/Setup';
 import { useAlertSound, useNow } from './components/hooks';
 import { useT, type Locale } from './i18n';
-import { EMPTY_FILTER, buildBoard, type BoardFilter } from './logic/board';
+import { EMPTY_FILTER, boardLayoutOf, buildBoard, nextLayout, type BoardFilter } from './logic/board';
 import { summarize, thresholdsFor } from './logic/elapsed';
 import { boardStale } from './logic/offline';
 import {
@@ -169,7 +169,15 @@ const FALLBACK_DISPLAY: KitchenDisplay = {
     sound_on_new_order: true,
 };
 
-function BoardScreen({
+/**
+ * The board itself, exported for testing.
+ *
+ * `App` cannot be rendered in a unit test — it boots the store, opens IndexedDB and attaches a
+ * websocket on mount. `BoardScreen` reads state and renders, which is where the layout decision
+ * lives, and that decision is exactly what silently discarded a `grid` display for as long as it
+ * was a private ternary nothing could reach (BAN-436a).
+ */
+export function BoardScreen({
     filter,
     onFilter,
     now,
@@ -210,7 +218,10 @@ function BoardScreen({
     );
 
     const thresholds = useMemo(() => thresholdsFor(display), [display]);
-    const layout = prefs.layout ?? (display.layout === 'list' ? 'list' : 'columns');
+    // `grid` used to fall into the `columns` arm of a ternary here, which is why a display
+    // configured as "Grille" in the back office rendered the card wall (BAN-436a). One normaliser
+    // now handles both the operator's override and the configured value.
+    const layout = boardLayoutOf(prefs.layout ?? display.layout);
 
     const categoryOf = useMemo(() => {
         return (productId: number | null | undefined): number | null =>
@@ -287,7 +298,7 @@ function BoardScreen({
                 layout={layout}
                 locale={prefs.locale ?? 'fr'}
                 onToggleMute={() => updatePrefs({ muted: !prefs.muted })}
-                onToggleLayout={() => updatePrefs({ layout: layout === 'columns' ? 'list' : 'columns' })}
+                onToggleLayout={() => updatePrefs({ layout: nextLayout(layout) })}
                 onChangeLocale={(locale) => updatePrefs({ locale })}
                 onChangeDisplay={changeDisplay}
             />

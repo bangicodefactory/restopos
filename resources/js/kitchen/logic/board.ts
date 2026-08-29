@@ -177,6 +177,13 @@ export type BoardView = {
     list: KitchenOrder[];
     /** Cards recently completed, newest first — the recall bar (KDS-021). */
     recallable: KitchenOrder[];
+    /**
+     * Identical items consolidated across cards — what the `grid` layout renders (KDS-013).
+     *
+     * Derived from `list`, not from the raw orders, so the roll-up can never disagree with the
+     * other two layouts about what is on the board.
+     */
+    rollUp: RollUpItem[];
 };
 
 export type BuildBoardOptions = {
@@ -193,9 +200,9 @@ export type BuildBoardOptions = {
 /**
  * The single projection every layout renders from.
  *
- * Producing columns and the flat list in one pass keeps the two layouts provably consistent: a
- * ticket hidden by a filter in one is hidden in the other, and the recall bar can never disagree
- * with the board about which cards are finished.
+ * Producing columns, the flat list and the roll-up in one pass keeps the three layouts provably
+ * consistent: a ticket hidden by a filter in one is hidden in the others, and the recall bar can
+ * never disagree with the board about which cards are finished.
  */
 export function buildBoard(options: BuildBoardOptions): BoardView {
     const { orders, filter, categoryOf, thresholds, now, doneRetentionMinutes } = options;
@@ -248,7 +255,167 @@ export function buildBoard(options: BuildBoardOptions): BoardView {
     // somebody is running back to fix.
     recallable.sort((a, b) => elapsedSeconds(a, now) - elapsedSeconds(b, now) || b.id - a.id);
 
-    return { stages, columns, list, recallable };
+    return { stages, columns, list, recallable, rollUp: rollUp(list, now) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The roll-up (KDS-013)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The three board layouts a `prep_displays.layout` can ask for.
+ *
+ * `grid` was already a valid enum case, allowed by the check constraint, documented in the schema,
+ * validated on save, offered in the back-office picker and written by the seeder for the bar
+ * screen — and then collapsed to `columns` on the way into the board, so an operator who chose
+ * "Grille" silently got the card wall. The value was never the missing part; reading it was.
+ */
+export type BoardLayout = 'columns' | 'grid' | 'list';
+
+/** Toggle order. Columns is the pass's default, so the cycle starts and returns there. */
+export const BOARD_LAYOUTS: readonly BoardLayout[] = ['columns', 'list', 'grid'];
+
+/**
+ * Normalise whatever the server — or a preference row written by an older build — hands us.
+ *
+ * Unknown values fall back to `columns` rather than throwing: the board is a wall screen, and a
+ * layout string nobody recognises has to degrade to the card wall, not to a blank pane.
+ */
+export function boardLayoutOf(value: string | null | undefined): BoardLayout {
+    return value === 'grid' || value === 'list' ? value : 'columns';
+}
+
+export function nextLayout(layout: BoardLayout): BoardLayout {
+    const index = BOARD_LAYOUTS.indexOf(layout);
+    return BOARD_LAYOUTS[(index + 1) % BOARD_LAYOUTS.length] ?? 'columns';
+}
+
+/** One card's contribution to a roll-up row — the ticket a cook ticks off when that portion is up. */
+export type RollUpSource = {
+    orderId: number;
+    lineId: number;
+    /** What the pass calls this card: its tracking number, or `#id` when it has none. */
+    label: string;
+    quantity: number;
+    state: KitchenLineState;
+    ageSeconds: number;
+};
+
+/** "12 × frites" — one line of production work, however many tickets asked for it. */
+export type RollUpItem = {
+    key: string;
+    productId: number | null;
+    name: string;
+    customerNote: string | null;
+    internalNote: string | null;
+    /** Total still owed. Only open work is counted, so this is always positive. */
+    quantity: number;
+    /** Contributing cards, oldest first. */
+    sources: RollUpSource[];
+    /** Age of the oldest card owing this item — what the row's urgency is judged on. */
+    oldestSeconds: number;
+};
+
+/**
+ * What makes two lines "the same thing to make".
+ *
+ * Product **and** notes, for the same reason the register's change-delta engine keys on uuid+note:
+ * a "no basil" margherita is not a margherita, and folding the two into one row of "3 ×" is how an
+ * allergy order gets plated wrong. A line with no product id falls back to its display name, which
+ * is all a free-text line has.
+ */
+function rollUpKey(line: KitchenLine): string {
+    // NUL as the separator rather than a space or a pipe: a product called "Pizza Reine" with no
+    // note must not key the same as a "Pizza" carrying the note "Reine". Every printable separator
+    // is a character a product name is allowed to contain.
+    return [
+        line.product_id ?? 'x',
+        line.display_name,
+        line.customer_note ?? '',
+        line.internal_note ?? '',
+    ].join('\u0000');
+}
+
+/** Quantities are decimal strings on the wire; three places is the schema's scale. */
+function round3(value: number): number {
+    return Math.round(value * 1000) / 1000;
+}
+
+/**
+ * Consolidate identical items across cards (KDS-013).
+ *
+ * Only *open* lines are counted. A served line is work already done and a cancelled one is work
+ * called off — either of them inflating "12 × frites" would send out a batch nobody ordered, which
+ * is the exact failure a production view exists to prevent.
+ *
+ * A card with no open lines therefore contributes no row, so a note-only ticket does not appear
+ * here at all. That is deliberate: the roll-up answers "what do I cook next", and the two card
+ * layouts remain where a cook reads a ticket in full.
+ */
+export function rollUp(orders: readonly KitchenOrder[], now: number): RollUpItem[] {
+    const byKey = new Map<string, RollUpItem>();
+
+    for (const order of orders) {
+        const ageSeconds = elapsedSeconds(order, now);
+        const label = order.tracking_number ?? `#${order.id}`;
+
+        for (const line of order.lines) {
+            if (!isLineOpen(line)) continue;
+
+            const quantity = Number.parseFloat(line.quantity);
+            // A zero or negative quantity on an open line is not work to do. Summing it would let a
+            // correction row cancel a real one out and drop the item off the pass entirely.
+            if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+            const source: RollUpSource = {
+                orderId: order.id,
+                lineId: line.id,
+                label,
+                quantity: round3(quantity),
+                state: line.state,
+                ageSeconds,
+            };
+
+            const key = rollUpKey(line);
+            const existing = byKey.get(key);
+
+            if (existing) {
+                existing.quantity = round3(existing.quantity + quantity);
+                existing.sources.push(source);
+                if (ageSeconds > existing.oldestSeconds) existing.oldestSeconds = ageSeconds;
+                continue;
+            }
+
+            byKey.set(key, {
+                key,
+                productId: line.product_id ?? null,
+                name: line.display_name,
+                customerNote: line.customer_note,
+                internalNote: line.internal_note,
+                quantity: round3(quantity),
+                sources: [source],
+                oldestSeconds: ageSeconds,
+            });
+        }
+    }
+
+    const items = [...byKey.values()];
+
+    // Oldest first, exactly as the card layouts sort: the batch somebody has been waiting longest
+    // for is the batch to start. Size breaks the tie, so the bigger batch of two equally old rows
+    // comes first — that is the whole economy of cooking to a roll-up.
+    for (const item of items) {
+        item.sources.sort((a, b) => b.ageSeconds - a.ageSeconds || a.orderId - b.orderId);
+    }
+    items.sort(
+        (a, b) =>
+            b.oldestSeconds - a.oldestSeconds ||
+            b.quantity - a.quantity ||
+            a.name.localeCompare(b.name) ||
+            (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+    );
+
+    return items;
 }
 
 /** Course headers on a card (KDS-007). Courses ascend; un-coursed lines sort last. */
