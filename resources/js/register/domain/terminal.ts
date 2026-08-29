@@ -96,14 +96,20 @@ export type TerminalDriver = {
 const drivers = new Map<string, TerminalDriver>();
 
 /**
- * `terminal_provider` values that mean "no terminal".
+ * The `terminal_provider` value that means "no terminal".
  *
  * `none` is the column's **default** (`2025_01_01_000104_create_config_tables.php`), so it is what
  * an unconfigured method ships to the register — not `null`. Checking only for `null`, as the first
  * version did, would let a driver registered under the literal provider `'none'` claim every
  * unconfigured card method on the register.
+ *
+ * Deliberately just this one value and not a set including `''`: the column is enum-checked in the
+ * database and validated with `Rule::enum(TerminalProvider::class)` on write, and `TerminalProvider`
+ * has no empty case, so an empty provider cannot arrive. A guard against it would be a branch no
+ * test could reach honestly — a mutation sweep found exactly that and it was deleted rather than
+ * papered over with a fixture the server cannot produce.
  */
-const NO_TERMINAL = new Set(['', 'none']);
+const NO_TERMINAL = 'none';
 
 export function registerTerminalDriver(driver: TerminalDriver): void {
     drivers.set(driver.provider, driver);
@@ -118,7 +124,7 @@ export function terminalDriverFor(method: PaymentMethodRow | undefined): Termina
     if (method?.method_type !== 'card_terminal') return null;
 
     const provider = method.terminal_provider;
-    if (provider === null || NO_TERMINAL.has(provider)) return null;
+    if (provider === null || provider === NO_TERMINAL) return null;
 
     return drivers.get(provider) ?? null;
 }

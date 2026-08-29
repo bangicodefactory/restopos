@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { PaymentStatus } from '@domain/enums';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildOrderCommand } from '../data/persistence';
@@ -33,11 +34,19 @@ import { PaymentScreen } from './PaymentScreen';
  */
 
 const CARD_METHOD = 7;
+const CASH_METHOD = 8;
 const PIZZA = 101;
 
+/**
+ * A register with two methods, not one.
+ *
+ * Deliberate: with a single configured method REG-201 re-tenders the moment a line is removed, so a
+ * register carrying only the card would auto-add a replacement between the delete and the assertion
+ * and hide whatever the delete did.
+ */
 function install(terminalProvider: string | null): void {
     installCatalog({
-        config: makeConfig({ payment_method_ids: [CARD_METHOD] }),
+        config: makeConfig({ payment_method_ids: [CARD_METHOD, CASH_METHOD] }),
         products: [makeProduct({ id: 1, name: 'Pizza', list_price: '20.00' })],
         variants: [makeVariant({ id: PIZZA, product_id: 1, display_name: 'Pizza' })],
         paymentMethods: [
@@ -48,6 +57,7 @@ function install(terminalProvider: string | null): void {
                 is_cash_count: false,
                 terminal_provider: terminalProvider,
             }),
+            makePaymentMethod({ id: CASH_METHOD, name: 'Espèces' }),
         ],
     });
 }
@@ -62,6 +72,21 @@ async function orderWithCardLine(isRefund = false): Promise<{ orderUuid: string;
 
 function paymentRow(uuid: string) {
     return useOrderStore.getState().payments[uuid];
+}
+
+/**
+ * Put a line into a status the screen itself can no longer produce.
+ *
+ * A fresh tender is `done`, and with the buttons routed through the registry nothing local writes
+ * `pending` any more — which is the fix. Reaching these states through the store is therefore the
+ * only way to stand a test on a line that arrived from the server or from an earlier session.
+ */
+function setStatus(uuid: string, status: PaymentStatus): void {
+    const payments = useOrderStore.getState().payments;
+
+    useOrderStore.setState({
+        payments: { ...payments, [uuid]: { ...payments[uuid]!, payment_status: status } },
+    } as never);
 }
 
 let terminal: FakeTerminal;
@@ -87,12 +112,7 @@ describe('with a driver registered', () => {
     it('sends through the driver and writes back the terminal’s own answer, metadata and all', async () => {
         const { orderUuid, paymentUuid } = await orderWithCardLine();
         // A fresh line is `done`; the send button only exists on a line the terminal has not taken.
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
         fireEvent.click(screen.getByTestId('terminal-send'));
@@ -113,12 +133,7 @@ describe('with a driver registered', () => {
         // The client half of the dead wire. `terminal_ticket` reached the payment row, and the push
         // command left it behind — so the slip lived in one browser's IndexedDB and nowhere else.
         const { orderUuid, paymentUuid } = await orderWithCardLine();
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
         fireEvent.click(screen.getByTestId('terminal-send'));
@@ -134,12 +149,7 @@ describe('with a driver registered', () => {
     it('leaves the line alone and says why when the terminal refuses', async () => {
         terminal.willRespond('send', { ok: false, reason: 'reg.pay.terminalFailed' });
         const { orderUuid, paymentUuid } = await orderWithCardLine();
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
         fireEvent.click(screen.getByTestId('terminal-send'));
@@ -160,15 +170,49 @@ describe('with a driver registered', () => {
         expect(terminal.sawVerb('reverse')).toBe(true);
     });
 
+    it('does not offer a reversal on a line the terminal has not captured', async () => {
+        // The button has to be state-gated, not merely present: `reverseOnTerminal` refuses an
+        // authorisation, so an always-rendered Reverse is a button whose only outcome is an error.
+        const { orderUuid, paymentUuid } = await orderWithCardLine();
+        setStatus(paymentUuid, 'pending');
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+
+        expect(screen.queryByTestId('terminal-reverse')).toBeNull();
+    });
+
+    it('locks the line while the terminal has it, and says it is waiting', async () => {
+        // The seconds a customer spends tapping a card are the whole reason the lock exists: a
+        // second tap on Send presents a second sale for one tender, and a delete during a cancel
+        // drops the row while the authorisation is still live on the device.
+        const release = terminal.holdOpen('send');
+        const { orderUuid, paymentUuid } = await orderWithCardLine();
+        // `failed`, not `pending`: on a pending line "Waiting for the terminal…" is already true
+        // from the status alone, so it would say nothing about the operation being in flight.
+        setStatus(paymentUuid, 'failed');
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+        expect(screen.getByTestId('payment-status').textContent).toBe('failed');
+        fireEvent.click(screen.getByTestId('terminal-send'));
+
+        await waitFor(() =>
+            expect((screen.getByTestId('terminal-send') as HTMLButtonElement).disabled).toBe(true),
+        );
+        expect(screen.getByTestId('payment-status').textContent).toBe('Waiting for the terminal…');
+        // REG-212 again, from the other direction: the row cannot be deleted out from under an
+        // operation the terminal has not answered yet.
+        expect(screen.queryByTestId('payment-remove')).toBeNull();
+
+        release();
+
+        await waitFor(() => expect(paymentRow(paymentUuid)?.payment_status).toBe('done'));
+        expect(screen.queryByTestId('payment-remove')).not.toBeNull();
+    });
+
     it('asks the terminal rather than offering the cashier a guess', async () => {
         terminal.willRespond('status', { ok: true, status: 'authorized' });
         const { orderUuid, paymentUuid } = await orderWithCardLine();
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
 
@@ -181,12 +225,7 @@ describe('with a driver registered', () => {
 
     it('refuses to send a refund order to the terminal and never reaches the driver', async () => {
         const { orderUuid, paymentUuid } = await orderWithCardLine(true);
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
         fireEvent.click(screen.getByTestId('terminal-send'));
@@ -233,14 +272,29 @@ describe('with no driver — which is every venue today', () => {
         await waitFor(() => expect(paymentRow(paymentUuid)?.payment_status).toBe('done'));
     });
 
+    it('drops the selection with the line, so the keypad stops editing a row that is gone', async () => {
+        // Not new behaviour — but it had no test, and a mutation sweep walked straight through it.
+        // Left selected, the numpad and the quick-tender keys stay live over a deleted uuid:
+        // `setPaymentAmount` finds nothing and returns, so every keystroke silently does nothing
+        // while the screen shows an armed keypad.
+        const { orderUuid, paymentUuid } = await orderWithCardLine();
+
+        render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
+
+        fireEvent.click(screen.getByTestId('payment-select'));
+        expect((screen.getAllByTestId('quick-amount')[0] as HTMLButtonElement).disabled).toBe(false);
+
+        fireEvent.click(screen.getByTestId('payment-remove'));
+
+        await waitFor(() =>
+            expect((screen.getAllByTestId('quick-amount')[0] as HTMLButtonElement).disabled).toBe(true),
+        );
+        expect(paymentRow(paymentUuid)).toBeUndefined();
+    });
+
     it('refuses to delete a line that may still be live on the device (REG-212)', async () => {
         const { orderUuid, paymentUuid } = await orderWithCardLine();
-        useOrderStore.setState({
-            payments: {
-                ...useOrderStore.getState().payments,
-                [paymentUuid]: { ...paymentRow(paymentUuid)!, payment_status: 'pending' },
-            },
-        } as never);
+        setStatus(paymentUuid, 'pending');
 
         render(<PaymentScreen orderUuid={orderUuid} onValidated={vi.fn()} onBack={vi.fn()} />);
         fireEvent.click(screen.getByTestId('payment-remove'));

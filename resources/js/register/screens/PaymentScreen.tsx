@@ -247,6 +247,12 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
      */
     const runTerminal = useCallback(
         async (payment: PaymentRow, verb: TerminalVerb) => {
+            // Belt and braces, and knowingly so: every button that can reach here carries
+            // `disabled={busy}`, and React does not dispatch onClick on a disabled button, so this
+            // line is not reachable by tapping. A mutation sweep confirmed it — deleting it fails
+            // nothing. It stays because the `disabled` prop is a rendering decision that a future
+            // button can forget, and because `removeLine` above guards the same way; the cost of
+            // the double-send it prevents is a customer charged twice for one tender.
             if (busy !== null) return;
 
             setError(null);
@@ -483,6 +489,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                             key={`${amount}-${index}`}
                             size="md"
                             variant="secondary"
+                            data-testid="quick-amount"
                             disabled={selectedPayment === null || frozen}
                             onClick={() => applyBuffer(amount)}
                         >
@@ -584,7 +591,12 @@ function PaymentLine({
                 selected && 'ring-2 ring-brand-500',
             )}
         >
-            <button type="button" className="min-w-0 flex-1 text-start" onClick={onSelect}>
+            <button
+                type="button"
+                className="min-w-0 flex-1 text-start"
+                data-testid="payment-select"
+                onClick={onSelect}
+            >
                 <span className="block font-semibold">{label}</span>
                 <span className="block text-sm text-slate-500" data-testid="payment-status">
                     {waiting ? t('reg.pay.terminalWaiting') : status}

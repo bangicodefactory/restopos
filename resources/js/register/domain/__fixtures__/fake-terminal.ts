@@ -46,6 +46,8 @@ export class FakeTerminal implements TerminalDriver {
 
     private readonly behaviours = new Map<TerminalVerb, Behaviour>();
 
+    private readonly gates = new Map<TerminalVerb, Promise<void>>();
+
     constructor(readonly provider: string = 'acme') {}
 
     /** Program one verb. Anything not programmed accepts with the default metadata. */
@@ -53,6 +55,27 @@ export class FakeTerminal implements TerminalDriver {
         this.behaviours.set(verb, behaviour);
 
         return this;
+    }
+
+    /**
+     * Hold a verb open until the returned callback is invoked.
+     *
+     * A real terminal takes seconds — the customer has to tap a card and key a PIN — and the whole
+     * point of the screen's in-flight lock is what it does during those seconds. Without a way to
+     * stop time here, every assertion about mid-operation state ("the buttons are disabled", "the
+     * line cannot be deleted", "it says it is waiting") is unwritable, and a mutation sweep proved
+     * it: every one of those guards survived until this existed.
+     */
+    holdOpen(verb: TerminalVerb): () => void {
+        let release = (): void => {};
+        this.gates.set(
+            verb,
+            new Promise<void>((resolve) => {
+                release = resolve;
+            }),
+        );
+
+        return release;
     }
 
     /** Did the driver see this verb at all? The guards refuse several before it is reached. */
@@ -80,14 +103,17 @@ export class FakeTerminal implements TerminalDriver {
         return this.record('status', payment);
     }
 
-    private record(verb: TerminalVerb, payment: PaymentRow, argument?: string): Promise<TerminalResult> {
+    private async record(verb: TerminalVerb, payment: PaymentRow, argument?: string): Promise<TerminalResult> {
         this.calls.push({ verb, paymentUuid: payment.uuid, ...(argument === undefined ? {} : { argument }) });
+
+        const gate = this.gates.get(verb);
+        if (gate) await gate;
 
         const behaviour = this.behaviours.get(verb) ?? defaultFor(verb);
 
-        if (behaviour === 'throw') return Promise.reject(new Error(`terminal exploded on ${verb}`));
+        if (behaviour === 'throw') throw new Error(`terminal exploded on ${verb}`);
 
-        return Promise.resolve(behaviour);
+        return behaviour;
     }
 }
 
