@@ -6,6 +6,7 @@ namespace App\Services\Pos;
 
 use App\Enums\SessionState;
 use App\Http\Resources\Pos\SessionResource;
+use App\Models\Catalog\ProductVariant;
 use App\Models\Concerns\PosLoadable;
 use App\Models\Identity\Customer;
 use App\Models\Pos\PosConfig;
@@ -237,16 +238,27 @@ final readonly class BootstrapService
     }
 
     /**
-     * Lazy product search (`GET /api/pos/products?search=`) — spec §5.4.
+     * Lazy product search (`GET /api/pos/products?search=`) — spec §5.4, REG-071.
      *
-     * @return array{records: list<array<string, mixed>>, next_cursor: ?string, total: int}
+     * Two things here exist for the scan-miss path and are easy to lose to a tidy-up:
+     *
+     *  1. **Variant barcodes are searched too.** The register indexes a scan against both
+     *     `product_variants.barcode` and `products.barcode` (`resources/js/register/data/catalog-load.ts`).
+     *     Matching only the template's column meant a variant-only barcode missed locally, went to
+     *     the server, and came back empty — the lazy fetch would have been dead on arrival at every
+     *     venue whose barcodes live on the SKU, which is most of them.
+     *  2. **The matched products' variants ship with the answer.** A product row alone cannot be
+     *     added to an order: a line references a *variant*. Returning products without them would
+     *     give the client something to cache and nothing to sell.
+     *
+     * @return array{records: list<array<string, mixed>>, variants: list<array<string, mixed>>, next_cursor: ?string, total: int}
      */
     public function searchProducts(PosConfig $config, ?string $search, ?int $categoryId, ?string $cursor, int $limit): array
     {
         $class = BootstrapRegistry::classFor('products');
 
         if ($class === null) {
-            return ['records' => [], 'next_cursor' => null, 'total' => 0];
+            return ['records' => [], 'variants' => [], 'next_cursor' => null, 'total' => 0];
         }
 
         /** @var Builder<Model> $query */
@@ -258,7 +270,11 @@ final readonly class BootstrapService
             $query->where(function (Builder $q) use ($table, $needle): void {
                 $q->whereRaw('lower('.$table.'.name) like ?', [$needle])
                     ->orWhereRaw('lower(coalesce('.$table.'.default_code, \'\')) like ?', [$needle])
-                    ->orWhereRaw('lower(coalesce('.$table.'.barcode, \'\')) like ?', [$needle]);
+                    ->orWhereRaw('lower(coalesce('.$table.'.barcode, \'\')) like ?', [$needle])
+                    ->orWhereHas('variants', function (Builder $v) use ($needle): void {
+                        $v->whereRaw('lower(coalesce(product_variants.barcode, \'\')) like ?', [$needle])
+                            ->orWhereRaw('lower(coalesce(product_variants.default_code, \'\')) like ?', [$needle]);
+                    });
             });
         }
 
@@ -266,7 +282,44 @@ final readonly class BootstrapService
             $query->whereHas('posCategories', fn (Builder $q) => $q->whereKey($categoryId));
         }
 
-        return $this->paginate($query, $class, PosLoadable::PROFILE_REGISTER, $cursor, $limit);
+        $page = $this->paginate($query, $class, PosLoadable::PROFILE_REGISTER, $cursor, $limit);
+
+        return [...$page, 'variants' => $this->variantsForProducts($config, $page['records'])];
+    }
+
+    /**
+     * The variants of an already-scoped page of products.
+     *
+     * Deliberately **not** `ProductVariant::posLoadScope()`: that re-derives its product set from
+     * `Product::posLoadScope()`, which is capped by `limited_product_count` — the very cap the lazy
+     * fetch exists to reach past. A product outside the cap would come back with no variants and be
+     * unsellable. Scope is carried by the ids themselves, which came from a config-scoped query,
+     * plus the company guard.
+     *
+     * @param  list<array<string, mixed>>  $products
+     * @return list<array<string, mixed>>
+     */
+    private function variantsForProducts(PosConfig $config, array $products): array
+    {
+        $productIds = array_values(array_filter(array_map(
+            static fn (array $row): ?int => isset($row['id']) ? (int) $row['id'] : null,
+            $products,
+        )));
+
+        if ($productIds === []) {
+            return [];
+        }
+
+        /** @var Builder<Model> $query */
+        $query = ProductVariant::query()
+            ->where('product_variants.company_id', $config->company_id)
+            ->whereIn('product_variants.product_id', $productIds)
+            ->orderBy('product_variants.id');
+
+        return $this->select($query, ProductVariant::class, PosLoadable::PROFILE_REGISTER)
+            ->map($this->rowMapper())
+            ->values()
+            ->all();
     }
 
     /**

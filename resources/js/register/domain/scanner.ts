@@ -105,8 +105,24 @@ export type ScanAction =
     | { kind: 'cashier'; code: string; parsed: ParsedBarcode }
     | { kind: 'unknown'; code: string; parsed: ParsedBarcode | null };
 
+/**
+ * Every code a scan could mean, most specific first: the parsed code, then the parser's alternates
+ * (UPC↔EAN conversion, zero-padded GTIN).
+ *
+ * The local index and the server lookup (REG-071) walk this same list in this same order, so a
+ * barcode that had to go to the server cannot resolve to a different product than one that did not.
+ */
+export function scanCandidates(parsed: ParsedBarcode | null, raw: string): string[] {
+    if (!parsed) {
+        const trimmed = raw.trim();
+        return trimmed === '' ? [] : [trimmed];
+    }
+
+    return [...new Set([parsed.code, ...parsed.candidates].filter((code) => code !== ''))];
+}
+
 function lookupVariant(catalog: CatalogIndex, parsed: ParsedBarcode): ProductVariantRow | null {
-    for (const candidate of [parsed.code, ...parsed.candidates]) {
+    for (const candidate of scanCandidates(parsed, parsed.raw)) {
         const hit = catalog.barcodeIndex.get(candidate);
         if (hit) return hit;
     }

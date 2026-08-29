@@ -18,14 +18,14 @@ import { decideAdd, excludedValueIds, matchVariant, startAdd } from './product-f
 
 const PLAIN = makeProduct({ id: 1, name: 'Pizza', list_price: '10.00' });
 const WITH_ATTRS = makeProduct({ id: 2, name: 'Frites', list_price: '4.00', attribute_count: 2 });
-const COMBO = makeProduct({ id: 3, name: 'Menu', list_price: '15.00', combo_count: 1 });
+const COMBO = makeProduct({ id: 3, name: 'Menu', list_price: '15.00', combo_count: 1, combo_ids: [31] });
 const WEIGHED = makeProduct({ id: 4, name: 'Fromage', list_price: '20.00', to_weight: true });
 const DEPOSIT = makeProduct({ id: 5, name: 'Consigne', list_price: '2.00', special_kind: 'deposit' });
 const FREE = makeProduct({ id: 6, name: 'Divers', list_price: '0' });
 const NO_VARIANT = makeProduct({ id: 7, name: 'Fantôme' });
 
 /** A product whose configurator *and* combo are both set — the order of the checks decides. */
-const COMBO_AND_ATTRS = makeProduct({ id: 8, name: 'Menu Frites', combo_count: 1, attribute_count: 1 });
+const COMBO_AND_ATTRS = makeProduct({ id: 8, name: 'Menu Frites', combo_count: 1, attribute_count: 1, combo_ids: [38] });
 
 function install(parts: CatalogParts = {}): void {
     installCatalog({
@@ -38,6 +38,21 @@ function install(parts: CatalogParts = {}): void {
             makeVariant({ id: 105, product_id: 5, display_name: 'Consigne' }),
             makeVariant({ id: 106, product_id: 6, display_name: 'Divers' }),
             makeVariant({ id: 108, product_id: 8, display_name: 'Menu Frites' }),
+        ],
+        // The configurator rows a bootstrapped catalogue always carries. Without them every
+        // configurable product here sat in the state only a lazily fetched one reaches —
+        // `attribute_count > 0` with no lines behind it — and the tests asserted that as normal.
+        attributeLines: [
+            { id: 21, product_id: 2, product_attribute_id: 1, is_required: true, sequence: 1, active: true },
+            { id: 81, product_id: 8, product_attribute_id: 1, is_required: true, sequence: 1, active: true },
+        ],
+        combos: [
+            { id: 31, name: 'Plat', base_price: '0.00', qty_free: 1, qty_max: 1, sequence: 1 },
+            { id: 38, name: 'Plat', base_price: '0.00', qty_free: 1, qty_max: 1, sequence: 1 },
+        ],
+        comboItems: [
+            { id: 311, combo_id: 31, product_variant_id: 101, extra_price: '0.00', sequence: 1 },
+            { id: 381, combo_id: 38, product_variant_id: 102, extra_price: '0.00', sequence: 1 },
         ],
         ...parts,
     });
@@ -60,6 +75,43 @@ describe('decideAdd', () => {
         { product: NO_VARIANT, expected: { kind: 'blocked', reason: 'no_variant' } },
     ])('routes $product.name', ({ product, expected }) => {
         expect(decideAdd(product, null)).toEqual(expected);
+    });
+
+    it('refuses a configurable product whose options never reached this till', () => {
+        // What a lazy scan-miss fetch produces: the server returns products and variants only, so a
+        // product with `attribute_count > 0` lands in the grid with no attribute lines behind it.
+        //
+        // Unguarded, the dialog opens empty, `missing` is empty because `lines` is empty, the Add
+        // button is enabled, and `matchVariant(productId, [])` falls through to the default variant
+        // — the wrong SKU at the wrong price on the bill and the wrong ticket in the kitchen.
+        install({ attributeLines: [] });
+
+        expect(decideAdd(WITH_ATTRS, null)).toEqual({ kind: 'blocked', reason: 'incomplete_options' });
+    });
+
+    it('refuses a combo whose components never reached this till', () => {
+        install({ combos: [], comboItems: [] });
+
+        expect(decideAdd(COMBO, null)).toEqual({ kind: 'blocked', reason: 'incomplete_options' });
+    });
+
+    it('judges the combo per product, not by whether the venue has any combos at all', () => {
+        // A venue with other combos would otherwise wave a lazily fetched one straight through,
+        // which is the only case this guard exists for.
+        install({
+            combos: [{ id: 99, name: 'Autre', base_price: '0.00', qty_free: 1, qty_max: 1, sequence: 1 }],
+            comboItems: [{ id: 991, combo_id: 99, product_variant_id: 101, extra_price: '0.00', sequence: 1 }],
+        });
+
+        expect(decideAdd(COMBO, null)).toEqual({ kind: 'blocked', reason: 'incomplete_options' });
+    });
+
+    it('still sells a plain product that arrived the same way', () => {
+        // The guard is about the configurator, not about lazily fetched products: a simple product
+        // needs nothing but its variant, and refusing it would break the feature it protects.
+        install({ attributeLines: [], combos: [], comboItems: [] });
+
+        expect(decideAdd(PLAIN, null)).toEqual({ kind: 'add', variantId: 101 });
     });
 
     it('asks for the combo before the configurator, so components are priced last', () => {

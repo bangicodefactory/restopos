@@ -15,6 +15,7 @@ import type {
 } from '@domain/types';
 import type { PosDb } from '@shared/db';
 
+import { defaultVariantsByProduct, groupVariantsByProduct, indexBarcodes } from './barcode-index';
 import { DEFAULT_CURRENCY_FORMAT, emptyCatalog, type CatalogIndex } from './catalog';
 
 /**
@@ -96,7 +97,7 @@ function sellableOrder(a: ProductRow, b: ProductRow): number {
     return a.name.localeCompare(b.name);
 }
 
-function ancestorsOf(category: PosCategoryRow, byId: Map<number, PosCategoryRow>): number[] {
+function ancestorsOf(category: PosCategoryRow, byId: ReadonlyMap<number, PosCategoryRow>): number[] {
     if (category.ancestorIds && category.ancestorIds.length > 0) return category.ancestorIds;
     const out: number[] = [];
     let parent = category.parent_id;
@@ -180,22 +181,9 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
 
     const productsById = new Map(products.map((p) => [p.id, p]));
     const variantsById = new Map(variants.map((v) => [v.id, v]));
-    const variantsByProduct = groupBy(variants, (v) => v.product_id);
-    const defaultVariantByProduct = new Map<number, ProductVariantRow>();
-    const barcodeIndex = new Map<string, ProductVariantRow>();
-    for (const [productId, list] of variantsByProduct) {
-        const active = list.filter((v) => v.active && v.is_active_combination);
-        const first = active[0] ?? list[0];
-        if (first) defaultVariantByProduct.set(productId, first);
-    }
-    for (const variant of variants) {
-        if (variant.barcode) barcodeIndex.set(variant.barcode, variant);
-    }
-    for (const product of products) {
-        if (!product.barcode) continue;
-        const variant = defaultVariantByProduct.get(product.id);
-        if (variant && !barcodeIndex.has(product.barcode)) barcodeIndex.set(product.barcode, variant);
-    }
+    const variantsByProduct = groupVariantsByProduct(variants);
+    const defaultVariantByProduct = defaultVariantsByProduct(variantsByProduct);
+    const barcodeIndex = indexBarcodes(products, variants, defaultVariantByProduct);
 
     const categoriesById = new Map(categories.map((c) => [c.id, c]));
     const categoryChildren = new Map<number, PosCategoryRow[]>();
@@ -347,5 +335,94 @@ export async function loadCatalogIndex(db: PosDb, version: number): Promise<Cata
         decimalPrecisions: new Map(decimalPrecisions.map((p) => [p.name, p.digits])),
         nomenclature: primaryNomenclature ? buildNomenclature(primaryNomenclature, barcodeRules) : null,
         fallbackNomenclature: fallbackRow ? buildNomenclature(fallbackRow, barcodeRules) : null,
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Incremental insert (REG-071)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What a lazy fetch brings back: a handful of products with their variants. */
+export type CatalogAddition = {
+    products: readonly ProductRow[];
+    variants: readonly ProductVariantRow[];
+};
+
+/**
+ * Fold a few lazily fetched products into an existing index.
+ *
+ * `setCatalog` only ever supported whole-index replacement, and the only thing that could build an
+ * index was a full Dexie re-read. That is right for a delta — several megabytes, once — and wrong
+ * for a scan miss: re-reading the whole catalogue to add one product would stall the till mid-sale.
+ *
+ * Rebuilt rather than mutated, because the index is frozen and `version` is a memo key: the product
+ * grid and the scan router both key off it, so a mutation nobody can observe is worse than no insert
+ * at all. `sellable` and `productsByCategory` are folded too — a product you can scan but cannot
+ * then find by name or category is exactly the half-wired state this ticket is about.
+ *
+ * Rows already present are **replaced**, not duplicated: the server's copy is newer by construction.
+ */
+export function insertCatalogProducts(
+    catalog: CatalogIndex,
+    addition: CatalogAddition,
+    version: number,
+): CatalogIndex {
+    if (addition.products.length === 0 && addition.variants.length === 0) return catalog;
+
+    const productsById = new Map(catalog.productsById);
+    for (const product of addition.products) productsById.set(product.id, product);
+    const products = [...productsById.values()];
+
+    const variantsById = new Map(catalog.variantsById);
+    for (const variant of addition.variants) variantsById.set(variant.id, variant);
+    const variants = [...variantsById.values()];
+
+    // Regrouped from the merged list rather than appended to the existing buckets: an incoming
+    // variant that replaces a cached one must not leave the stale copy sitting in its product's
+    // bucket, where `defaultVariantsByProduct` could still pick it.
+    const variantsByProduct = groupVariantsByProduct(variants);
+    const defaultVariantByProduct = defaultVariantsByProduct(variantsByProduct);
+    const barcodeIndex = indexBarcodes(
+        products,
+        variants,
+        defaultVariantByProduct,
+        new Map(catalog.barcodeIndex),
+    );
+
+    const config = catalog.config;
+    const allowed = config?.limit_categories === true ? new Set(config.iface_available_categ_ids) : null;
+    const sellable = products
+        .filter((p) => p.active && p.available_in_pos && !p.is_special)
+        .filter((p) => allowed === null || p.pos_category_ids.some((id) => allowed.has(id)))
+        .sort(sellableOrder);
+
+    const productsByCategory = new Map<number, ProductRow[]>();
+    for (const product of sellable) {
+        const seen = new Set<number>();
+        for (const categoryId of product.pos_category_ids) {
+            const category = catalog.categoriesById.get(categoryId);
+            const ids = category ? [...ancestorsOf(category, catalog.categoriesById), categoryId] : [categoryId];
+            for (const id of ids) {
+                if (seen.has(id)) continue;
+                seen.add(id);
+                const bucket = productsByCategory.get(id);
+                if (bucket) bucket.push(product);
+                else productsByCategory.set(id, [product]);
+            }
+        }
+    }
+
+    return {
+        ...catalog,
+        version,
+        products,
+        variants,
+        productsById,
+        variantsById,
+        variantsByProduct,
+        defaultVariantByProduct,
+        barcodeIndex,
+        sellable,
+        productsByCategory,
     };
 }

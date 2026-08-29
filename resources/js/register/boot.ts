@@ -22,7 +22,7 @@ import {
 import { ApiClient, ApiError, BootstrapClient, DeltaPuller, OutboxSyncer } from '@shared/sync';
 
 import { loadCatalogIndex } from './data/catalog-load';
-import { setCatalog } from './data/catalog';
+import { nextCatalogVersion, setCatalog } from './data/catalog';
 import { mediaToWarm, warmMediaCache } from '@shared/media';
 
 import { createPersistence, loadOrdersFromDb } from './data/persistence';
@@ -52,8 +52,6 @@ import { usePosSessionStore } from './state/session-store';
  * things allowed to block are pairing (there is nothing to work with) and the very first bootstrap
  * (likewise).
  */
-
-let catalogVersion = 0;
 
 export type BootResult = { paired: boolean; hasData: boolean };
 
@@ -230,8 +228,7 @@ export async function hydrateLocal(): Promise<void> {
     const runtime = tryRuntime();
     if (!runtime) return;
 
-    catalogVersion += 1;
-    const catalog = await loadCatalogIndex(runtime.db, catalogVersion);
+    const catalog = await loadCatalogIndex(runtime.db, nextCatalogVersion());
     setCatalog(catalog);
     runtime.printer.setBindings(bindingsFromCatalog(catalog));
 

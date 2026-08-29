@@ -1,5 +1,6 @@
 import { createPosStore } from '@shared/store';
 
+import type { BarcodeSourceKind } from '../domain/barcode-source';
 import type { SplitTender } from '../domain/split-order';
 
 import { recordOrderScreen } from '../domain/order-actions';
@@ -81,6 +82,12 @@ export type UiSlice = {
      * believes it has permission it can no longer show the provenance of.
      */
     lineApprovals: Record<string, string[]>;
+    /**
+     * Which scanner the cashier has asked for (REG-081). A *preference*, not a fact: the screen runs
+     * `selectBarcodeSource`, which falls back to the wedge on a device with no camera. Not persisted
+     * — a reload should come back on the hardware scanner, which is the one that always works.
+     */
+    scannerSource: BarcodeSourceKind;
 
     setScreen: (screen: Screen) => void;
     setPane: (pane: Pane) => void;
@@ -99,6 +106,7 @@ export type UiSlice = {
     setReceiptOrder: (orderUuid: string | null) => void;
     noteScan: () => void;
     grantLineApproval: (lineUuid: string, ability: string) => void;
+    setScannerSource: (source: BarcodeSourceKind) => void;
 };
 
 export const useUiStore = createPosStore<UiSlice>((set) => ({
@@ -115,6 +123,7 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
     receiptOrderUuid: null,
     lastScanAt: 0,
     lineApprovals: {},
+    scannerSource: 'hid',
 
     setScreen: (screen) => {
         set((state) => {
@@ -217,6 +226,11 @@ export const useUiStore = createPosStore<UiSlice>((set) => ({
             const held = state.lineApprovals[lineUuid] ?? [];
 
             if (!held.includes(ability)) state.lineApprovals[lineUuid] = [...held, ability];
+        }),
+
+    setScannerSource: (source) =>
+        set((state) => {
+            state.scannerSource = source;
         }),
 
 }));
