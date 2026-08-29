@@ -12,7 +12,12 @@ import { REGISTER_EVENTS, reverbConfig, sessionChannel } from './realtime';
 import { publishDisplay } from './domain/customer-display-bus';
 import { applySessionClosedBroadcast } from './domain/session-actions';
 import { canOpenOrder, foreignOrder } from './domain/foreign-order';
-import { fireCourseAndSend, sendToKitchen } from './domain/kitchen-send';
+import {
+    explicitReprint,
+    fireCourseAndSend,
+    sendToKitchen,
+    type SendCategoryCount,
+} from './domain/kitchen-send';
 import { splitRemainder } from './domain/split-order';
 import { cleanCourses, createOrder, markPrinted } from './domain/order-actions';
 import { print } from './domain/printing';
@@ -47,6 +52,29 @@ import { useTabRole } from './state/use-tab-role';
  * byte-identical for every tenant so the service worker can precache it, and a deep link into a
  * half-restored order is a worse experience than landing on the floor plan.
  */
+
+/** `1.5` prints as `1.5`, `2.000` as `2` — a weighed item keeps its decimals, a countable one does not. */
+function countText(count: number): string {
+    return Number.isInteger(count) ? String(count) : String(Number(count.toFixed(3)));
+}
+
+/**
+ * KDS-061 — "3 Plats · 2 Boissons" under the send confirmation.
+ *
+ * Returns a spread-able fragment rather than a string so an order with a single uncategorised line
+ * produces no second line at all: a toast that reads "Sent / 1 Other" is noise, and a toast with an
+ * empty body is a layout bug.
+ */
+function sentSummary(
+    summary: readonly SendCategoryCount[],
+    t: ReturnType<typeof useT>,
+): { message?: string } {
+    const message = summary
+        .map((entry) => `${countText(entry.count)} ${entry.name || t('reg.order.sentUncategorised')}`)
+        .join(' · ');
+
+    return message.length > 0 ? { message } : {};
+}
 
 export function App(): JSX.Element {
     const t = useT();
@@ -244,7 +272,7 @@ export function App(): JSX.Element {
             return false;
         }
         if (outcome.status === 'sent') {
-            toast.show({ tone: 'success', title: t('reg.order.sentOk') });
+            toast.show({ tone: 'success', title: t('reg.order.sentOk'), ...sentSummary(outcome.summary, t) });
         }
         return outcome.status === 'sent' || outcome.status === 'nothing';
     }, [openDialog, selectedOrderUuid, t, toast]);
@@ -258,11 +286,32 @@ export function App(): JSX.Element {
                 return;
             }
             if (outcome.status === 'sent') {
-                toast.show({ tone: 'success', title: t('reg.order.sentOk') });
+                toast.show({ tone: 'success', title: t('reg.order.sentOk'), ...sentSummary(outcome.summary, t) });
             }
         },
         [selectedOrderUuid, t, toast],
     );
+
+    /**
+     * KDS-059 — put the last kitchen ticket on paper again, and nothing else.
+     *
+     * Deliberately not routed through `onSend`: by the time a jam is noticed the delta has already
+     * been consumed, so a re-send would print an empty ticket, and a re-fire would tell the pass to
+     * cook a second time. The reprint replays the retained document.
+     */
+    const onReprintPrep = useCallback(async () => {
+        if (selectedOrderUuid === null) return;
+        const outcome = await explicitReprint(selectedOrderUuid);
+        if (outcome.status === 'nothing') {
+            toast.show({ tone: 'warn', title: t('reg.order.reprintNothing') });
+            return;
+        }
+        if (outcome.status === 'failed' || outcome.printed === 0) {
+            toast.show({ tone: 'danger', title: t('reg.order.reprintFailed') });
+            return;
+        }
+        toast.show({ tone: 'success', title: t('reg.order.reprintOk') });
+    }, [selectedOrderUuid, t, toast]);
 
     const onBill = useCallback(async () => {
         const runtime = tryRuntime();
@@ -367,6 +416,7 @@ export function App(): JSX.Element {
                         }}
                         onSend={() => void onSend()}
                         onFireCourse={(courseUuid) => void onFireCourse(courseUuid)}
+                        onReprintPrep={() => void onReprintPrep()}
                         onBill={() => void onBill()}
                         onSplit={() => setScreen('split')}
                         onTransfer={() => startTransfer(selectedOrderUuid)}

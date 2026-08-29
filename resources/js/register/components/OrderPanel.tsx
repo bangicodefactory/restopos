@@ -8,7 +8,7 @@ import { useCallback, useMemo } from 'react';
 import { tryRuntime } from '../data/runtime';
 import { useT } from '../i18n';
 import { fastPayVerdict, fastPaymentMethods } from '../domain/fast-payment';
-import { currentDelta } from '../domain/kitchen-send';
+import { currentDelta, hasReprintablePrep } from '../domain/kitchen-send';
 import {
     addCourse,
     addPayment,
@@ -47,6 +47,8 @@ export type OrderPanelProps = {
     onFastPaid: () => void;
     onSend: () => void;
     onFireCourse: (courseUuid: string) => void;
+    /** KDS-059 — reprint the last kitchen ticket, without recomputing or re-sending the delta. */
+    onReprintPrep: () => void;
     onBill: () => void;
     onSplit: () => void;
     onTransfer: () => void;
@@ -59,6 +61,7 @@ export function OrderPanel({
     onFastPaid,
     onSend,
     onFireCourse,
+    onReprintPrep,
     onBill,
     onSplit,
     onTransfer,
@@ -298,6 +301,28 @@ export function OrderPanel({
                         onClick={() => orderUuid !== null && addCourse(orderUuid)}
                     >
                         {t('reg.order.addCourse')}
+                    </Button>
+                ) : null}
+
+                {/*
+                 * KDS-059 — the printer jammed and the kitchen never got the paper.
+                 *
+                 * Disabled until this till has actually rendered a prep ticket for the order:
+                 * offering "reprint" for an order that was never sent promises the cashier a piece
+                 * of paper that does not exist. Read straight rather than memoised, because the
+                 * retention lives in module memory and a stale `false` here is a button that will
+                 * not work when it is needed.
+                 */}
+                {restaurant ? (
+                    <Button
+                        size="md"
+                        variant="secondary"
+                        className="mb-2 w-full"
+                        data-testid="reprint-prep"
+                        disabled={orderUuid === null || !hasReprintablePrep(orderUuid)}
+                        onClick={onReprintPrep}
+                    >
+                        {t('reg.order.reprintPrep')}
                     </Button>
                 ) : null}
 

@@ -2,7 +2,7 @@ import { cn } from '@shared/ui';
 import type { JSX, ReactNode } from 'react';
 
 import { SUPPORTED_LOCALES, useKdsI18n, useT, type Locale } from '../i18n';
-import type { BoardFilter } from '../logic/board';
+import { nextLayout, type BoardFilter, type BoardLayout } from '../logic/board';
 import { formatElapsed, type StationSummary } from '../logic/elapsed';
 import type { KitchenOrder } from '../types';
 
@@ -15,6 +15,13 @@ import type { KitchenOrder } from '../types';
  * of a knuckle.
  */
 
+/** The dictionary key naming each layout, so the toggle stays exhaustive as layouts are added. */
+const LAYOUT_KEY: Record<BoardLayout, 'kds.board.layoutColumns' | 'kds.board.layoutList' | 'kds.board.layoutGrid'> = {
+    columns: 'kds.board.layoutColumns',
+    list: 'kds.board.layoutList',
+    grid: 'kds.board.layoutGrid',
+};
+
 export type SummaryBarProps = {
     displayName: string;
     summary: StationSummary;
@@ -22,7 +29,7 @@ export type SummaryBarProps = {
     online: boolean;
     realtime: 'connected' | 'degraded' | 'off';
     muted: boolean;
-    layout: 'columns' | 'list';
+    layout: BoardLayout;
     locale: Locale;
     onToggleMute: () => void;
     onToggleLayout: () => void;
@@ -63,8 +70,13 @@ export function SummaryBar(props: SummaryBarProps): JSX.Element {
                     ))}
                 </select>
 
-                <ChromeButton onClick={props.onToggleLayout} label={t('kds.board.layoutColumns')}>
-                    {props.layout === 'columns' ? t('kds.board.layoutList') : t('kds.board.layoutColumns')}
+                {/*
+                 * The button names the layout it will switch *to*, and there are three of them now
+                 * (KDS-013). Two hard-coded labels in a ternary is what left `grid` with no way of
+                 * being reached from the screen even once the board could render it.
+                 */}
+                <ChromeButton onClick={props.onToggleLayout} label={t(LAYOUT_KEY[nextLayout(props.layout)])}>
+                    {t(LAYOUT_KEY[nextLayout(props.layout)])}
                 </ChromeButton>
 
                 <ChromeButton

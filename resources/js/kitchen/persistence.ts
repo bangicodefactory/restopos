@@ -3,6 +3,7 @@ import { META, getDb, getMeta, setMeta, type PosDb } from '@shared/db';
 import type { Locale } from '@shared/i18n';
 
 import type { PairResponse } from './api';
+import type { BoardLayout } from './logic/board';
 import type { KitchenBoardResponse, KitchenPairing, QueuedAction } from './types';
 
 /**
@@ -213,7 +214,7 @@ export type KitchenPrefs = {
     locale: Locale | null;
     muted: boolean;
     /** `null` follows the display's configured layout; anything else overrides it for this screen. */
-    layout: 'columns' | 'list' | null;
+    layout: BoardLayout | null;
     categoryIds: number[];
     lateOnly: boolean;
 };

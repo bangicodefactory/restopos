@@ -35,6 +35,11 @@ export default defineConfig({
             'resources/js/register/**/*.test.ts',
             'resources/js/register/**/*.test.tsx',
             'resources/js/kitchen/**/*.test.ts',
+            // `.tsx` alongside `.ts`, as every other app folder already has it. The kitchen entry
+            // listed only `.ts`, so a component test for the board would have been collected by
+            // nothing — the same "passes review by never running" trap as the service worker and
+            // the scripts/ entry above.
+            'resources/js/kitchen/**/*.test.tsx',
             'resources/js/selforder/**/*.test.ts',
             'resources/js/backoffice/**/*.test.ts',
             'resources/js/backoffice/**/*.test.tsx',

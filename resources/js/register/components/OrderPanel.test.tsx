@@ -56,6 +56,7 @@ function panel(props: Partial<Parameters<typeof OrderPanel>[0]> = {}) {
             onFastPaid={props.onFastPaid ?? vi.fn()}
             onSend={props.onSend ?? vi.fn()}
             onFireCourse={vi.fn()}
+            onReprintPrep={props.onReprintPrep ?? vi.fn()}
             onBill={vi.fn()}
             onSplit={vi.fn()}
             onTransfer={vi.fn()}
