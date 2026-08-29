@@ -195,6 +195,16 @@ export function reverbConfig(token: string | null): ReverbConfig | null {
     const key = str(env['VITE_REVERB_APP_KEY']);
     if (key === '') return null;
 
+    // No token, no realtime — and say so rather than pretending (BAN-402a).
+    //
+    // Every channel here is private, so `/broadcasting/auth` runs the device middleware and
+    // 401s without a bearer. `getEcho` freezes `auth.headers` at construction and caches the
+    // instance globally, so one call with a null token yields a socket that connects, reports
+    // `connected` from the *connection* state, and can never receive anything — a green badge
+    // over a channel that is structurally incapable of delivering. Returning null instead makes
+    // `useEcho` report `unavailable` and start the poll, which is the honest degradation.
+    if (token === null || token === '') return null;
+
     const scheme = str(env['VITE_REVERB_SCHEME']) === 'https' ? 'https' : 'http';
     const host = str(env['VITE_REVERB_HOST']) || globalThis.location?.hostname || 'localhost';
     const port = Number.parseInt(str(env['VITE_REVERB_PORT']) || '8080', 10);

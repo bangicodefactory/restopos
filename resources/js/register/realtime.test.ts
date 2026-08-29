@@ -11,6 +11,7 @@ import {
     emittedByDeviceUuid,
     isSelfEcho,
     realtimeBadge,
+    reverbConfig,
     sessionChannel,
     startDeltaScheduler,
 } from './realtime';
@@ -351,5 +352,30 @@ describe('the delta scheduler', () => {
         await vi.advanceTimersByTimeAsync(5000);
 
         expect(pulls).toBe(0);
+    });
+});
+
+describe('reverbConfig', () => {
+    // The guard that turns this failure from silent into visible.
+    //
+    // Every channel the register subscribes to is private, so `/broadcasting/auth` runs the device
+    // middleware and 401s without a bearer. `getEcho` freezes `auth.headers` at construction and
+    // caches the instance for the document, so a single call with a null token yields a socket that
+    // connects, reports `connected` from the *connection* state, and can never receive anything.
+    //
+    // This is exactly what master does: `App.tsx` read the token in a mount-time memo, and
+    // `main.tsx` renders before `boot()` has set the runtime. Refusing to build a config without a
+    // token makes `useEcho` report `unavailable` and start the poll instead.
+    it('refuses to configure a socket it cannot authenticate', () => {
+        expect(reverbConfig(null)).toBeNull();
+        expect(reverbConfig('')).toBeNull();
+    });
+
+    it('carries the device token when there is one', () => {
+        const config = reverbConfig('device-token');
+
+        expect(config).not.toBeNull();
+        expect(config?.token).toBe('device-token');
+        expect(config?.enabled).toBe(true);
     });
 });

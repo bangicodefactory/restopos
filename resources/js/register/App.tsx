@@ -110,8 +110,23 @@ export function App(): JSX.Element {
      * another till seated. Neither event is trusted as data: each one asks for a delta pull, and
      * the pull is what is authoritative.
      */
-    const reverb = useMemo(() => reverbConfig(tryRuntime()?.device?.token ?? null), []);
-    const deviceUuid = useMemo(() => tryRuntime()?.device?.info.uuid ?? null, []);
+    // Read every render, and memoised on the token itself rather than on `[]` (BAN-402a).
+    //
+    // `main.tsx` renders this component and only *then* calls `boot()`, which awaits twice
+    // before `setRuntime()`. So at first render `tryRuntime()` is null, and a mount-time memo
+    // baked `token: null` and `deviceUuid: null` in for the life of the tab. That is not
+    // hypothetical — it is what master does, and it is why the register has never actually
+    // received a broadcast: every channel is private, `/broadcasting/auth` 401s without a
+    // bearer, and `useEcho` still reported `connected` from the socket state.
+    //
+    // The runtime lands during boot, `phase` changes, this re-renders, and the token appears.
+    // Depending on the token rather than on a proxy signal keeps the dependency honest: it is
+    // the value the memo actually uses, so nobody can "tidy up an unnecessary dep" and
+    // silently restore the bug.
+    const device = tryRuntime()?.device ?? null;
+    const deviceToken = device?.token ?? null;
+    const deviceUuid = device?.info.uuid ?? null;
+    const reverb = useMemo(() => reverbConfig(deviceToken), [deviceToken]);
     const setRealtime = useSyncStore((state) => state.setRealtime);
 
     const sessionEvents = useMemo(
