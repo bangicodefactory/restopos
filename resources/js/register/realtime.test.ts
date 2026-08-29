@@ -356,6 +356,24 @@ describe('the delta scheduler', () => {
 });
 
 describe('reverbConfig', () => {
+    // The app key is stubbed rather than inherited from the environment. Without it CI — which
+    // has no Reverb key — returns null on the *key* check before reaching the token guard, so
+    // the refusal test passed for the wrong reason and the positive test failed outright. An
+    // assertion that depends on ambient config proves whatever that config happens to be.
+    beforeEach(() => {
+        vi.stubEnv('VITE_REVERB_APP_KEY', 'test-key');
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('has no realtime at all without an app key, whatever the token', () => {
+        vi.stubEnv('VITE_REVERB_APP_KEY', '');
+
+        expect(reverbConfig('device-token')).toBeNull();
+    });
+
     // The guard that turns this failure from silent into visible.
     //
     // Every channel the register subscribes to is private, so `/broadcasting/auth` runs the device
