@@ -43,7 +43,8 @@ use Illuminate\Support\Str;
  * it (spec §2.D).
  *
  * `access_token` doubles as the broadcast channel name
- * (`pos-config.{access_token}`) and as the self-order entry token (§6.6).
+ * (`pos.config.{access_token}` — the name `routes/channels.php` authorises and
+ * every `broadcastOn()` builds) and as the self-order entry token (§6.6).
  * `config_revision` is bumped whenever anything client-visible changes; a client
  * whose stored revision differs discards its cache and re-bootstraps (§5.5).
  */
@@ -401,11 +402,17 @@ class PosConfig extends Model
 
     // ----------------------------------------------------------------- helpers
 
-    /** Broadcast channel name for this register (spec §6.6). */
-    public function channelName(): string
-    {
-        return 'pos-config.'.$this->access_token;
-    }
+    /*
+     * `channelName()` used to live here, returning `pos-config.{access_token}` — a HYPHEN, against
+     * an authorizer and nine `broadcastOn()` calls that all say `pos.config.`. It matched nothing.
+     * Its only caller shipped it to every till as the bootstrap payload's `channel`, which no
+     * client has ever read, so the mismatch could not surface: a wrong name that is never
+     * subscribed with fails silently forever.
+     *
+     * Deleted rather than corrected. `access_token` is already on the register's config row, and a
+     * channel name built where it is subscribed with (`register/realtime.ts`) is one a test can
+     * catch; a second copy on the model is only somewhere for the two to drift apart again.
+     */
 
     public function hasOpenSession(): bool
     {

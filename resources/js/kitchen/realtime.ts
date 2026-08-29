@@ -4,10 +4,10 @@ import type { ReverbConfig } from '@shared/store';
  * Realtime wiring for the kitchen (KDS-015).
  *
  * The channel and event names come from `docs/spec/05-api-contract.md` §11.2 / §11.3, which is the
- * normative document. They deliberately differ from the helpers exported by `@shared/store`
- * (`channels.prepDisplay(id)` → `prep.display.{id}`, and no `kitchen.ticket.*` in the `events`
- * map) — that helper predates the contract. Coding against the contract is the rule; the drift is
- * reported, not worked around silently.
+ * normative document. `@shared/store` used to export `channels` / `events` helpers that disagreed
+ * with it; they had no callers and have been deleted rather than corrected, because a name map
+ * nobody imports is a name map nothing can prove right. Each app now declares its own beside the
+ * code that subscribes with it.
  *
  * `broadcastAs` names are prefixed with `.` when subscribing so Echo does not prepend the
  * application namespace.

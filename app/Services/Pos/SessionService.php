@@ -15,6 +15,7 @@ use App\Exceptions\Pos\RegisterNotReady;
 use App\Models\Identity\Employee;
 use App\Models\Pos\CashMovement;
 use App\Models\Pos\PosConfig;
+use App\Models\Pos\PosDevice;
 use App\Models\Pos\PosSession;
 use App\Models\Pos\SessionCashCount;
 use App\Services\Audit\AuditRecorder;
@@ -485,6 +486,11 @@ final readonly class SessionService
      * expected, refuse an over-threshold variance unless a manager approved it,
      * then freeze the summaries.
      *
+     * `$device` is the till that pressed the button, and it is stamped on the `SessionClosed`
+     * broadcast as `emitted_by_device_uuid` so its siblings can tell a peer's close from their own
+     * echo. Null is the honest answer for a back-office force-close: no device did it, and a
+     * subscriber that treats "unknown author" as "me" would ignore the very close it must react to.
+     *
      * @param  array<int, string>  $countedByMethod  payment_method_id => counted amount
      * @param  list<array{denomination_value: string|float, quantity: int, pos_bill_id?: int|null}>  $denominations
      */
@@ -500,6 +506,7 @@ final readonly class SessionService
         bool $force = false,
         ?int $approvedByEmployeeId = null,
         bool $abandon = false,
+        ?PosDevice $device = null,
     ): PosSession {
         if ($session->state === SessionState::Closed) {
             throw new DomainException('This session is already closed.');
@@ -523,7 +530,7 @@ final readonly class SessionService
         }
 
         return $this->connection->transaction(function () use (
-            $session, $countedCash, $countedByMethod, $denominations, $employeeId, $userId, $notes, $managerApproved, $force, $drafts, $approvedByEmployeeId
+            $session, $countedCash, $countedByMethod, $denominations, $employeeId, $userId, $notes, $managerApproved, $force, $drafts, $approvedByEmployeeId, $device
         ): PosSession {
             $expectedCash = $this->expectedCash($session);
             $counted = $countedCash ?? $expectedCash;
@@ -657,6 +664,7 @@ final readonly class SessionService
                     state: SessionState::Closed->value,
                     cashDifference: $difference,
                     totals: $totals,
+                    emittedByDeviceUuid: $device?->uuid,
                 ));
             }
 

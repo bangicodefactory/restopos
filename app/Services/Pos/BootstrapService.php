@@ -577,7 +577,6 @@ final readonly class BootstrapService
             ])
             ->values()
             ->all();
-        $row['channel'] = $config->channelName();
 
         // The house discount cap (BAN-518). It lives in `config/pos.php`, not on `pos_configs`, so
         // `attributesToArray()` above does not carry it — and without it the till has no idea when a

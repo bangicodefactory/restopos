@@ -179,24 +179,18 @@ export function usePollingFallback(degraded: boolean, poll: () => void, interval
     }, [degraded, intervalMs]);
 }
 
-/** Channel names, in one place so the server and the three clients cannot drift. */
-export const channels = {
-    config: (configId: number): string => `pos.config.${configId}`,
-    device: (deviceId: string): string => `pos.device.${deviceId}`,
-    session: (sessionId: number): string => `pos.session.${sessionId}`,
-    prepDisplay: (displayId: number): string => `prep.display.${displayId}`,
-    order: (uuid: string): string => `pos.order.${uuid}`,
-} as const;
-
-/** Event names broadcast by the server (spec 03 §5.4). */
-export const events = {
-    catalogChanged: '.catalog.changed',
-    orderUpdated: '.order.updated',
-    orderPaid: '.order.paid',
-    tableUpdated: '.table.updated',
-    prepOrderChanged: '.prep.order.changed',
-    deviceRevoked: '.device.revoked',
-    customerDisplayUpdate: '.customer_display.update',
-    paymentStatus: '.payment.status',
-    sessionClosed: '.session.closed',
-} as const;
+/*
+ * There were `channels` and `events` maps here, exported and unreferenced.
+ *
+ * Both were wrong, and being unreferenced is what let them stay wrong. `channels.config` built
+ * `pos.config.{numeric id}` while `routes/channels.php` authorises `pos.config.{configToken}` —
+ * the authorizer would have refused every subscription. `events.orderUpdated` was `.order.updated`
+ * while `OrderSynced::broadcastAs()` is `order.synced`, so a listener bound to it would have
+ * subscribed successfully and then never fired: the worst failure shape available, because the
+ * status badge says connected the whole time.
+ *
+ * They are not replaced by corrected versions. Each app already declares the names it uses beside
+ * the code that subscribes with them (`register/realtime.ts`, `kitchen/realtime.ts`,
+ * `selforder/realtime.ts`), which is the only arrangement where a wrong name is caught — by the
+ * test that exercises the subscription — rather than sitting in a shared file nobody imports.
+ */

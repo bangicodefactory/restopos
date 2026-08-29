@@ -11,6 +11,7 @@ use App\Events\Pos\SessionClosed;
 use App\Events\Restaurant\TableStateChanged;
 use App\Models\Pos\PosDevice;
 use App\Services\Device\DeviceTokenService;
+use App\Services\Pos\SessionService;
 use Illuminate\Broadcasting\Broadcasters\Broadcaster;
 use Illuminate\Contracts\Broadcasting\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -73,6 +74,96 @@ it('broadcasts table.state on both the config and the table channel', function (
 
         return in_array('private-pos.config.'.$this->fx->config->access_token, $channels, true)
             && in_array('private-pos.table.'.$e->tableId, $channels, true);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Provenance (BAN-402)
+|--------------------------------------------------------------------------
+|
+| `OrderSynced` and `OrderStateChanged` have always carried the emitting
+| device. `SessionClosed` and `TableStateChanged` were dispatched with the
+| argument simply omitted, so they defaulted to null on the wire — and a
+| subscriber cannot suppress its own echo against a field that is always null.
+| It could only choose between re-pulling its own writes and hearing nothing.
+|
+*/
+
+it('stamps the moving till on table.state so a peer can tell it from its own echo', function (): void {
+    Event::fake([TableStateChanged::class]);
+
+    $uuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['table_id' => $this->fx->tableOne->getKey()])],
+    ])->assertOk();
+
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/orders/{$uuid}/transfer", ['table_id' => $this->fx->tableTwo->getKey()])
+        ->assertOk();
+
+    Event::assertDispatched(TableStateChanged::class, function (TableStateChanged $e): bool {
+        return $e->emittedByDeviceUuid === $this->fx->device->uuid;
+    });
+
+    // …and on the wire, which is the only thing the register ever sees.
+    Event::assertDispatched(TableStateChanged::class, function (TableStateChanged $e): bool {
+        return $e->broadcastWith()['emitted_by_device_uuid'] === $this->fx->device->uuid;
+    });
+});
+
+it('stamps the guest-count change too, not only the transfer', function (): void {
+    Event::fake([TableStateChanged::class]);
+
+    $uuid = (string) Str::uuid();
+
+    $this->withHeaders($this->fx->headers())->postJson('/api/pos/sync', [
+        'orders' => [$this->fx->orderCommand($uuid, [], ['table_id' => $this->fx->tableOne->getKey()])],
+    ])->assertOk();
+
+    Event::fake([TableStateChanged::class]);
+
+    $this->withHeaders($this->fx->headers())
+        ->patchJson("/api/pos/orders/{$uuid}/guests", ['guest_count' => 4])
+        ->assertOk();
+
+    Event::assertDispatched(TableStateChanged::class, function (TableStateChanged $e): bool {
+        return $e->emittedByDeviceUuid === $this->fx->device->uuid;
+    });
+});
+
+it('stamps the closing till on session.closed', function (): void {
+    Event::fake([SessionClosed::class]);
+
+    $id = $this->fx->session->getKey();
+
+    $this->withHeaders($this->fx->headers())
+        ->postJson("/api/pos/sessions/{$id}/close", ['counted_cash' => '0'])
+        ->assertOk();
+
+    Event::assertDispatched(SessionClosed::class, function (SessionClosed $e): bool {
+        return $e->emittedByDeviceUuid === $this->fx->device->uuid
+            && $e->broadcastWith()['emitted_by_device_uuid'] === $this->fx->device->uuid;
+    });
+});
+
+it('leaves session.closed unattributed when no device closed it', function (): void {
+    // A back-office force-close. Null is the honest answer, and it matters: a subscriber that read
+    // null as "mine" would ignore the close and keep trading into frozen summaries.
+    Event::fake([SessionClosed::class]);
+
+    app(SessionService::class)->close(
+        session: $this->fx->session,
+        countedCash: '0',
+        managerApproved: true,
+        force: true,
+        abandon: true,
+    );
+
+    Event::assertDispatched(SessionClosed::class, function (SessionClosed $e): bool {
+        return $e->emittedByDeviceUuid === null
+            && $e->broadcastWith()['emitted_by_device_uuid'] === null;
     });
 });
 

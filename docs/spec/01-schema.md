@@ -3197,11 +3197,18 @@ the server id); master data is keyed by id.
   fiscal record.
 
 ### 6.6 Broadcast (no tables, but it shapes the schema)
-Channel names derive from tokens already in the schema, so no extra state is needed:
-- `pos-config.{pos_configs.access_token}` — `order.synced`, `order.removed`, `session.closing`,
-  `customer_display.update`, `product.changed` (fan-out includes `pos_config_trusted_config` peers).
-- `pos-order.{pos_orders.access_token}` — self-order status, payment result.
-- `prep-display.{prep_displays.access_token}` — KDS board events.
+Channel names derive from tokens already in the schema, so no extra state is needed. The names below
+are the ones `routes/channels.php` authorises and every `broadcastOn()` builds — dots throughout, no
+hyphens:
+- `pos.config.{pos_configs.access_token}` — `order.synced`, `order.state`, `session.closed`,
+  `table.state`, `catalog.changed` (fan-out includes `pos_config_trusted_config` peers).
+- `pos.session.{pos_sessions.id}` — `session.closed`, for the tills trading in one session.
+- `pos.order.{pos_orders.access_token}` — self-order status, payment result.
+- `kitchen.display.{prep_displays.access_token}` — KDS board events.
+
+Every payload on these channels carries `emitted_by_device_uuid` (`pos_devices.uuid`, null when no
+device performed the act). A subscriber suppresses only an exact match against its own uuid: an
+unattributed event is somebody else's and must be pulled.
 Payloads carry **ids/uuids only** where trust matters (mirroring Odoo's
 `ONLINE_PAYMENTS_NOTIFICATION` design); the client re-fetches authoritative data over HTTP.
 
