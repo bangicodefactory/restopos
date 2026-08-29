@@ -78,6 +78,10 @@ function paymentCommand(payment: PaymentRow): RecordCommand<PaymentRow> {
         card_last4: payment.card_last4,
         auth_code: payment.auth_code,
         transaction_reference: payment.transaction_reference,
+        // REG-213 — the merchant slip the driver handed back. Without it on the command the slip
+        // exists only in this device's IndexedDB: it never reaches the server, so it cannot come
+        // back on a reprint from another till and it is lost with the browser profile.
+        terminal_ticket: payment.terminal_ticket,
     };
 }
 

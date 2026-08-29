@@ -2536,6 +2536,10 @@ final readonly class OrderSyncService
                     'auth_code' => $command['auth_code'] ?? null,
                     'transaction_reference' => $command['transaction_reference'] ?? null,
                     'entry_mode' => $command['entry_mode'] ?? null,
+                    // REG-213 — the device's merchant slip. The column, the model's `$fillable` and
+                    // the register's `PaymentRow` all carried it and no writer ever set it, so the
+                    // slip stopped at the till and the receipt could never reprint it.
+                    'terminal_ticket' => $command['terminal_ticket'] ?? null,
                 ], static fn ($v): bool => $v !== null),
                 (array) ($command['terminal'] ?? []),
             );
@@ -2587,6 +2591,7 @@ final readonly class OrderSyncService
                 'auth_code' => $terminal['auth_code'] ?? null,
                 'transaction_reference' => $terminal['transaction_reference'] ?? null,
                 'entry_mode' => $terminal['entry_mode'] ?? null,
+                'terminal_ticket' => $terminal['terminal_ticket'] ?? null,
                 'terminal_payload' => $terminal === [] ? null : $terminal,
             ]);
 
