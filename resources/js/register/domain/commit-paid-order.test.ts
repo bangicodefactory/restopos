@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 import { installCatalog, makeProduct, makeVariant, resetRegisterState } from './__fixtures__/catalog';
 import { addLine, commitPaidOrder, createOrder } from './order-actions';
+import { useSyncStore } from '../state/boot-store';
 import { useOrderStore } from '../state/order-store';
 
 /**
@@ -73,4 +74,50 @@ it('still validates when no runtime is available', async () => {
 
     expect(flushed).toBe(true);
     expect(useOrderStore.getState().orders[orderUuid]?.state).toBe('paid');
+});
+
+/*
+| BAN-402 — the same window, seen by the delta scheduler.
+|
+| The periodic pull defers while a payment is in flight, because a delta landing between "paid" and
+| "flushed" rewrites the very rows this function is persisting. That only works if the flag is
+| actually raised for the whole window and actually lowered afterwards, including when the flush
+| throws — a flag left raised stops the till pulling deltas for the rest of the shift.
+*/
+
+it('raises the payment-in-flight flag for the whole durability window', async () => {
+    const seen: boolean[] = [];
+    const durability = {
+        flushNow: vi.fn(async () => {
+            seen.push(useSyncStore.getState().paymentInFlight);
+            return true;
+        }),
+        drain: vi.fn(async () => {
+            seen.push(useSyncStore.getState().paymentInFlight);
+        }),
+    };
+
+    const orderUuid = await createOrder({ tableId: 1 });
+    addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+    expect(useSyncStore.getState().paymentInFlight).toBe(false);
+    await commitPaidOrder(orderUuid, durability);
+
+    expect(seen).toEqual([true, true]);
+    expect(useSyncStore.getState().paymentInFlight).toBe(false);
+});
+
+it('lowers the flag even when the flush throws', async () => {
+    const durability = {
+        flushNow: vi.fn(async () => {
+            throw new Error('quota exceeded');
+        }),
+        drain: vi.fn(async () => {}),
+    };
+
+    const orderUuid = await createOrder({ tableId: 1 });
+    addLine({ orderUuid, variantId: PIZZA, quantity: 1 });
+
+    await expect(commitPaidOrder(orderUuid, durability)).rejects.toThrow('quota exceeded');
+    expect(useSyncStore.getState().paymentInFlight).toBe(false);
 });
