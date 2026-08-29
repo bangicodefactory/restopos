@@ -251,6 +251,22 @@ describe('payments', () => {
         expect(totals).toMatchObject({ paid: '10.00', due: '2.00', change: '0.00' });
     });
 
+    it('stops counting a payment the terminal reversed', () => {
+        // The money went back to the customer. A reversed card payment that still counted as
+        // settled would leave the order reading fully paid with nothing behind it — the till hands
+        // over the goods and the day balances short.
+        const payments = [
+            makePayment({ amount: '10.00' }),
+            makePayment({ amount: '4.00', payment_status: 'reversed' }),
+        ];
+
+        expect(settledPayments(payments)).toHaveLength(1);
+
+        const totals = totalsOf([makeLine({ tax_ids: [], price_unit: '12.00' })], {}, makeOrder(), payments);
+
+        expect(totals).toMatchObject({ paid: '10.00', due: '2.00' });
+    });
+
     it('reports change once the customer has overpaid', () => {
         const totals = totalsOf(
             [makeLine({ tax_ids: [EXCLUDED.id], price_unit: '10.00' })],

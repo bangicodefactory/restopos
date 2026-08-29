@@ -35,6 +35,11 @@ final class OrderPaymentResource extends JsonResource
             'card_last4' => $payment->card_last4,
             'auth_code' => $payment->auth_code,
             'transaction_reference' => $payment->transaction_reference,
+            // REG-213 — the terminal's own merchant slip, which the receipt has to be able to
+            // reprint. `order-lookup.ts` has always read this field back into the register's
+            // replica; until it was emitted here that read resolved to null on every order that
+            // came back from the server, so a reprint could never carry the slip.
+            'terminal_ticket' => $payment->terminal_ticket,
         ];
     }
 }

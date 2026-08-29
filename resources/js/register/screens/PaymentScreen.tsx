@@ -7,7 +7,14 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { tryRuntime } from '../data/runtime';
-import { cancelOnTerminal } from '../domain/terminal';
+import {
+    cancelOnTerminal,
+    hasTerminalDriver,
+    requestTerminalCancel,
+    reverseOnTerminal,
+    sendToTerminal,
+    terminalStatus,
+} from '../domain/terminal';
 import { getCatalog } from '../data/catalog';
 import { useT } from '../i18n';
 import type { RegisterKey } from '../i18n';
@@ -57,6 +64,14 @@ import type { PrecheckBlock } from './payment-prechecks';
  *  - **A live authorisation is cancelled on the terminal before its line may go** (REG-212).
  *    Deleting the row used to be local-only, which reads as "the terminal was told" while a real
  *    capture stays live and the customer is charged for a payment the register thinks it cancelled.
+ *  - **The terminal buttons go through the registry, not through a local status string** (REG-210).
+ *    They used to call `setPaymentStatus(uuid, status)` and nothing else, so "Send to the terminal"
+ *    wrote `pending` — the line then said "Waiting for the terminal…" with nothing sent anywhere,
+ *    and the cashier watched a card being taken that was not. What renders now depends on whether a
+ *    driver is registered for the method: with one, the terminal's own answer decides and carries
+ *    its metadata back with it; without one there is no Send button at all, because there is nothing
+ *    to send to, and the cashier's Force / Cancel remain the honest local attestations they always
+ *    were.
  */
 
 /** Stable empty array so the mount-cleanup effect does not re-run on every render. */
@@ -107,8 +122,13 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     const [buffer, setBuffer] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [pendingOverpay, setPendingOverpay] = useState(false);
-    /** A terminal cancel in flight. Re-tapping would send a second reversal for one authorisation. */
-    const [cancelling, setCancelling] = useState<string | null>(null);
+    /**
+     * A terminal operation in flight, by payment uuid.
+     *
+     * One lock for every verb, not one per button: re-tapping while a send is out sends a second
+     * sale for one tender, and re-tapping a cancel sends a second reversal for one authorisation.
+     */
+    const [busy, setBusy] = useState<string | null>(null);
 
     const methods = catalog.paymentMethods.filter((method) =>
         (catalog.config?.payment_method_ids ?? []).includes(method.id),
@@ -186,7 +206,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
      */
     const removeLine = useCallback(
         async (payment: PaymentRow) => {
-            if (cancelling !== null) return;
+            if (busy !== null) return;
 
             setError(null);
 
@@ -194,7 +214,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                 (candidate) => candidate.id === payment.payment_method_id,
             );
 
-            setCancelling(payment.uuid);
+            setBusy(payment.uuid);
 
             try {
                 const cancelled = await cancelOnTerminal(payment, method);
@@ -208,10 +228,69 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                 removePayment(payment.uuid);
                 setSelectedPayment((current) => (current === payment.uuid ? null : current));
             } finally {
-                setCancelling(null);
+                setBusy(null);
             }
         },
-        [cancelling, catalog.paymentMethods, t],
+        [busy, catalog.paymentMethods, t],
+    );
+
+    /**
+     * REG-210 — the terminal buttons, routed through the driver registry.
+     *
+     * `force` is the one verb that never reaches a driver: it is the cashier asserting that the
+     * device took the money when the register could not be told, and it only renders where there is
+     * no driver to ask. Every other verb takes the terminal's own answer — including the metadata,
+     * which is why `setPaymentStatus` is finally called with its third argument. That argument has
+     * existed since the row was declared and until now was passed by exactly one unit test, so a
+     * card brand, an auth code and a merchant slip were fields the register could hold and never
+     * filled in.
+     */
+    const runTerminal = useCallback(
+        async (payment: PaymentRow, verb: TerminalVerb) => {
+            // Belt and braces, and knowingly so: every button that can reach here carries
+            // `disabled={busy}`, and React does not dispatch onClick on a disabled button, so this
+            // line is not reachable by tapping. A mutation sweep confirmed it — deleting it fails
+            // nothing. It stays because the `disabled` prop is a rendering decision that a future
+            // button can forget, and because `removeLine` above guards the same way; the cost of
+            // the double-send it prevents is a customer charged twice for one tender.
+            if (busy !== null) return;
+
+            setError(null);
+
+            const method = catalog.paymentMethods.find(
+                (candidate) => candidate.id === payment.payment_method_id,
+            );
+
+            if (verb === 'force') {
+                setPaymentStatus(payment.uuid, 'done');
+
+                return;
+            }
+
+            setBusy(payment.uuid);
+
+            try {
+                const result =
+                    verb === 'send'
+                        ? await sendToTerminal(payment, method, order)
+                        : verb === 'cancel'
+                          ? await requestTerminalCancel(payment, method)
+                          : verb === 'reverse'
+                            ? await reverseOnTerminal(payment, method)
+                            : await terminalStatus(payment, method);
+
+                if (!result.ok) {
+                    setError(t(result.reason));
+
+                    return;
+                }
+
+                setPaymentStatus(payment.uuid, result.status, result.metadata);
+            } finally {
+                setBusy(null);
+            }
+        },
+        [busy, catalog.paymentMethods, order, t],
     );
 
     const applyBuffer = useCallback(
@@ -371,13 +450,17 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                                 setSelectedPayment(payment.uuid);
                                 setBuffer('');
                             }}
-                            frozen={frozen || cancelling !== null}
+                            frozen={frozen || busy !== null}
+                            busy={busy === payment.uuid}
                             onRemove={() => void removeLine(payment)}
-                            onTerminal={(status) => setPaymentStatus(payment.uuid, status)}
+                            onTerminal={(verb) => void runTerminal(payment, verb)}
                             terminal={
                                 catalog.paymentMethods.find((method) => method.id === payment.payment_method_id)
                                     ?.method_type === 'card_terminal'
                             }
+                            hasDriver={hasTerminalDriver(
+                                catalog.paymentMethods.find((method) => method.id === payment.payment_method_id),
+                            )}
                         />
                     ))}
                 </ul>
@@ -406,6 +489,7 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
                             key={`${amount}-${index}`}
                             size="md"
                             variant="secondary"
+                            data-testid="quick-amount"
                             disabled={selectedPayment === null || frozen}
                             onClick={() => applyBuffer(amount)}
                         >
@@ -456,6 +540,15 @@ export function PaymentScreen({ orderUuid, onValidated, onBack }: PaymentScreenP
     );
 }
 
+/**
+ * What the cashier can ask of a terminal line.
+ *
+ * `force` is not a terminal operation and never reaches a driver — it is the cashier stating that
+ * the device took the money. It is listed here because it is one of the buttons, and keeping it out
+ * of the union would only mean a second handler that does the same dispatch.
+ */
+type TerminalVerb = 'send' | 'cancel' | 'reverse' | 'status' | 'force';
+
 function PaymentLine({
     payment,
     label,
@@ -465,6 +558,8 @@ function PaymentLine({
     onRemove,
     onTerminal,
     terminal,
+    hasDriver,
+    busy,
     frozen,
 }: {
     payment: PaymentRow;
@@ -473,12 +568,21 @@ function PaymentLine({
     amount: string;
     onSelect: () => void;
     onRemove: () => void;
-    onTerminal: (status: PaymentRow['payment_status']) => void;
+    onTerminal: (verb: TerminalVerb) => void;
     terminal: boolean;
+    /** Is a driver registered for this line's method? Decides which buttons are honest. */
+    hasDriver: boolean;
+    /** Is this line's own terminal operation still out? */
+    busy: boolean;
     frozen: boolean;
 }): JSX.Element {
     const t = useT();
-    const pending = payment.payment_status === 'pending';
+    const status = payment.payment_status;
+    const pending = status === 'pending';
+    // "Waiting" now means one of two true things: an operation is genuinely out to a driver, or the
+    // row arrived already pending. Nothing on this screen can put a line into `pending` without
+    // having sent it any more, which is what the label used to claim falsely.
+    const waiting = busy || pending;
 
     return (
         <li
@@ -487,10 +591,15 @@ function PaymentLine({
                 selected && 'ring-2 ring-brand-500',
             )}
         >
-            <button type="button" className="min-w-0 flex-1 text-start" onClick={onSelect}>
+            <button
+                type="button"
+                className="min-w-0 flex-1 text-start"
+                data-testid="payment-select"
+                onClick={onSelect}
+            >
                 <span className="block font-semibold">{label}</span>
-                <span className="block text-sm text-slate-500">
-                    {pending ? t('reg.pay.terminalWaiting') : payment.payment_status}
+                <span className="block text-sm text-slate-500" data-testid="payment-status">
+                    {waiting ? t('reg.pay.terminalWaiting') : status}
                 </span>
             </button>
 
@@ -498,19 +607,86 @@ function PaymentLine({
 
             {terminal ? (
                 <div className="flex flex-col gap-1">
-                    <Button size="sm" variant="secondary" onClick={() => onTerminal('pending')}>
-                        {t('reg.pay.terminalSend')}
-                    </Button>
-                    {pending ? (
+                    {hasDriver ? (
                         <>
-                            <Button size="sm" variant="success" onClick={() => onTerminal('done')}>
-                                {t('reg.pay.terminalForce')}
-                            </Button>
-                            <Button size="sm" variant="danger" onClick={() => onTerminal('cancelled')}>
-                                {t('reg.pay.terminalCancel')}
-                            </Button>
+                            {/* Nothing to send for a capture, and re-sending an authorisation the
+                                terminal is already holding would present a second sale. */}
+                            {status === 'done' || status === 'authorized' ? null : (
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={busy}
+                                    data-testid="terminal-send"
+                                    onClick={() => onTerminal('send')}
+                                >
+                                    {t('reg.pay.terminalSend')}
+                                </Button>
+                            )}
+                            {status === 'pending' || status === 'authorized' ? (
+                                <>
+                                    {/* The way out of "the customer says it went through": ask the
+                                        device rather than guess, which is what Force is. */}
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={busy}
+                                        data-testid="terminal-status"
+                                        onClick={() => onTerminal('status')}
+                                    >
+                                        {t('reg.pay.terminalAsk')}
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="danger"
+                                        disabled={busy}
+                                        data-testid="terminal-cancel"
+                                        onClick={() => onTerminal('cancel')}
+                                    >
+                                        {t('reg.pay.terminalCancel')}
+                                    </Button>
+                                </>
+                            ) : null}
+                            {status === 'done' ? (
+                                <Button
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={busy}
+                                    data-testid="terminal-reverse"
+                                    onClick={() => onTerminal('reverse')}
+                                >
+                                    {t('reg.pay.terminalReverse')}
+                                </Button>
+                            ) : null}
                         </>
-                    ) : null}
+                    ) : (
+                        /* No driver: the cashier is the driver. There is no Send, because there is
+                           nothing to send to — only the two attestations of what they did on the
+                           device themselves, and each renders only where it would change anything. */
+                        <>
+                            {status === 'done' ? null : (
+                                <Button
+                                    size="sm"
+                                    variant="success"
+                                    disabled={busy}
+                                    data-testid="terminal-force"
+                                    onClick={() => onTerminal('force')}
+                                >
+                                    {t('reg.pay.terminalForce')}
+                                </Button>
+                            )}
+                            {status === 'cancelled' ? null : (
+                                <Button
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={busy}
+                                    data-testid="terminal-cancel"
+                                    onClick={() => onTerminal('cancel')}
+                                >
+                                    {t('reg.pay.terminalCancel')}
+                                </Button>
+                            )}
+                        </>
+                    )}
                 </div>
             ) : null}
 

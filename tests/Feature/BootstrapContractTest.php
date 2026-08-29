@@ -248,6 +248,89 @@ it('lets a nested terminal object win over the flat card fields on overlap', fun
         ->and($payment->auth_code)->toBe('FLAT01');
 });
 
+// ── (g) the merchant slip — a field with a reader, a column and no writer (BAN-414) ──
+//
+// The ninth instance of this file's failure, and the longest: `terminal_ticket` is a column, is in
+// the model's `$fillable`, is declared on `PaymentRow`, and is read straight back into the register's
+// replica at `order-lookup.ts:361`. Between those two ends there was nothing at all — the register's
+// payment command did not send it, OrderSyncService did not persist it, and OrderPaymentResource did
+// not emit it. So the read resolved to null on every order that had ever been near the server, and
+// REG-213's "the terminal's own ticket text is printed on the customer receipt" could not happen.
+
+it('carries the terminal ticket all the way from the register command back onto the resource', function (): void {
+    $uuid = (string) Str::uuid();
+    $slip = "MERCHANT COPY\nVISA ****4242\nAUTH A12345\nAPPROVED";
+
+    pushOrders([orderOnSession($uuid, ['state' => 'paid'], [[
+        'op' => 'create',
+        'uuid' => (string) Str::uuid(),
+        'payment_method_id' => $this->fx->card->getKey(),
+        'amount' => '24.20',
+        'payment_status' => 'done',
+        'card_last4' => '4242',
+        'terminal_ticket' => $slip,
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $order = Order::query()->where('uuid', $uuid)->firstOrFail();
+    $payment = Payment::query()->where('pos_order_id', $order->getKey())->firstOrFail();
+
+    // Persisted…
+    expect($payment->terminal_ticket)->toBe($slip);
+
+    // …and handed back, which is the half that was missing. Asserted through the real endpoint
+    // rather than the resource in isolation: the client reads it off this payload.
+    $this->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/orders/{$uuid}")
+        ->assertOk()
+        ->assertJsonPath('payments.0.terminal_ticket', $slip);
+});
+
+it('accepts the slip nested under `terminal` like every other field on that object', function (): void {
+    $uuid = (string) Str::uuid();
+
+    pushOrders([orderOnSession($uuid, ['state' => 'paid'], [[
+        'op' => 'create',
+        'uuid' => (string) Str::uuid(),
+        'payment_method_id' => $this->fx->card->getKey(),
+        'amount' => '24.20',
+        'payment_status' => 'done',
+        'terminal' => ['terminal_ticket' => 'NESTED SLIP'],
+    ]])])->assertOk()->assertJsonPath('results.0.status', 'ok');
+
+    $payment = Payment::query()
+        ->where('pos_order_id', Order::query()->where('uuid', $uuid)->value('id'))
+        ->firstOrFail();
+
+    expect($payment->terminal_ticket)->toBe('NESTED SLIP');
+});
+
+it('leaves the slip null when the terminal did not hand one back', function (): void {
+    // The control. A cash sale must not acquire an empty-string slip that a receipt would then
+    // print a blank block for.
+    $uuid = (string) Str::uuid();
+
+    pushOrders([orderOnSession($uuid, ['state' => 'paid'], [[
+        'op' => 'create',
+        'uuid' => (string) Str::uuid(),
+        'payment_method_id' => $this->fx->card->getKey(),
+        'amount' => '24.20',
+        'payment_status' => 'done',
+    ]])])->assertOk();
+
+    $payment = $this->withHeaders($this->fx->headers())
+        ->getJson("/api/pos/orders/{$uuid}")
+        ->assertOk()
+        ->json('payments.0');
+
+    // `assertJsonPath(..., null)` would NOT do here: a missing key resolves to null through
+    // `data_get`, so it passes just as happily with the resource emitting no `terminal_ticket`
+    // at all — which is the exact defect this section exists to catch. The key has to be
+    // present AND null: the register reads it back into the replica unconditionally
+    // (order-lookup.ts:361), so an absent key and a null one are different bugs.
+    expect($payment)->toHaveKey('terminal_ticket')
+        ->and($payment['terminal_ticket'])->toBeNull();
+});
+
 // ── (h) printers — the register reads a shape the bootstrap had never sent (BAN-426) ──
 //
 // The eighth instance of exactly the failure this file was opened for, and the worst of them,

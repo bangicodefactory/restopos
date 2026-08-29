@@ -92,12 +92,24 @@ export function buildOrderInput(
     };
 }
 
-/** Payments that count towards `amount_paid`: the change line never does (REG-204). */
+/**
+ * Payments that count towards `amount_paid`: the change line never does (REG-204).
+ *
+ * `reversed` is excluded (BAN-414a). The money went back to the customer, so a reversed card
+ * payment that still counted as settled would leave the order reading fully paid with nothing
+ * behind it — the till would hand over the goods and the day would balance short.
+ *
+ * This was latent rather than wrong before: `reversed` is a long-standing `PaymentStatus` case that
+ * nothing in the register could produce. The terminal `reverse` verb is what makes it reachable, so
+ * it is fixed in the same change that arms it. `OrderSyncService::paymentTotals` excludes it too —
+ * the server total wins on sync, so a client-only fix would have been overwritten by the next pull.
+ */
 export function settledPayments(payments: readonly PaymentRow[]): PaymentRow[] {
     return payments.filter(
         (payment) =>
             !payment.is_change &&
             payment.payment_status !== 'failed' &&
+            payment.payment_status !== 'reversed' &&
             payment.payment_status !== 'cancelled',
     );
 }

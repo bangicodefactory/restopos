@@ -12,6 +12,7 @@ features:
   - REG-208
   - REG-209
   - REG-212
+  - REG-213
   - REG-216
   - REG-217
   - REG-218
@@ -155,6 +156,29 @@ deleted — the till has no way to know whether the terminal took the money.
 
 **Cancel it on the terminal first**, then mark the line cancelled here. The delete goes through once
 the line says it took nothing.
+
+## Giving a card payment back
+
+Once the terminal has actually taken the money, cancelling is no longer the right word — that
+payment has to be **reversed**, which sends the money back to the card.
+
+The till offers **Reverse** on a card line the terminal has completed. It does not offer it on one
+still waiting: that one is cancelled, not reversed, and reversing an authorisation nobody captured
+would return money that was never taken.
+
+A reversed payment stops counting towards what the order has been paid, so the bill goes back to
+showing what is still owed. The line stays on the order rather than disappearing — the reversal is
+part of what happened, and the receipt has to be able to show it.
+
+## What the terminal writes on the payment
+
+When a card payment goes through a terminal, the till keeps what the terminal reported: the card
+brand, the last four digits, the authorisation code, the transaction reference, and the merchant
+slip text.
+
+That is what lets a manager answer "which card was this?" from the back office weeks later without
+the paper. If your terminal is not integrated, these are simply empty and the payment still works —
+the cashier types the amount and the terminal is operated by hand.
 
 ## A payment method that has been removed
 
