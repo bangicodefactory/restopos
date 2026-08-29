@@ -26,7 +26,7 @@ export type AddDecision =
     | { kind: 'combo'; productId: number }
     | { kind: 'scale'; variantId: number }
     | { kind: 'openPrice'; variantId: number }
-    | { kind: 'blocked'; reason: 'refund_order' | 'no_variant' };
+    | { kind: 'blocked'; reason: 'refund_order' | 'no_variant' | 'incomplete_options' };
 
 export function decideAdd(product: ProductRow, orderUuid: string | null): AddDecision {
     const catalog = getCatalog();
@@ -38,8 +38,32 @@ export function decideAdd(product: ProductRow, orderUuid: string | null): AddDec
     const variant = catalog.defaultVariantByProduct.get(product.id);
     if (!variant) return { kind: 'blocked', reason: 'no_variant' };
 
-    if (product.combo_count > 0) return { kind: 'combo', productId: product.id };
-    if (product.attribute_count > 0) return { kind: 'variant', productId: product.id };
+    // A product can reach the grid without the data its configurator needs (BAN-421a). The lazy
+    // scan-miss fetch returns products and variants only — no attribute lines, no combos — so a
+    // configurable product pulled in that way is browsable and tappable with nothing behind it.
+    //
+    // Left unchecked the dialog opens empty, `missing` is empty because `lines` is empty, so the
+    // Add button is enabled, and `matchVariant(productId, [])` falls through to the default
+    // variant: the wrong SKU at the wrong price on the customer's bill and the wrong ticket in
+    // the kitchen. Refuse instead — the same call as `no_variant` above, and the same reason.
+    //
+    // Scanning such a product is unaffected: `routeScan` resolves a barcode to a variant and
+    // `applyScan` adds that variant directly, never coming through here.
+    if (product.combo_count > 0) {
+        // Per product, not a global count: a venue with other combos would otherwise let a
+        // lazily fetched one straight through, which is the case this guard is for.
+        const resolvable = product.combo_ids.filter((id) => catalog.combosById.has(id));
+        if (resolvable.length === 0) return { kind: 'blocked', reason: 'incomplete_options' };
+
+        return { kind: 'combo', productId: product.id };
+    }
+
+    if (product.attribute_count > 0) {
+        const lines = catalog.attributeLinesByProduct.get(product.id) ?? [];
+        if (lines.length === 0) return { kind: 'blocked', reason: 'incomplete_options' };
+
+        return { kind: 'variant', productId: product.id };
+    }
     if (product.to_weight) return { kind: 'scale', variantId: variant.id };
     if (product.special_kind === 'deposit' || product.list_price === '0')
         return { kind: 'openPrice', variantId: variant.id };

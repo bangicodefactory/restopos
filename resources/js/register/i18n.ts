@@ -110,6 +110,8 @@ export const registerEn = {
     'reg.products.reference': 'Reference',
     'reg.products.barcode': 'Barcode',
     'reg.products.unknownBarcode': 'Unknown barcode: {code}',
+    'reg.products.optionsUnavailable':
+        'This product needs its options chosen, and they have not been downloaded to this till. Search for it in the catalogue, or scan its barcode.',
     'reg.products.scanOffline': 'Unknown product — connect to look it up.',
     'reg.products.scanCamera': 'Scan with the camera',
     'reg.products.scanCameraPreview': 'Camera scanner',
@@ -545,6 +547,8 @@ export const registerFr: Record<RegisterKey, string> = {
     'reg.products.reference': 'Référence',
     'reg.products.barcode': 'Code-barres',
     'reg.products.unknownBarcode': 'Code-barres inconnu : {code}',
+    'reg.products.optionsUnavailable':
+        'Ce produit demande de choisir des options, et elles ne sont pas descendues sur cette caisse. Cherchez-le dans le catalogue, ou scannez son code-barres.',
     'reg.products.scanOffline': 'Produit inconnu — connectez-vous pour le rechercher.',
     'reg.products.scanCamera': 'Scanner avec la caméra',
     'reg.products.scanCameraPreview': 'Scanner caméra',

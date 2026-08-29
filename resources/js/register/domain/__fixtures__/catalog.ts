@@ -12,6 +12,9 @@ import type {
     PosPresetRow,
     RestaurantFloorRow,
     RestaurantTableRow,
+    ComboItemRow,
+    ComboRow,
+    ProductAttributeLineRow,
     ProductAttributeLineValueRow,
     ProductAttributeValueRow,
     ProductRow,
@@ -341,11 +344,32 @@ export type CatalogParts = {
     employees?: readonly EmployeeRow[];
     presets?: readonly PosPresetRow[];
     paymentMethods?: readonly PaymentMethodRow[];
+    /**
+     * The configurator's own rows. Absent from this builder until BAN-421a, which meant every test
+     * of a product with `attribute_count > 0` ran against an EMPTY `attributeLinesByProduct` — the
+     * exact state a lazily fetched product arrives in, asserted as if it were normal.
+     */
+    attributeLines?: readonly ProductAttributeLineRow[];
+    combos?: readonly ComboRow[];
+    comboItems?: readonly ComboItemRow[];
     attributeValues?: readonly ProductAttributeValueRow[];
     attributeLineValues?: readonly ProductAttributeLineValueRow[];
     floors?: readonly RestaurantFloorRow[];
     tables?: readonly RestaurantTableRow[];
 };
+
+/** Group rows by a key, the one shape the three configurator maps share. */
+function bucket<T>(rows: readonly T[], keyOf: (row: T) => number): Map<number, T[]> {
+    const out = new Map<number, T[]>();
+    for (const row of rows) {
+        const key = keyOf(row);
+        const existing = out.get(key);
+        if (existing) existing.push(row);
+        else out.set(key, [row]);
+    }
+
+    return out;
+}
 
 export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
     const products = parts.products ?? [];
@@ -376,6 +400,10 @@ export function buildCatalog(parts: CatalogParts = {}): CatalogIndex {
         config: parts.config === undefined ? makeConfig() : parts.config,
         currency: parts.currency === undefined ? makeCurrency() : parts.currency,
         currencyFormat: emptyCatalog().currencyFormat,
+
+        attributeLinesByProduct: bucket(parts.attributeLines ?? [], (line) => line.product_id),
+        combosById: new Map((parts.combos ?? []).map((combo) => [combo.id, combo])),
+        comboItemsByCombo: bucket(parts.comboItems ?? [], (item) => item.combo_id),
 
         products,
         variants,

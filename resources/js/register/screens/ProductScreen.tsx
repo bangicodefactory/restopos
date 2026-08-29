@@ -94,9 +94,18 @@ export function ProductScreen({
 
     const onPick = useCallback(
         (product: ProductRow) => {
-            void ensureOrder().then((uuid) => startAdd(product, uuid));
+            void ensureOrder().then((uuid) => {
+                const decision = startAdd(product, uuid);
+
+                // A refusal has to be said out loud. `startAdd` swallows `blocked`, so a product
+                // whose options never arrived would otherwise be a tile that does nothing when
+                // tapped — the same silence this ticket removed from the scan path.
+                if (decision.kind === 'blocked' && decision.reason === 'incomplete_options') {
+                    pushNotice({ orderUuid: uuid, message: t('reg.products.optionsUnavailable') });
+                }
+            });
         },
-        [ensureOrder],
+        [ensureOrder, pushNotice, t],
     );
 
     const onLongPress = useCallback(
