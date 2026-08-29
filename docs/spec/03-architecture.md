@@ -1438,9 +1438,14 @@ Reverb carries **change notifications and small state deltas**. It is explicitly
 | `presence-pos.config.{configId}.devices` | presence | Registers of this config | Who is online; drives "3 terminals connected" and the multi-tab guard |
 | `pos.self.{configToken}` | public | Self-order clients of this config | Menu/product availability changes, kiosk open/closed |
 | `pos.order.{orderAccessToken}` | public | One customer's phone | That order's state changes and payment result |
+| `pos.display.{customerDisplayToken}` | public | One register's customer display | The screen projection this register is showing (REG-352, BAN-443a) |
 | `private-pos.table.{tableId}` | private | Registers | Table occupancy / merge / transfer |
 
 **Public channels carry only what the token already grants.** `pos.order.{accessToken}` is a public channel whose name *is* the capability — knowing the name is knowing the secret, which is exactly the property we want for an anonymous customer. Nothing sensitive (costs, margins, other orders) ever goes on a public channel.
+
+**The customer display is public, and it is a *different* token (BAN-443a).** This section originally put the display's feed on `private-pos.device.{deviceId}`, which assumes the display is a paired device. It is not: the display shell is propless and holds no bearer token, and giving it one means a pairing screen, a boot phase and token storage on a screen that faces the public — a change worth making deliberately, not as a side effect of wiring a transport. So it subscribes to a public channel whose name is its capability, exactly as a customer's phone does.
+
+The token is **not** `pos_configs.access_token`. That one is the self-order entry token printed on every table's QR, so every guest in the room holds it, and a display channel named with it would let any of them watch every sale. `PosConfig::customerDisplayToken()` is an HMAC of the config id under `access_token` — derived, so rotating `access_token` rotates it, and one-way, so a display URL cannot be turned back into a menu URL.
 
 ### 5.3 Authorization
 
@@ -1511,13 +1516,17 @@ final class OrderChanged implements ShouldBroadcast
 | `product.availability` | config, self | `{variant_ids: [..], available: bool}` | Immediate in-memory patch; no pull needed |
 | `device.command` | device | `{command: 'reload'\|'wipe'\|'ping'\|'open_drawer'\|'print', args}` | Remote administration |
 | `device.revoked` | device | `{}` | Wipe local data, show pairing screen |
-| `customer_display.update` | device | `{order_snapshot}` | Remote second screen (fat by necessity) |
+| `display.update` | `pos.display.{token}` | `{v, payload, emitted_by_device_uuid}` | Remote second screen (fat by necessity — see below). Built as `CustomerDisplayUpdated`; planned here as `customer_display.update` on the device channel, moved to a public capability channel because the display holds no credential. |
 | `selforder.order.state` | `pos.order.{token}` | `{state, tracking_number, paid}` | Customer's status page |
 | `selforder.config.status` | `pos.self.{token}` | `{open: bool, reason}` | Kiosk enable/disable ordering |
 
 **Debouncing at the source.** `catalog.changed` is emitted from a queued listener with a 2-second `Cache::lock` coalescing window; a bulk price import must not emit 40 000 events. Same for `table.status`.
 
-**Broadcast from the queue, always.** Every event is `ShouldBroadcast` (queued), never `ShouldBroadcastNow`, except `payment.status` and `prep.ticket`, which are latency-critical and go on a dedicated `realtime` Horizon queue with its own workers so a slow report job cannot delay a card terminal.
+**Broadcast from the queue, always.** Every event is `ShouldBroadcast` (queued), never `ShouldBroadcastNow`, except `payment.status`, `prep.ticket` and `display.update`, which are latency-critical and go on a dedicated `realtime` Horizon queue with its own workers so a slow report job cannot delay a card terminal.
+
+`display.update` joined that list in BAN-443a for the same reason as `prep.ticket`, and one more. It is latency-critical — a total that appears a second after the item was scanned reads as a broken screen to the person watching it — and it is the one event with **no** REST fallback: §5.1's "every realtime event has a REST fallback that produces the same result" holds because every other consumer has a local replica to pull into. The display has none, and nothing to pull with, so a frame that arrives late is simply late and a frame that is lost is lost until the next keystroke. Queuing it behind an export job would be the difference between a mirror and a slideshow.
+
+**The one place a payload is the data.** §5.1 says realtime is not the sync transport. `display.update` breaks that deliberately and it is the only place that should: the display is a render target, not a replica holder, and it is not a source of truth for anything — nothing reads the payload back, nothing persists it, and the register does not wait for it. The reasoning is repeated in full on `CustomerDisplayUpdated`'s docblock so it is in front of whoever next tries to make the event thin.
 
 ### 5.5 Client wiring
 

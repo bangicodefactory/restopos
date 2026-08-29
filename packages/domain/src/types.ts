@@ -652,6 +652,15 @@ export type PosConfigRow = {
     self_ordering_image_media_id: number | null;
     self_order_online_payment_method_id: number | null;
     access_token: string | null;
+    /**
+     * The customer display's capability token (REG-352, BAN-443a).
+     *
+     * Names the public channel `pos.display.{token}` the register relays frames onto, and travels
+     * in the display's URL so a screen with no credential can subscribe and fetch its branding.
+     * Derived server-side from `access_token`; **not** `access_token` itself, which is on every
+     * table's self-order QR and would let any guest in the room watch every sale.
+     */
+    customer_display_token: string | null;
 
     employee_idle_logout_seconds: number;
     allow_offline_manager_override: boolean;

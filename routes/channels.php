@@ -29,8 +29,9 @@ use Laravel\Sanctum\PersonalAccessToken;
 |   private-kitchen.display.{token}      one KDS screen
 |   pos.self.{configToken}     (public)  menu / availability for anonymous clients
 |   pos.order.{orderToken}     (public)  one customer's own order
+|   pos.display.{displayToken} (public)  one register's customer-display screen
 |
-| The two public channels are deliberate: the channel *name is the capability*.
+| The three public channels are deliberate: the channel *name is the capability*.
 | Knowing `pos.order.{token}` is knowing the secret, which is exactly the
 | property we want for an anonymous customer with no account. Nothing sensitive
 | — costs, margins, other orders — is ever emitted on them.
@@ -124,12 +125,20 @@ Broadcast::channel('kitchen.display.{displayToken}', function (mixed $device, st
 | call one for non-private channels. They are documented here so the catalogue
 | is complete and reviewable in one place:
 |
-|   pos.self.{configToken}   catalog.changed, product.availability,
-|                            selforder.config.status
-|   pos.order.{orderToken}   order.state, payment.status, selforder.placed
+|   pos.self.{configToken}    catalog.changed, product.availability,
+|                             selforder.config.status
+|   pos.order.{orderToken}    order.state, payment.status, selforder.placed
+|   pos.display.{displayToken}  display.update
 |
 | `configToken` is `pos_configs.access_token` and `orderToken` is
 | `pos_orders.access_token`; both rotate independently.
+|
+| `displayToken` is neither (BAN-443a). It is `PosConfig::customerDisplayToken()`
+| — an HMAC of the config id under `access_token`. Public for the same reason as
+| the two above: the customer display holds no credential and cannot authenticate,
+| so there is nothing for an authorizer to check. Deliberately not `access_token`
+| itself, which is printed on every table's self-order QR — a display feed named
+| with it would let any guest in the room watch every sale.
 */
 
 /**

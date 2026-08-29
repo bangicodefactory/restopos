@@ -17,6 +17,7 @@ it.
 | [Taking orders](register/orders.md) | Cashier | Adding items, changing an order, finding an earlier ticket |
 | [Taking payment](register/payments.md) | Cashier | Cash, card, splitting a bill, change, validating a sale |
 | [Refunds](register/refunds.md) | Cashier, manager | Giving money back against an earlier sale |
+| [The screen facing the customer](register/customer-display.md) | Cashier, manager | Putting a customer display on a second monitor or its own device |
 | [Manager approvals](register/approvals.md) | Manager | Approving discounts and overrides on the till |
 | [Rearranging the room](register/floor-plan.md) | Manager | Moving, resizing and adding tables from the till |
 | [Reading a kitchen ticket](kitchen/reading-a-ticket.md) | Kitchen | Where the food is going, what to make, and the marks that matter |

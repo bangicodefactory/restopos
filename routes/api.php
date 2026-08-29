@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Kitchen\PrintJobController;
 use App\Http\Controllers\Api\Pos\BootstrapController;
 use App\Http\Controllers\Api\Pos\CatalogController;
 use App\Http\Controllers\Api\Pos\CustomerAccountController;
+use App\Http\Controllers\Api\Pos\CustomerDisplayController;
 use App\Http\Controllers\Api\Pos\DeltaController;
 use App\Http\Controllers\Api\Pos\EmployeeAuthController;
 use App\Http\Controllers\Api\Pos\MediaController;
@@ -143,6 +144,16 @@ Route::prefix('pos')->name('api.pos.')->middleware('device')->group(function ():
         Route::delete('orders/{order}/courses/{course}', [CourseController::class, 'destroy'])->name('courses.destroy');
     });
 
+    // Customer display relay (REG-352, BAN-443a).
+    //
+    // Under `pos:realtime` rather than `pos:sync`: this writes nothing. It is the one place the
+    // project sends *data* over the socket instead of a cache-invalidation hint, because the
+    // display has no replica to pull from — see `CustomerDisplayUpdated`'s docblock, which is where
+    // that exception is argued.
+    Route::post('customer-display', [CustomerDisplayController::class, 'update'])
+        ->middleware('device.can:pos:realtime')
+        ->name('customer-display.update');
+
     // Kitchen delta — the register's side (spec 02 KDS-051…058)
     Route::get('orders/{order}/preparation-changes', [PreparationController::class, 'changes'])->name('preparation.changes');
     Route::post('orders/{order}/preparation', [PreparationController::class, 'send'])->name('preparation.send');
@@ -162,6 +173,21 @@ Route::prefix('kitchen')->name('api.kitchen.')->middleware(['device', 'device.ca
     Route::get('print-jobs', [PrintJobController::class, 'index'])->name('print-jobs.index');
     Route::post('print-jobs/{job}/ack', [PrintJobController::class, 'acknowledge'])->name('print-jobs.ack');
 });
+
+// ── customer display (no credential, capability in the URL) ─────────────────
+//
+// Outside the `device` group on purpose. The display shell is propless and holds no bearer token —
+// giving it one would mean a pairing screen and token storage on a screen facing the public — so
+// the capability travels in the URL, compared in constant time by the controller. Two reads, both
+// scoped to one config: its name, and the one media row `customer_display_bg_media_id` points at.
+// There is no id parameter here to walk.
+Route::prefix('pos/customer-display')
+    ->name('api.pos.customer-display.')
+    ->middleware('throttle:60,1')
+    ->group(function (): void {
+        Route::get('{config:id}', [CustomerDisplayController::class, 'show'])->name('show');
+        Route::get('{config:id}/background', [CustomerDisplayController::class, 'backgroundBytes'])->name('background');
+    });
 
 // ── self-order (anonymous, throttled) ───────────────────────────────────────
 Route::prefix('self-order/{configToken}')

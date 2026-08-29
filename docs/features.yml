@@ -24,7 +24,7 @@
 
 meta:
   # Ceiling on undocumented user-facing features. Ratchet: it may fall, never rise.
-  manual_debt: 133
+  manual_debt: 129
 
 features:
   # Session lifecycle & cash control (REG-001 … REG-039) — user
@@ -171,10 +171,19 @@ features:
   REG-336: { status: shipped, surface: user, manual: todo }
 
   # Customer display (REG-350 … REG-364) — user
-  REG-350: { status: shipped, surface: user, manual: todo }
-  REG-351: { status: shipped, surface: user, manual: todo }
-  REG-352: { status: shipped, surface: user, manual: todo }
-  REG-354: { status: shipped, surface: user, manual: todo }
+  #
+  # BAN-443a. REG-352 and REG-354 were recorded `shipped` here and were not: a grep for
+  # `customer_display_bg_media_id` under resources/js/register returned one hit, a fixture, and
+  # there was no display event, channel or subscription anywhere. The transport, the branding read
+  # and the navbar opener landed in BAN-443a; the ledger row is now true.
+  REG-350: { status: shipped, surface: user, manual: register/customer-display.md }
+  REG-351: { status: shipped, surface: user, manual: register/customer-display.md#which-one-to-choose }
+  REG-352: { status: shipped, surface: user, manual: register/customer-display.md#which-one-to-choose }
+  # REG-353 (IoT-proxy display variant) is deliberately not here — see BAN-426.
+  REG-354: { status: shipped, surface: user, manual: register/customer-display.md#its-own-look }
+  # REG-355 (payment QR and live scale weight mirrored to the display) is not built.
+  REG-356: { status: shipped, surface: user, manual: register/customer-display.md#putting-one-on,
+             note: "URL and clipboard, not a QR — the QR encoder lives in the back-office bundle" }
 
   # Multi-device synchronisation (REG-365 … REG-384) — internal
   # BAN-402a. The register did subscribe before this — and had never authenticated: the token was
@@ -472,6 +481,13 @@ features:
   # cannot be verified in CI: `navigator.serial` needs Chromium, a user gesture and a physical
   # RS-232 scale. The IoT/proxy transport (`GET /scale/read`) is not built at all.
   XCT-058: { status: partial, surface: user, manual: register/weighing.md, note: "Reader, protocol parser, fake transport and the iot_scale gate are built and covered. The WebSerial transport is unverifiable without Chromium and a physical scale; the IoT/proxy transport is not built." }
+
+  # Broadcast event catalogue (XCT-030 … XCT-039) — internal
+  # BAN-443a added the customer-display event, which was the one `app/Events/` never had. Still
+  # `partial`: the spec's catalogue also names "orders removed" and "kiosk status", and neither
+  # exists. Recording this `shipped` because the row this ticket needed is present is how a ledger
+  # stops being evidence.
+  XCT-031: { status: partial, surface: internal, note: "order.synced, session.closed, display.update, product.changed, order.state, payment.status. No orders-removed or kiosk-status event." }
 
   # Tenancy, security & audit (XCT-100 … XCT-129) — internal
   XCT-101: { status: shipped, surface: internal }

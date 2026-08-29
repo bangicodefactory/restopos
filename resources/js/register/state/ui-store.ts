@@ -39,6 +39,8 @@ export type DialogKind =
     | 'closeSession'
     | 'refund'
     | 'transfer'
+    /** The display's URL, so a second screen can be paired without hand-typing it (REG-356). */
+    | 'customerDisplay'
     /** "Send these to the kitchen first?" — asked on Pay when the delta is non-empty (RST-143). */
     | 'sendBeforePay';
 

@@ -265,6 +265,7 @@ export function makeConfig(partial: Partial<PosConfigRow> = {}): PosConfigRow {
         self_ordering_image_media_id: null,
         self_order_online_payment_method_id: null,
         access_token: null,
+        customer_display_token: null,
         employee_idle_logout_seconds: 0,
         allow_offline_manager_override: true,
         role_abilities: null,
