@@ -141,6 +141,7 @@ features:
   REG-292: { status: shipped, surface: user, manual: register/orders.md }
   REG-293: { status: shipped, surface: user, manual: register/orders.md }
   REG-295: { status: shipped, surface: user, manual: register/orders.md }
+  REG-297: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#putting-a-ticket-on-paper-again }
   REG-300: { status: shipped, surface: user, manual: register/orders.md }
   REG-301: { status: shipped, surface: user, manual: register/orders.md }
 
@@ -277,6 +278,9 @@ features:
   KDS-056: { status: shipped, surface: user, manual: todo }
   KDS-057: { status: shipped, surface: user, manual: todo }
   KDS-058: { status: shipped, surface: user, manual: todo }
+  # BAN-436a — the roll-up rendered by the `grid` layout that was shipped and collapsed at App.tsx:213.
+  KDS-059: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#putting-a-ticket-on-paper-again }
+  KDS-061: { status: shipped, surface: user, manual: kitchen/reading-a-ticket.md#what-the-cashier-sees-when-a-ticket-is-sent }
   KDS-060: { status: shipped, surface: user, manual: todo }
   KDS-062: { status: shipped, surface: user, manual: todo }
   KDS-063: { status: shipped, surface: user, manual: todo }
